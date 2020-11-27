@@ -40,20 +40,9 @@ typedef struct PublicKey PublicKey;
 
 typedef struct Verifier Verifier;
 
-typedef struct {
-  const uint8_t *ptr;
-  uintptr_t len;
-} Slice;
-
-typedef struct {
-  uint8_t *ptr;
-  uintptr_t len;
-  uintptr_t capacity;
-} Bytes;
-
 const char *error_message(void);
 
-KeyPair *keypair_new(Slice seed);
+KeyPair *keypair_new(const uint8_t *seed_ptr, uintptr_t seed_len);
 
 PublicKey *keypair_public(const KeyPair *kp);
 
@@ -69,17 +58,29 @@ bool biscuit_builder_add_authority_rule(BiscuitBuilder *builder, const char *rul
 
 bool biscuit_builder_add_authority_caveat(BiscuitBuilder *builder, const char *caveat);
 
-Biscuit *biscuit_builder_build(BiscuitBuilder *builder, Slice seed);
+Biscuit *biscuit_builder_build(BiscuitBuilder *builder,
+                               const uint8_t *seed_ptr,
+                               uintptr_t seed_len);
 
 void biscuit_builder_free(BiscuitBuilder *_builder);
 
-Biscuit *biscuit_from(Slice biscuit);
+Biscuit *biscuit_from(const uint8_t *biscuit_ptr, uintptr_t biscuit_len);
 
-Biscuit *biscuit_from_sealed(Slice biscuit, Slice secret);
+Biscuit *biscuit_from_sealed(const uint8_t *biscuit_ptr,
+                             uintptr_t biscuit_len,
+                             const uint8_t *secret_ptr,
+                             uintptr_t secret_len);
 
-Bytes biscuit_serialize(const Biscuit *biscuit);
+uintptr_t biscuit_serialized_size(const Biscuit *biscuit);
 
-Bytes biscuit_serialize_sealed(const Biscuit *biscuit, Slice secret);
+uintptr_t biscuit_sealed_size(const Biscuit *biscuit);
+
+uintptr_t biscuit_serialize(const Biscuit *biscuit, uint8_t *buffer_ptr);
+
+uintptr_t biscuit_serialize_sealed(const Biscuit *biscuit,
+                                   const uint8_t *secret_ptr,
+                                   uintptr_t secret_len,
+                                   uint8_t *buffer_ptr);
 
 BlockBuilder *biscuit_create_block(const Biscuit *biscuit);
 
@@ -106,8 +107,6 @@ bool verifier_verify(Verifier *verifier);
 char *verifier_print(Verifier *verifier);
 
 void verifier_free(Verifier *_verifier);
-
-void bytes_free(Bytes bytes);
 
 void string_free(char *ptr);
 
