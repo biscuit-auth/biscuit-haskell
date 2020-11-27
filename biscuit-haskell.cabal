@@ -25,6 +25,7 @@ source-repository head
 
 library
   exposed-modules:
+      Biscuit
       Lib
   other-modules:
       Paths_biscuit_haskell
