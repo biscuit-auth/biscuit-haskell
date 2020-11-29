@@ -64,5 +64,7 @@ packages:
 #
 # Allow a newer minor version of GHC than the snapshot specifies
 # compiler-check: newer-minor
-extra-include-dirs: [/home/clementd/git/perso/biscuit-haskell/biscuit/usr/include/biscuit_auth]
-extra-lib-dirs: [/home/clementd/git/perso/biscuit-haskell/result]
+#extra-include-dirs: [/home/clementd/git/perso/biscuit-haskell/biscuit/usr/include/biscuit_auth]
+#extra-lib-dirs: [/home/clementd/git/perso/biscuit-haskell/result/lib]
+extra-include-dirs: [/home/clementd/git/perso/biscuit-haskell/yolo/usr/include/biscuit_auth]
+extra-lib-dirs: [/home/clementd/git/perso/biscuit-haskell/result/lib]

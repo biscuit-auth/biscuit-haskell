@@ -6,6 +6,9 @@ author:              "Author name here"
 maintainer:          "example@example.com"
 copyright:           "2020 Author name here"
 
+extra-libraries:
+- biscuit_auth
+
 extra-source-files:
 - README.md
 - ChangeLog.md
