@@ -26,6 +26,7 @@ dependencies:
 - base >= 4.7 && < 5
 - bytestring
 - base64
+- random
 
 library:
   source-dirs: src

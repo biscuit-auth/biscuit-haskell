@@ -1,4 +1,6 @@
 {-# LANGUAGE ForeignFunctionInterface #-}
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE FlexibleContexts #-}
 module Biscuit where
 
 #include "biscuit_auth.h"
@@ -12,12 +14,14 @@ import Foreign.Marshal.Alloc
 import Foreign.Ptr
 import Foreign.Storable
 import Data.ByteString.Internal
--- import C2HS
+import Data.ByteString
+import Data.Coerce (Coercible, coerce)
+-- import C2HSImp
 
 {#pointer *Biscuit foreign finalizer biscuit_free newtype#}
 {#pointer *BiscuitBuilder foreign finalizer biscuit_builder_free newtype#}
 {#pointer *BlockBuilder foreign finalizer block_builder_free newtype#}
-{#pointer *KeyPair foreign finalizer keypair_free newtype#}
+{#pointer *KeyPair foreign finalizer key_pair_free newtype#}
 {#pointer *PublicKey foreign finalizer public_key_free newtype#}
 {#pointer *Verifier foreign finalizer verifier_free newtype#}
 
@@ -26,7 +30,13 @@ withCStringLen' s f =
   let f' (ptr, int) = f (castPtr ptr, toEnum int)
    in withCStringLen s f'
 
-{#fun error_message as ^ {} -> `String' peekCString* #}
+withBSLen :: ByteString -> ((Ptr CUChar, CULong) -> IO a) -> IO a
+withBSLen bs f = useAsCStringLen bs $ \(buf, int) -> do
+  print @CULong (toEnum int)
+  f (castPtr buf, toEnum int)
+
+peekN :: Coercible (ForeignPtr b) b => Ptr b -> IO b
+peekN = fmap coerce . newForeignPtr_
 
 getErrorMessage :: IO (Maybe String)
 getErrorMessage = do
@@ -35,33 +45,64 @@ getErrorMessage = do
     then pure Nothing
     else Just <$> peekCString res
 
-serialize :: Ptr Biscuit
+serialize :: Biscuit
           -> IO ByteString
-serialize b = do
+serialize = flip withBiscuit $ \b -> do
   size <- fromIntegral <$> {#call biscuit_serialized_size #} b
   allocaBytes size $ \buf -> do
     {#call biscuit_serialize #} b buf
-    fBuf <- newForeignPtr_ $ castPtr buf
-    pure $ PS fBuf 0 size
+    packCStringLen (castPtr buf, size)
 
-{#fun pure keypair_new as ^ { withCStringLen'* `String'& } -> `Ptr KeyPair' id #}
+serializeKeyPair :: KeyPair
+                 -> IO ByteString
+serializeKeyPair = flip withKeyPair $ \kp ->
+   allocaBytes 32 $ \buf -> do
+     {#call key_pair_serialize #} kp buf
+     packCStringLen (castPtr buf, 32)
 
-{#fun pure keypair_public as ^ { id `Ptr KeyPair' } -> `Ptr PublicKey' id #}
+deserializeKeyPair :: ByteString
+                   -> IO (Maybe KeyPair)
+deserializeKeyPair = flip useAsCString $ \buf -> do
+     kp <- {#call key_pair_deserialize #} (castPtr buf)
+     if kp /= nullPtr
+       then Just <$> peekN kp
+       else pure Nothing
 
-{#fun pure biscuit_builder as ^ { id `Ptr KeyPair' } -> `Ptr BiscuitBuilder' id #}
+serializePublicKey :: PublicKey
+                   -> IO ByteString
+serializePublicKey = flip withPublicKey $ \pk ->
+   allocaBytes 32 $ \buf -> do
+     {#call public_key_serialize #} pk buf
+     packCStringLen (castPtr buf, 32)
 
-{#fun biscuit_builder_add_authority_fact as ^ { id `Ptr BiscuitBuilder', withCString* `String' } -> `Bool' #}
+deserializePublicKey :: ByteString
+                     -> IO (Maybe PublicKey)
+deserializePublicKey = flip useAsCString $ \buf -> do
+     pk <- {#call public_key_deserialize #} (castPtr buf)
+     if pk /= nullPtr
+       then Just <$> peekN pk
+       else pure Nothing
 
-{#fun biscuit_builder_add_authority_caveat as ^ { id `Ptr BiscuitBuilder', withCString* `String' } -> `Bool' #}
+{#fun error_message as ^ {} -> `String' peekCString* #}
 
-{#fun pure biscuit_builder_build as ^ { id `Ptr BiscuitBuilder', withCStringLen'* `String'& } -> `Ptr Biscuit' id #}
+{#fun key_pair_new as ^ { withBSLen* `ByteString'& } -> `KeyPair' #}
 
-{#fun pure biscuit_from as ^ { withCStringLen'* `String'& } -> `Ptr Biscuit' id #}
+{#fun key_pair_public as ^ { withKeyPair* `KeyPair' } -> `PublicKey' #}
 
-{#fun pure biscuit_verify as ^ { id `Ptr Biscuit', id `Ptr PublicKey' } -> `Ptr Verifier' id #}
+{#fun biscuit_builder as ^ { withKeyPair* `KeyPair' } -> `BiscuitBuilder' #}
 
-{#fun verifier_add_caveat as ^ { id `Ptr Verifier', withCString* `String' } -> `Bool' #}
+{#fun biscuit_builder_add_authority_fact as ^ { `BiscuitBuilder', withCString* `String' } -> `Bool' #}
 
-{#fun pure verifier_verify as ^ { id `Ptr Verifier' } -> `Bool' #}
+{#fun biscuit_builder_add_authority_caveat as ^ { `BiscuitBuilder', withCString* `String' } -> `Bool' #}
 
-{#fun pure verifier_print as ^ { id `Ptr Verifier' } -> `String' peekCString* #}
+{#fun biscuit_builder_build as ^ { `BiscuitBuilder', withBSLen* `ByteString'& } -> `Biscuit' #}
+
+{#fun biscuit_from as ^ { withBSLen* `ByteString'& } -> `Biscuit' #}
+
+{#fun biscuit_verify as ^ { `Biscuit', `PublicKey' } -> `Verifier' #}
+
+{#fun verifier_add_caveat as ^ { `Verifier', withCString* `String' } -> `Bool' #}
+
+{#fun verifier_verify as ^ { `Verifier' } -> `Bool' #}
+
+{#fun verifier_print as ^ { `Verifier' } -> `String' peekCString* #}
