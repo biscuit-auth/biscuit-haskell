@@ -3,11 +3,12 @@ module Lib
     ) where
 
 import           Biscuit
-import           Control.Monad (when)
+import           Control.Monad          (when)
+import           Data.ByteString.Base64
 
 someFunc :: IO ()
 someFunc = do
-  let kp = keypairNewPrint "abcdefghabcdefghabcdefghabcdefgh"
+  let kp = keypairNew "abcdefghabcdefghabcdefghabcdefgh"
   print kp
   let pub = keypairPublic kp
   print pub
@@ -16,15 +17,16 @@ someFunc = do
   print res
   when (not res) $ do
     print "fact error"
-    print =<< errorMessage
-  res' <- biscuitBuilderAddAuthorityCaveat builder "*cav() <- user_id($id)"
+    print =<< getErrorMessage
+  res' <- biscuitBuilderAddAuthorityCaveat builder "*yolo(#aa) <- right(#authority,#efgh)"
   print res'
   when (not res') $ do
     print "caveat error"
-    print =<< errorMessage
+    print =<< getErrorMessage
   print builder
   let bisc = biscuitBuilderBuild builder "abcdefghabcdefghabcdefghabcdefgh"
   print bisc
+  print =<< encodeBase64 <$> serialize bisc
   let verif = biscuitVerify bisc pub
   res'' <- verifierAddCaveat verif "*right(#abcd) <- right(#authority,#efgh)"
   print res''

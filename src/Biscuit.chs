@@ -7,8 +7,11 @@ module Biscuit where
 
 import Foreign.C.String
 import Foreign.C.Types
+import GHC.ForeignPtr
+import Foreign.Marshal.Alloc
 import Foreign.Ptr
 import Foreign.Storable
+import Data.ByteString.Internal
 -- import C2HS
 
 {#pointer *Biscuit foreign finalizer biscuit_free newtype#}
@@ -25,11 +28,22 @@ withCStringLen' s f =
 
 {#fun error_message as ^ {} -> `String' peekCString* #}
 
+getErrorMessage :: IO (Maybe String)
+getErrorMessage = do
+  res <- {#call error_message #}
+  if res == nullPtr
+    then pure Nothing
+    else Just <$> peekCString res
 
+serialize :: Ptr Biscuit
+          -> IO ByteString
+serialize b = do
+  size <- fromIntegral <$> {#call biscuit_serialized_size #} b
+  buf <- mallocPlainForeignPtrBytes size
+  {#call biscuit_serialize #} b (unsafeForeignPtrToPtr buf)
+  pure $ PS (castForeignPtr buf) 0 size
 
 {#fun pure keypair_new as ^ { withCStringLen'* `String'& } -> `Ptr KeyPair' id #}
-
-{#fun pure keypair_new_print as ^ { withCStringLen'* `String'& } -> `Ptr KeyPair' id #}
 
 {#fun pure keypair_public as ^ { id `Ptr KeyPair' } -> `Ptr PublicKey' id #}
 

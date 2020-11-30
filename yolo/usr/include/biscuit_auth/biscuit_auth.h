@@ -44,8 +44,6 @@ const char *error_message(void);
 
 KeyPair *keypair_new(const uint8_t *seed_ptr, uintptr_t seed_len);
 
-KeyPair *keypair_new_print(const uint8_t *seed_ptr, uintptr_t seed_len);
-
 PublicKey *keypair_public(const KeyPair *kp);
 
 void keypair_free(KeyPair *_kp);
