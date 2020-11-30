@@ -39,9 +39,10 @@ serialize :: Ptr Biscuit
           -> IO ByteString
 serialize b = do
   size <- fromIntegral <$> {#call biscuit_serialized_size #} b
-  buf <- mallocPlainForeignPtrBytes size
-  {#call biscuit_serialize #} b (unsafeForeignPtrToPtr buf)
-  pure $ PS (castForeignPtr buf) 0 size
+  allocaBytes size $ \buf -> do
+    {#call biscuit_serialize #} b buf
+    fBuf <- newForeignPtr_ $ castPtr buf
+    pure $ PS fBuf 0 size
 
 {#fun pure keypair_new as ^ { withCStringLen'* `String'& } -> `Ptr KeyPair' id #}
 
