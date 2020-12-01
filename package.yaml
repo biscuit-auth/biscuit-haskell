@@ -27,6 +27,8 @@ dependencies:
 - bytestring
 - base64
 - random
+- inline-c
+- text
 
 library:
   source-dirs: src
