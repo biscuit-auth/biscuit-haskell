@@ -26,6 +26,7 @@ source-repository head
 library
   exposed-modules:
       Biscuit
+      Biscuit.Internal
       Inline
       Lib
   other-modules:
@@ -38,7 +39,10 @@ library
       base >=4.7 && <5
     , base64
     , bytestring
+    , cryptonite
+    , either
     , inline-c
+    , mtl
     , random
     , text
   default-language: Haskell2010
@@ -57,7 +61,10 @@ executable biscuit-haskell-exe
     , base64
     , biscuit-haskell
     , bytestring
+    , cryptonite
+    , either
     , inline-c
+    , mtl
     , random
     , text
   default-language: Haskell2010
@@ -77,7 +84,10 @@ test-suite biscuit-haskell-test
     , base64
     , biscuit-haskell
     , bytestring
+    , cryptonite
+    , either
     , inline-c
+    , mtl
     , random
     , text
   default-language: Haskell2010

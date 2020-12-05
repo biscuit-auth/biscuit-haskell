@@ -26,8 +26,11 @@ dependencies:
 - base >= 4.7 && < 5
 - bytestring
 - base64
-- random
+- cryptonite
+- either
 - inline-c
+- mtl
+- random
 - text
 
 library:
