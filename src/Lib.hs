@@ -22,6 +22,7 @@ someFunc = nice
 
 nice :: IO ()
 nice = do
+ let orFail = either (fail . show) pure
  keyPair   <- B.randomKeyPair
  let public = B.getPublic keyPair
  let authority =
@@ -37,19 +38,20 @@ nice = do
                         ]
          , B._context = Nothing
          }
- biscuit <- B.mkBiscuit keyPair authority =<< B.randomSeed
+ biscuit <- orFail =<< B.mkBiscuit keyPair authority =<< B.randomSeed
  let verifier = B.Verifier
                  [ "operation(#ambient, #read)" -- this is a read operation
                  , "resource(#ambient, 456)"    -- the current resource id is 456
                  , "right(#authority, 123, 456, #read)" -- the user 123 has read access to resource 456
+                 , "date(#ambient,2020-12-01T00:00:00Z)" -- the current date
                  ] [] []
+ bkp <- B.randomKeyPair
  result <- B.verifyBiscuit biscuit verifier public
  case result of
    Right () -> putStrLn "The token is valid"
    Left e   -> putStrLn $ "There was an error checking the token " <> show e
- bkp <- B.randomKeyPair
  let ttlBlock = B.Block [] [] [ "*ttl($date) <- date(#ambient,$date) @ $date < 2020-12-05T23:00:00Z"] Nothing
- withTtl <- B.attenuateBiscuit biscuit ttlBlock bkp =<< B.randomSeed
+ withTtl <- orFail =<< B.attenuateBiscuit biscuit ttlBlock bkp =<< B.randomSeed
  result' <- B.verifyBiscuit withTtl verifier public
  case result' of
    Right () -> putStrLn "The token is valid"

@@ -37,7 +37,6 @@ withCStringLen' s f =
 
 withBSLen :: ByteString -> ((Ptr CUChar, CULong) -> IO a) -> IO a
 withBSLen bs f = useAsCStringLen bs $ \(buf, int) -> do
-  print @CULong (toEnum int)
   f (castPtr buf, toEnum int)
 
 peekMCString :: CString -> IO (Maybe String)
