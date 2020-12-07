@@ -18,6 +18,7 @@ module Biscuit
   , attenuateBiscuit
   ) where
 
+import           Control.Concurrent     (runInBoundThread)
 import           Control.Monad          (mfilter)
 import           Control.Monad.Except   (ExceptT (..), runExceptT)
 import           Crypto.Random          (getRandomBytes)
@@ -160,7 +161,7 @@ mkBiscuit :: KeyPair
           -> Block
           -> Seed
           -> IO (Either (NonEmpty DataLogParsingError) Biscuit)
-mkBiscuit (KeyPair kp _) Block{..} (Seed seed) = do
+mkBiscuit (KeyPair kp _) Block{..} (Seed seed) = runInBoundThread $ do
   builder <- Internal.biscuitBuilder kp
   result <- getCompose $ do
     traverse_ (Compose . addFactToBiscuit builder) _facts
@@ -262,7 +263,7 @@ verifyBiscuit :: Biscuit
               -> Verifier
               -> PublicKey
               -> IO (Either VerificationError ())
-verifyBiscuit biscuit@Biscuit{..} verifier (PublicKey pubKey) = runExceptT $ do
+verifyBiscuit biscuit@Biscuit{..} verifier (PublicKey pubKey) = runInBoundThread $ runExceptT $ do
   vHandle <- ExceptT . fmap (first InvalidVerifier) $ mkVerifier _handle pubKey verifier
   ExceptT $ do
     res <- Internal.verifierVerify vHandle
