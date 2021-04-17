@@ -16,6 +16,7 @@ module Biscuit
   , verifyBiscuit
   , Verifier (..)
   , attenuateBiscuit
+  , serializeBiscuit
   ) where
 
 import           Control.Concurrent     (runInBoundThread)
@@ -270,3 +271,6 @@ verifyBiscuit biscuit@Biscuit{..} verifier (PublicKey pubKey) = runInBoundThread
     if res
         then pure $ Right ()
         else Left <$> retrieveValidationError verifier biscuit
+
+serializeBiscuit :: Biscuit -> IO ByteString
+serializeBiscuit Biscuit{_handle} = Internal.serialize _handle

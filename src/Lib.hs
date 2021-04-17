@@ -39,6 +39,7 @@ nice = do
          , B._context = Nothing
          }
  biscuit <- orFail =<< B.mkBiscuit keyPair authority =<< B.randomSeed
+ print =<< encodeBase64 <$> B.serializeBiscuit biscuit
  let verifier = B.Verifier
                  [ "operation(#ambient, #read)" -- this is a read operation
                  , "resource(#ambient, 456)"    -- the current resource id is 456
