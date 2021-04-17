@@ -29,7 +29,10 @@ dependencies:
 - cryptonite
 - either
 - inline-c
+- libsodium
 - mtl
+- cereal
+- protobuf
 - random
 - text
 
