@@ -24,6 +24,7 @@ description:         Please see the README on GitHub at <https://github.com/gith
 
 dependencies:
 - base >= 4.7 && < 5
+- attoparsec
 - bytestring
 - base64
 - cryptonite
@@ -36,6 +37,9 @@ dependencies:
 - protobuf
 - random
 - text
+- template-haskell
+- th-lift-instances
+- time
 
 library:
   source-dirs: src
