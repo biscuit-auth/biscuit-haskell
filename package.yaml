@@ -28,6 +28,7 @@ dependencies:
 - base64
 - cryptonite
 - either
+- hex
 - inline-c
 - libsodium
 - mtl

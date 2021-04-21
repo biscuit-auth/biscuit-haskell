@@ -44,6 +44,7 @@ library
     , cereal
     , cryptonite
     , either
+    , hex
     , inline-c
     , libsodium
     , mtl
@@ -69,6 +70,7 @@ executable biscuit-haskell-exe
     , cereal
     , cryptonite
     , either
+    , hex
     , inline-c
     , libsodium
     , mtl
@@ -95,6 +97,7 @@ test-suite biscuit-haskell-test
     , cereal
     , cryptonite
     , either
+    , hex
     , inline-c
     , libsodium
     , mtl

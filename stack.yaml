@@ -42,6 +42,7 @@ packages:
 # extra-deps: []
 extra-deps:
 - libsodium-1.0.18.1@sha256:718a99126c2ffc292da602a3da570e6772c94d5240ff120f6a17fe623db3ca8e,1020
+- hex-0.2.0@sha256:197d2561d2e216c4ead035b4911dabc6e678ac6257cb71b64e324c822f6f9f5a,726
 
 
 # Override default flag values for local packages and extra-deps
