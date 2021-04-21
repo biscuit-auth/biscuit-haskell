@@ -31,10 +31,10 @@ nice = do
          , B._rules = []
          -- the token is only valid for read operations
          -- the token is only valid if the current user id has read rights on the current resource
-         , B._caveats = [ "*readOnlyAccess($resourceId,$userId) <- operation(#ambient, #read), \
-                                                                \resource(#ambient, $resourceId), \
-                                                                \userId(#authority,$userId) , \
-                                                                \right(#authority, $userid, $resourceId, #read)"
+         , B._checks = [ "check if operation(#ambient, #read), \
+                                                               \resource(#ambient, $resourceId), \
+                                                               \userId(#authority,$userId) , \
+                                                               \right(#authority, $userId, $resourceId, #read)"
                         ]
          , B._context = Nothing
          }
@@ -51,7 +51,7 @@ nice = do
  case result of
    Right () -> putStrLn "The token is valid"
    Left e   -> putStrLn $ "There was an error checking the token " <> show e
- let ttlBlock = B.Block [] [] [ "*ttl($date) <- date(#ambient,$date) @ $date < 2020-12-05T23:00:00Z"] Nothing
+ let ttlBlock = B.Block [] [] [ "check if date(#ambient,$date), $date < 2020-12-05T23:00:00Z"] Nothing
  withTtl <- orFail =<< B.attenuateBiscuit biscuit ttlBlock bkp =<< B.randomSeed
  result' <- B.verifyBiscuit withTtl verifier public
  case result' of
@@ -86,17 +86,17 @@ c2hs = do
     print "fact error"
     print =<< errorKind
     print =<< getErrorMessage
-  res' <- biscuitBuilderAddAuthorityCaveat builder "*yolo(#aa) <- right(#authority,#efgh)"
+  res' <- biscuitBuilderAddAuthorityCheck builder "yolo(#aa) <- right(#authority,#efgh)"
   print res'
   when (not res') $ do
-    print "caveat error"
+    print "check error"
     print =<< getErrorMessage
   bisc    <-  biscuitBuilderBuild builder =<< getSeed
   printBiscuitAddr bisc
   print =<< encodeBase64 <$> serialize bisc
   verif <- biscuitVerify bisc pub
   printVerifierAddr verif
-  res'' <- verifierAddCaveat verif "*right(#abcd) <- right(#authority,#efgh)"
+  res'' <- verifierAddCheck verif "right(#abcd) <- right(#authority,#efgh)"
   print res''
   putStrLn =<< verifierPrint verif
   vRes <- verifierVerify verif

@@ -18,8 +18,8 @@
 #define biscuit_bindings_h
 
 
-#define BISCUIT_AUTH_MAJOR 0
-#define BISCUIT_AUTH_MINOR 6
+#define BISCUIT_AUTH_MAJOR 1
+#define BISCUIT_AUTH_MINOR 0
 #define BISCUIT_AUTH_PATCH 0
 
 
@@ -28,7 +28,13 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+/**
+ * maximum supported version of the serialization format
+ */
+#define MAX_SCHEMA_VERSION 1
+
 typedef enum {
+  None,
   InvalidArgument,
   InternalError,
   FormatSignatureInvalidFormat,
@@ -40,6 +46,7 @@ typedef enum {
   FormatSerializationError,
   FormatBlockDeserializationError,
   FormatBlockSerializationError,
+  FormatVersion,
   InvalidAuthorityIndex,
   InvalidBlockIndex,
   SymbolTableOverlap,
@@ -49,9 +56,15 @@ typedef enum {
   LogicInvalidAmbientFact,
   LogicInvalidBlockFact,
   LogicInvalidBlockRule,
-  LogicFailedCaveats,
+  LogicFailedChecks,
+  LogicVerifierNotEmpty,
+  LogicDeny,
+  LogicNoMatchingPolicy,
   ParseError,
-  None,
+  TooManyFacts,
+  TooManyIterations,
+  Timeout,
+  ConversionError,
 } ErrorKind;
 
 typedef struct Biscuit Biscuit;
@@ -64,25 +77,30 @@ typedef struct KeyPair KeyPair;
 
 typedef struct PublicKey PublicKey;
 
+/**
+ * used to check authorization policies on a token
+ *
+ * can be created from [`Biscuit::verify`](`crate::token::Biscuit::verify`) or [`Verifier::new`]
+ */
 typedef struct Verifier Verifier;
 
 const char *error_message(void);
 
 ErrorKind error_kind(void);
 
-uint64_t error_caveat_count(void);
+uint64_t error_check_count(void);
 
-uint64_t error_caveat_id(uint64_t caveat_index);
+uint64_t error_check_id(uint64_t check_index);
 
-uint64_t error_caveat_block_id(uint64_t caveat_index);
+uint64_t error_check_block_id(uint64_t check_index);
 
 /**
  * deallocation is handled by Biscuit
  * the string is overwritten on each call
  */
-const char *error_caveat_rule(uint64_t caveat_index);
+const char *error_check_rule(uint64_t check_index);
 
-bool error_caveat_is_verifier(uint64_t caveat_index);
+bool error_check_is_verifier(uint64_t check_index);
 
 KeyPair *key_pair_new(const uint8_t *seed_ptr, uintptr_t seed_len);
 
@@ -120,7 +138,7 @@ bool biscuit_builder_add_authority_fact(BiscuitBuilder *builder, const char *fac
 
 bool biscuit_builder_add_authority_rule(BiscuitBuilder *builder, const char *rule);
 
-bool biscuit_builder_add_authority_caveat(BiscuitBuilder *builder, const char *caveat);
+bool biscuit_builder_add_authority_check(BiscuitBuilder *builder, const char *check);
 
 Biscuit *biscuit_builder_build(const BiscuitBuilder *builder,
                                const uint8_t *seed_ptr,
@@ -152,13 +170,13 @@ uintptr_t biscuit_block_fact_count(const Biscuit *biscuit, uint32_t block_index)
 
 uintptr_t biscuit_block_rule_count(const Biscuit *biscuit, uint32_t block_index);
 
-uintptr_t biscuit_block_caveat_count(const Biscuit *biscuit, uint32_t block_index);
+uintptr_t biscuit_block_check_count(const Biscuit *biscuit, uint32_t block_index);
 
 char *biscuit_block_fact(const Biscuit *biscuit, uint32_t block_index, uint32_t fact_index);
 
 char *biscuit_block_rule(const Biscuit *biscuit, uint32_t block_index, uint32_t rule_index);
 
-char *biscuit_block_caveat(const Biscuit *biscuit, uint32_t block_index, uint32_t caveat_index);
+char *biscuit_block_check(const Biscuit *biscuit, uint32_t block_index, uint32_t check_index);
 
 char *biscuit_block_context(const Biscuit *biscuit, uint32_t block_index);
 
@@ -180,7 +198,7 @@ bool block_builder_add_fact(BlockBuilder *builder, const char *fact);
 
 bool block_builder_add_rule(BlockBuilder *builder, const char *rule);
 
-bool block_builder_add_caveat(BlockBuilder *builder, const char *caveat);
+bool block_builder_add_check(BlockBuilder *builder, const char *check);
 
 void block_builder_free(BlockBuilder *_builder);
 
@@ -188,7 +206,7 @@ bool verifier_add_fact(Verifier *verifier, const char *fact);
 
 bool verifier_add_rule(Verifier *verifier, const char *rule);
 
-bool verifier_add_caveat(Verifier *verifier, const char *caveat);
+bool verifier_add_check(Verifier *verifier, const char *check);
 
 bool verifier_verify(Verifier *verifier);
 
@@ -199,5 +217,7 @@ void verifier_free(Verifier *_verifier);
 void string_free(char *ptr);
 
 const char *biscuit_print(const Biscuit *biscuit);
+
+extern double performance_now(void);
 
 #endif /* biscuit_bindings_h */

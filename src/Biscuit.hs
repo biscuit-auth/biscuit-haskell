@@ -79,7 +79,7 @@ biscuitBlocks = _blocks
 data Block = Block
   { _facts   :: [Text]
   , _rules   :: [Text]
-  , _caveats :: [Text]
+  , _checks  :: [Text]
   , _context :: Maybe Text
   } deriving Show
 
@@ -96,8 +96,8 @@ getBlockAt biscuit blockId = do
   _facts <- fmap T.pack <$> traverse (Internal.biscuitBlockFact biscuit blockId) [0..factCount-1]
   ruleCount <- Internal.biscuitBlockRuleCount biscuit blockId
   _rules <- fmap T.pack <$> traverse (Internal.biscuitBlockRule biscuit blockId) [0..ruleCount-1]
-  caveatCount <- Internal.biscuitBlockCaveatCount biscuit blockId
-  _caveats <- fmap T.pack <$> traverse (Internal.biscuitBlockCaveat biscuit blockId) [0..caveatCount-1]
+  checkCount <- Internal.biscuitBlockCheckCount biscuit blockId
+  _checks <- fmap T.pack <$> traverse (Internal.biscuitBlockCheck biscuit blockId) [0..checkCount-1]
   _context <- fmap T.pack <$> Internal.biscuitBlockContext biscuit blockId
   pure Block{..}
 
@@ -119,7 +119,7 @@ addDatalogElement add value = do
 
 type DataLogParsingError = (String, String)
 
-addFactToBiscuit, addRuleToBiscuit, addCaveatToBiscuit, setContextOnBiscuit
+addFactToBiscuit, addRuleToBiscuit, addCheckToBiscuit, setContextOnBiscuit
   :: Internal.BiscuitBuilder
   -> Text
   -> IO (Validation (NonEmpty DataLogParsingError) ())
@@ -127,13 +127,13 @@ addFactToBiscuit builder =
   addDatalogElement (Internal.biscuitBuilderAddAuthorityFact builder) . T.unpack
 addRuleToBiscuit builder =
   addDatalogElement (Internal.biscuitBuilderAddAuthorityRule builder) . T.unpack
-addCaveatToBiscuit builder =
-  addDatalogElement (Internal.biscuitBuilderAddAuthorityCaveat builder) . T.unpack
+addCheckToBiscuit builder =
+  addDatalogElement (Internal.biscuitBuilderAddAuthorityCheck builder) . T.unpack
 setContextOnBiscuit builder =
   addDatalogElement
     (Internal.biscuitBuilderSetAuthorityContext builder) . T.unpack
 
-addFactToBlock, addRuleToBlock, addCaveatToBlock, setContextOnBlock
+addFactToBlock, addRuleToBlock, addCheckToBlock, setContextOnBlock
   :: Internal.BlockBuilder
   -> Text
   -> IO (Validation (NonEmpty DataLogParsingError) ())
@@ -141,13 +141,13 @@ addFactToBlock builder =
   addDatalogElement (Internal.blockBuilderAddFact builder) . T.unpack
 addRuleToBlock builder =
   addDatalogElement (Internal.blockBuilderAddRule builder) . T.unpack
-addCaveatToBlock builder =
-  addDatalogElement (Internal.blockBuilderAddCaveat builder) . T.unpack
+addCheckToBlock builder =
+  addDatalogElement (Internal.blockBuilderAddCheck builder) . T.unpack
 setContextOnBlock builder =
   addDatalogElement
     (Internal.blockBuilderSetContext builder) . T.unpack
 
-addFactToVerifier, addRuleToVerifier, addCaveatToVerifier
+addFactToVerifier, addRuleToVerifier, addCheckToVerifier
   :: Internal.Verifier
   -> Text
   -> IO (Validation (NonEmpty DataLogParsingError) ())
@@ -155,8 +155,8 @@ addFactToVerifier verifier =
   addDatalogElement (Internal.verifierAddFact verifier) . T.unpack
 addRuleToVerifier verifier =
   addDatalogElement (Internal.verifierAddRule verifier) . T.unpack
-addCaveatToVerifier verifier =
-  addDatalogElement (Internal.verifierAddCaveat verifier) . T.unpack
+addCheckToVerifier verifier =
+  addDatalogElement (Internal.verifierAddCheck verifier) . T.unpack
 
 mkBiscuit :: KeyPair
           -> Block
@@ -167,7 +167,7 @@ mkBiscuit (KeyPair kp _) Block{..} (Seed seed) = runInBoundThread $ do
   result <- getCompose $ do
     traverse_ (Compose . addFactToBiscuit builder) _facts
     traverse_ (Compose . addRuleToBiscuit builder) _rules
-    traverse_ (Compose . addCaveatToBiscuit builder) _caveats
+    traverse_ (Compose . addCheckToBiscuit builder) _checks
     traverse_ (Compose . setContextOnBiscuit builder) _context
     pure ()
   case result of
@@ -186,7 +186,7 @@ attenuateBiscuit Biscuit{_handle} Block{..} KeyPair{_private} (Seed seed) = do
   result <- getCompose $ do
     traverse_ (Compose . addFactToBlock builder) _facts
     traverse_ (Compose . addRuleToBlock builder) _rules
-    traverse_ (Compose . addCaveatToBlock builder) _caveats
+    traverse_ (Compose . addCheckToBlock builder) _checks
     traverse_ (Compose . setContextOnBlock builder) _context
     pure ()
   case result of
@@ -196,21 +196,21 @@ attenuateBiscuit Biscuit{_handle} Block{..} KeyPair{_private} (Seed seed) = do
       Right <$> biscuitFromHandle newHandle
 
 data Verifier = Verifier
-  { _vfacts   :: [Text]
-  , _vrules   :: [Text]
-  , _vcaveats :: [Text]
+  { _vfacts  :: [Text]
+  , _vrules  :: [Text]
+  , _vchecks :: [Text]
   } deriving Show
 
-data FailedCaveat
-  = FailedCaveat
-  { caveat :: Text
+data FailedCheck
+  = FailedCheck
+  { check  :: Text
   , source :: Either Block Verifier
   }
   deriving Show
 
 data VerificationError
   = InvalidSignature
-  | LogicFailedCaveats (NonEmpty FailedCaveat)
+  | LogicFailedChecks (NonEmpty FailedCheck)
   | InvalidVerifier (NonEmpty DataLogParsingError)
   deriving Show
 
@@ -223,7 +223,7 @@ mkVerifier handle pubKey Verifier{..} = do
   result <- getCompose $ do
     traverse_ (Compose . addFactToVerifier verifier) _vfacts
     traverse_ (Compose . addRuleToVerifier verifier) _vrules
-    traverse_ (Compose . addCaveatToVerifier verifier) _vcaveats
+    traverse_ (Compose . addCheckToVerifier verifier) _vchecks
     pure ()
   case result of
     Failure es -> pure $ Left es
@@ -235,30 +235,30 @@ retrieveValidationError :: Verifier -> Biscuit -> IO VerificationError
 retrieveValidationError verifier biscuit = do
   kind <- Internal.errorKind
   case kind of
-    Internal.LogicFailedCaveats -> LogicFailedCaveats <$> retrieveCaveatsErrors verifier biscuit
+    Internal.LogicFailedChecks -> LogicFailedChecks <$> retrieveChecksErrors verifier biscuit
     -- ToDo invalid signature errors happen earlier
     _                           -> pure InvalidSignature
 
-retrieveCaveatsErrors :: Verifier -> Biscuit -> IO (NonEmpty FailedCaveat)
-retrieveCaveatsErrors verifier biscuit = do
-  errorCount <- Internal.errorCaveatCount
+retrieveChecksErrors :: Verifier -> Biscuit -> IO (NonEmpty FailedCheck)
+retrieveChecksErrors verifier biscuit = do
+  errorCount <- Internal.errorCheckCount
   ids <- if errorCount <= 0
       then fail "Error count should be > 0"
       else pure $ 0 :| [1..errorCount - 1]
-  traverse (retrieveCaveatError verifier biscuit) ids
+  traverse (retrieveCheckError verifier biscuit) ids
 
-retrieveCaveatError :: Verifier -> Biscuit -> Int -> IO FailedCaveat
-retrieveCaveatError verifier Biscuit{_authority,_blocks} caveatId = do
+retrieveCheckError :: Verifier -> Biscuit -> Int -> IO FailedCheck
+retrieveCheckError verifier Biscuit{_authority,_blocks} checkId = do
   let getBlock i = if i == 0 then _authority
                              else _blocks !! (i-1)
-  isVerifier <- Internal.errorCaveatIsVerifier caveatId
-  caveat <- T.pack <$> Internal.errorCaveatRule caveatId
+  isVerifier <- Internal.errorCheckIsVerifier checkId
+  check <- T.pack <$> Internal.errorCheckRule checkId
   source <- if isVerifier
                then pure $ Right verifier
                else do
-                       blockId <- Internal.errorCaveatBlockId caveatId
+                       blockId <- Internal.errorCheckBlockId checkId
                        pure . Left $ getBlock blockId
-  pure FailedCaveat{caveat,source}
+  pure FailedCheck{check,source}
 
 verifyBiscuit :: Biscuit
               -> Verifier

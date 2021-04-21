@@ -103,7 +103,7 @@ deserializePublicKey = flip useAsCString $ \buf -> do
 
 {#fun biscuit_builder_add_authority_rule as ^ { `BiscuitBuilder', withCString* `String' } -> `Bool' #}
 
-{#fun biscuit_builder_add_authority_caveat as ^ { `BiscuitBuilder', withCString* `String' } -> `Bool' #}
+{#fun biscuit_builder_add_authority_check as ^ { `BiscuitBuilder', withCString* `String' } -> `Bool' #}
 
 -- todo add missing _authority in C bindings
 {#fun biscuit_builder_set_authority_context as ^ { `BiscuitBuilder', withCString* `String' } -> `Bool' #}
@@ -116,8 +116,8 @@ deserializePublicKey = flip useAsCString $ \buf -> do
 {#fun biscuit_block_rule_count as ^ { `Biscuit', `Int' } -> `Int' #}
 {#fun biscuit_block_rule as ^ { `Biscuit', `Int', `Int' } -> `String' peekCString* #}
 
-{#fun biscuit_block_caveat_count as ^ { `Biscuit', `Int' } -> `Int' #}
-{#fun biscuit_block_caveat as ^ { `Biscuit', `Int', `Int' } -> `String' peekCString* #}
+{#fun biscuit_block_check_count as ^ { `Biscuit', `Int' } -> `Int' #}
+{#fun biscuit_block_check as ^ { `Biscuit', `Int', `Int' } -> `String' peekCString* #}
 
 {#fun biscuit_block_context as ^ { `Biscuit', `Int' } -> `Maybe String' peekMCString* #}
 
@@ -127,7 +127,7 @@ deserializePublicKey = flip useAsCString $ \buf -> do
 {#fun biscuit_create_block as ^ { `Biscuit' } -> `BlockBuilder' #}
 {#fun block_builder_add_fact as ^ { `BlockBuilder', withCString* `String' } -> `Bool' #}
 {#fun block_builder_add_rule as ^ { `BlockBuilder', withCString* `String' } -> `Bool' #}
-{#fun block_builder_add_caveat as ^ { `BlockBuilder', withCString* `String' } -> `Bool' #}
+{#fun block_builder_add_check as ^ { `BlockBuilder', withCString* `String' } -> `Bool' #}
 {#fun block_builder_set_context as ^ { `BlockBuilder', withCString* `String' } -> `Bool' #}
 {#fun biscuit_append_block as ^ { `Biscuit', `BlockBuilder', `KeyPair', withBSLen* `ByteString'& } -> `Biscuit' #}
 
@@ -138,7 +138,7 @@ deserializePublicKey = flip useAsCString $ \buf -> do
 {#fun biscuit_verify as ^ { `Biscuit', `PublicKey' } -> `Verifier' #}
 {#fun verifier_add_fact as ^ { `Verifier', withCString* `String' } -> `Bool' #}
 {#fun verifier_add_rule as ^ { `Verifier', withCString* `String' } -> `Bool' #}
-{#fun verifier_add_caveat as ^ { `Verifier', withCString* `String' } -> `Bool' #}
+{#fun verifier_add_check as ^ { `Verifier', withCString* `String' } -> `Bool' #}
 {#fun verifier_verify as ^ { `Verifier' } -> `Bool' #}
 
 -- Printers
@@ -149,8 +149,8 @@ deserializePublicKey = flip useAsCString $ \buf -> do
 {# enum ErrorKind {} deriving (Eq,Show) #}
 {#fun error_kind as ^ {} -> `ErrorKind' #}
 {#fun error_message as ^ {} -> `String' peekCString* #}
-{#fun error_caveat_count as ^ {} -> `Int' #}
-{#fun error_caveat_id as ^ {`Int'} -> `Int' #}
-{#fun error_caveat_block_id as ^ {`Int'} -> `Int' #}
-{#fun error_caveat_rule as ^ {`Int'} -> `String' peekCString* #}
-{#fun error_caveat_is_verifier as ^ {`Int'} -> `Bool' #}
+{#fun error_check_count as ^ {} -> `Int' #}
+{#fun error_check_id as ^ {`Int'} -> `Int' #}
+{#fun error_check_block_id as ^ {`Int'} -> `Int' #}
+{#fun error_check_rule as ^ {`Int'} -> `String' peekCString* #}
+{#fun error_check_is_verifier as ^ {`Int'} -> `Bool' #}
