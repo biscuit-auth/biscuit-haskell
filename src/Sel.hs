@@ -151,25 +151,25 @@ verifySignature :: ByteString
                 -> IO Bool
 verifySignature publicKey message Signature{d,z} = do
   hashMessage publicKey message $ \e -> do
-  withScalar $ \dinv -> do
-    withBSLen d $ \(dBuf, _) -> do
-      crypto_core_ristretto255_scalar_invert dinv dBuf
-      withScalar $ \zdinv -> do
-        withBSLen z $ \(zBuf, _) -> do
-        crypto_core_ristretto255_scalar_mul zdinv zBuf dinv
-        scalarToPoint zdinv $ \zzdinv -> do
-          withScalar $ \edinv -> do
-            crypto_core_ristretto255_scalar_mul edinv e dinv
-            withPoint $ \toto -> do
-              withBSLen publicKey $ \(pubBuf, _) -> do
-                crypto_scalarmult_ristretto255 toto edinv pubBuf
-                withPoint $ \aa -> do
-                  crypto_core_ristretto255_add aa zzdinv toto
-                  hashPoints [aa] $ \candidateD -> do
-                    withScalar $ \diff -> do
-                      crypto_core_ristretto255_scalar_sub diff dBuf candidateD
-                      res <- sodium_is_zero diff (crypto_core_ristretto255_scalarbytes)
-                      pure $ res == 1
+    withScalar $ \dinv -> do
+      withBSLen d $ \(dBuf, _) -> do
+        crypto_core_ristretto255_scalar_invert dinv dBuf
+        withScalar $ \zdinv -> do
+          withBSLen z $ \(zBuf, _) -> do
+            crypto_core_ristretto255_scalar_mul zdinv zBuf dinv
+            scalarToPoint zdinv $ \zzdinv -> do
+              withScalar $ \edinv -> do
+                crypto_core_ristretto255_scalar_mul edinv e dinv
+                withPoint $ \toto -> do
+                  withBSLen publicKey $ \(pubBuf, _) -> do
+                    crypto_scalarmult_ristretto255 toto edinv pubBuf
+                    withPoint $ \aa -> do
+                      crypto_core_ristretto255_add aa zzdinv toto
+                      hashPoints [aa] $ \candidateD -> do
+                        withScalar $ \diff -> do
+                          crypto_core_ristretto255_scalar_sub diff dBuf candidateD
+                          res <- sodium_is_zero diff (crypto_core_ristretto255_scalarbytes)
+                          pure $ res == 1
 
 main :: IO ()
 main = do
