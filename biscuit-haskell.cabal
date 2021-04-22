@@ -27,6 +27,8 @@ library
   exposed-modules:
       Biscuit
       Biscuit.Internal
+      Datalog.AST
+      Datalog.Parser
       DatalogQQ
       Inline
       Lib
