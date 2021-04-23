@@ -27,17 +27,17 @@ import           Language.Haskell.TH.Syntax
 data IsWithinSet = NotWithinSet | WithinSet
 data ParsedAs = RegularString | QuasiQuote
 
-type family VariableType (inSet :: IsWithinSet) (ctx :: ParsedAs) :: *
-type instance VariableType 'NotWithinSet p = Text
-type instance VariableType 'WithinSet p    = Void
+type family VariableType (inSet :: IsWithinSet) (ctx :: ParsedAs) where
+  VariableType 'NotWithinSet p = Text
+  VariableType 'WithinSet p    = Void
 
-type family SliceType (inSet :: IsWithinSet) (ctx :: ParsedAs) :: *
-type instance SliceType s 'RegularString = Void
-type instance SliceType s 'QuasiQuote    = String
+type family SliceType (inSet :: IsWithinSet) (ctx :: ParsedAs) where
+  SliceType s 'RegularString = Void
+  SliceType s 'QuasiQuote    = String
 
-type family SetType (inSet :: IsWithinSet) (ctx :: ParsedAs) :: *
-type instance SetType 'NotWithinSet m = Set (ID' 'WithinSet m)
-type instance SetType 'WithinSet    m = Void
+type family SetType (inSet :: IsWithinSet) (ctx :: ParsedAs) where
+  SetType 'NotWithinSet m = Set (ID' 'WithinSet m)
+  SetType 'WithinSet    m = Void
 
 data ID' (inSet :: IsWithinSet) (ctx :: ParsedAs) =
     Symbol Text
