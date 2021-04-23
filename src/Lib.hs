@@ -1,15 +1,11 @@
 {-# LANGUAGE OverloadedStrings #-}
-module Lib
-    ( someFunc
-    ) where
+module Lib where
 
-import           Control.Monad          (when, (<=<))
+import           Control.Monad          (when)
 import           Data.Bifoldable        (bitraverse_)
 import           Data.ByteString        (ByteString)
 import qualified Data.ByteString        as BS
 import           Data.ByteString.Base64
-import           Data.ByteString.Short
-import           Data.Foldable          (traverse_)
 import           System.Random
 
 import           Biscuit.Internal
@@ -60,18 +56,24 @@ nice = do
 
 getSeed :: IO ByteString
 getSeed =
-  BS.pack <$> traverse (const randomIO) [0..31]
+  BS.pack <$> traverse (const randomIO) ([0..31] :: [Int])
 
+printKeyPairAddr :: KeyPair -> IO ()
 printKeyPairAddr = (putStrLn "KeyPair" >>) . flip withKeyPair print
+printPublicKeyAddr :: PublicKey -> IO ()
 printPublicKeyAddr = (putStrLn "PublicKey" >>) . flip withPublicKey print
+
+printBiscuitBuilderAddr :: BiscuitBuilder -> IO ()
 printBiscuitBuilderAddr = (putStrLn "Builder" >>) . flip withBiscuitBuilder print
+printBiscuitAddr :: Biscuit -> IO ()
 printBiscuitAddr = (putStrLn "Biscuit" >>) . flip withBiscuit print
+printVerifierAddr :: Verifier -> IO ()
 printVerifierAddr = (putStrLn "Verifier" >>) . flip withVerifier print
 
 c2hs :: IO ()
 c2hs = do
-  kp      <- keyPairNew =<< getSeed
-  print . encodeBase64 =<< serializeKeyPair kp
+  kp'      <- keyPairNew =<< getSeed
+  print . encodeBase64 =<< serializeKeyPair kp'
   kp <- maybe undefined id <$> deserializeKeyPair (decodeBase64Lenient "3W/koXfmhyHtiNAi+Y9V5EI9/fi8OrGobD5OISpf3A8=")
   printKeyPairAddr kp
   pub     <- keyPairPublic kp
@@ -83,13 +85,13 @@ c2hs = do
   res <- biscuitBuilderAddAuthorityFact builder "prout*right(#efgh,#authority)yolo"
   print res
   when (not res) $ do
-    print "fact error"
+    putStrLn "fact error"
     print =<< errorKind
     print =<< getErrorMessage
   res' <- biscuitBuilderAddAuthorityCheck builder "yolo(#aa) <- right(#authority,#efgh)"
   print res'
   when (not res') $ do
-    print "check error"
+    putStrLn "check error"
     print =<< getErrorMessage
   bisc    <-  biscuitBuilderBuild builder =<< getSeed
   printBiscuitAddr bisc

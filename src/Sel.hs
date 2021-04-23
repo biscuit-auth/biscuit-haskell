@@ -9,18 +9,13 @@ module Sel
   ) where
 
 import           Data.ByteString
-import           Data.ByteString
 import           Data.ByteString.Base64
-import           Data.ByteString.Internal
-import           Data.Coerce              (Coercible, coerce)
-import           Data.Hex                 (hex, unhex)
-import           Data.Traversable         (for)
-import           Foreign.C.String
+import           Data.Foldable          (for_)
+import           Data.Functor           (void)
+import           Data.Hex               (hex)
 import           Foreign.C.Types
 import           Foreign.Marshal.Alloc
 import           Foreign.Ptr
-import           Foreign.Storable
-import           GHC.ForeignPtr
 import           Libsodium
 
 -- todo newtype ByteStrings
@@ -58,26 +53,24 @@ randomScalar f = withScalar $ \scalarBuf -> do
 withScalar :: (Scalar -> IO a) -> IO a
 withScalar f = do
   let intScalarSize = cs2int crypto_core_ristretto255_scalarbytes
-  allocaBytes intScalarSize $ \scalarBuf -> do
-    f scalarBuf
+  allocaBytes intScalarSize f
 
 withPoint :: (Point -> IO a) -> IO a
 withPoint f = do
   let intPointSize = cs2int crypto_core_ristretto255_bytes
-  allocaBytes intPointSize $ \pointBuf -> do
-    f pointBuf
+  allocaBytes intPointSize f
 
 scalarToPoint :: Ptr CUChar
               -> (Ptr CUChar -> IO a)
               -> IO a
 scalarToPoint scalar f =
   withPoint $ \pointBuf -> do
-    crypto_scalarmult_ristretto255_base pointBuf scalar
+    void $ crypto_scalarmult_ristretto255_base pointBuf scalar
     f pointBuf
 
 mkKeyPair :: IO Keypair
-mkKeyPair = do
-  randomScalar $ \scalarBuf -> do
+mkKeyPair =
+  randomScalar $ \scalarBuf ->
     scalarToPoint scalarBuf $ \pointBuf -> do
       privateKey <- scalarToByteString scalarBuf
       publicKey <- pointToByteString pointBuf
@@ -92,11 +85,11 @@ hashPoints :: [Point]
 hashPoints points f = do
   state <- crypto_hash_sha512_state'malloc
   crypto_hash_sha512_state'ptr state $ \statePtr -> do
-    crypto_hash_sha512_init statePtr
-    for points $ \point ->
+    void $ crypto_hash_sha512_init statePtr
+    for_ points $ \point ->
       crypto_hash_sha512_update statePtr point (fromInteger $ toInteger crypto_core_ristretto255_bytes)
     allocaBytes (cs2int crypto_hash_sha512_bytes) $ \hash -> do
-      crypto_hash_sha512_final statePtr hash
+      void $ crypto_hash_sha512_final statePtr hash
       allocaBytes (cs2int crypto_core_ristretto255_scalarbytes) $ \scalar -> do
          crypto_core_ristretto255_scalar_reduce scalar hash
          f scalar
@@ -104,37 +97,37 @@ hashPoints points f = do
 withBSLen :: ByteString
           -> ((Ptr CUChar, CULLong) -> IO a)
           -> IO a
-withBSLen bs f = useAsCStringLen bs $ \(buf, int) -> do
+withBSLen bs f = useAsCStringLen bs $ \(buf, int) ->
       f (castPtr buf, toEnum int)
 
 hashMessage :: ByteString
             -> ByteString
             -> (Scalar -> IO a) -> IO a
-hashMessage publicKey message f = do
-  withBSLen publicKey $ \(kpBuf, kpLen) -> do
+hashMessage publicKey message f =
+  withBSLen publicKey $ \(kpBuf, kpLen) ->
     withBSLen message $ \(msgBuf, msgLen) -> do
       state <- crypto_hash_sha512_state'malloc
       crypto_hash_sha512_state'ptr state $ \statePtr -> do
-        crypto_hash_sha512_init statePtr
-        crypto_hash_sha512_update statePtr kpBuf kpLen
-        crypto_hash_sha512_update statePtr msgBuf msgLen
+        void $ crypto_hash_sha512_init statePtr
+        void $ crypto_hash_sha512_update statePtr kpBuf kpLen
+        void $ crypto_hash_sha512_update statePtr msgBuf msgLen
         allocaBytes (cs2int crypto_hash_sha512_bytes) $ \hash -> do
-          crypto_hash_sha512_final statePtr hash
+          void $ crypto_hash_sha512_final statePtr hash
           allocaBytes (cs2int crypto_core_ristretto255_scalarbytes) $ \scalar -> do
-             crypto_core_ristretto255_scalar_reduce scalar hash
+             void $ crypto_core_ristretto255_scalar_reduce scalar hash
              f scalar
 
 signBlock :: Keypair
           -> ByteString
           -> IO Signature
-signBlock Keypair{publicKey,privateKey} message = do
-  randomScalar $ \r -> do
-    scalarToPoint r $ \aa -> do
-      hashPoints [aa] $ \d -> do
-        hashMessage publicKey message $ \e -> do
+signBlock Keypair{publicKey,privateKey} message =
+  randomScalar $ \r ->
+    scalarToPoint r $ \aa ->
+      hashPoints [aa] $ \d ->
+        hashMessage publicKey message $ \e ->
           withScalar $ \rd -> do
             crypto_core_ristretto255_scalar_mul rd r d
-            withScalar $ \epk -> do
+            withScalar $ \epk ->
               withBSLen privateKey $ \(pk, _) -> do
                 crypto_core_ristretto255_scalar_mul epk e pk
                 withScalar $ \z -> do
@@ -149,26 +142,26 @@ verifySignature :: ByteString
                 -> ByteString
                 -> Signature
                 -> IO Bool
-verifySignature publicKey message Signature{d,z} = do
-  hashMessage publicKey message $ \e -> do
-    withScalar $ \dinv -> do
+verifySignature publicKey message Signature{d,z} =
+  hashMessage publicKey message $ \e ->
+    withScalar $ \dinv ->
       withBSLen d $ \(dBuf, _) -> do
-        crypto_core_ristretto255_scalar_invert dinv dBuf
-        withScalar $ \zdinv -> do
+        void $ crypto_core_ristretto255_scalar_invert dinv dBuf
+        withScalar $ \zdinv ->
           withBSLen z $ \(zBuf, _) -> do
             crypto_core_ristretto255_scalar_mul zdinv zBuf dinv
-            scalarToPoint zdinv $ \zzdinv -> do
+            scalarToPoint zdinv $ \zzdinv ->
               withScalar $ \edinv -> do
                 crypto_core_ristretto255_scalar_mul edinv e dinv
-                withPoint $ \toto -> do
+                withPoint $ \toto ->
                   withBSLen publicKey $ \(pubBuf, _) -> do
-                    crypto_scalarmult_ristretto255 toto edinv pubBuf
+                    void $ crypto_scalarmult_ristretto255 toto edinv pubBuf
                     withPoint $ \aa -> do
-                      crypto_core_ristretto255_add aa zzdinv toto
-                      hashPoints [aa] $ \candidateD -> do
+                      void $ crypto_core_ristretto255_add aa zzdinv toto
+                      hashPoints [aa] $ \candidateD ->
                         withScalar $ \diff -> do
                           crypto_core_ristretto255_scalar_sub diff dBuf candidateD
-                          res <- sodium_is_zero diff (crypto_core_ristretto255_scalarbytes)
+                          res <- sodium_is_zero diff crypto_core_ristretto255_scalarbytes
                           pure $ res == 1
 
 main :: IO ()

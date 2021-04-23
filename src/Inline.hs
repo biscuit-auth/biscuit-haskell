@@ -3,7 +3,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 module Inline where
 
-import           Data.ByteString       (ByteString, copy, packCStringLen)
+import           Data.ByteString       (ByteString, packCStringLen)
 import           Data.Text             (Text)
 import           Foreign.Marshal.Alloc
 import qualified Language.C.Inline     as C

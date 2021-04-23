@@ -1,6 +1,7 @@
 {-# LANGUAGE ApplicativeDo   #-}
 {-# LANGUAGE NamedFieldPuns  #-}
 {-# LANGUAGE RecordWildCards #-}
+{- HLINT ignore "Redundant pure" -}
 module Biscuit
   ( Biscuit
   , biscuitAuthority
@@ -20,7 +21,6 @@ module Biscuit
   ) where
 
 import           Control.Concurrent     (runInBoundThread)
-import           Control.Monad          (mfilter)
 import           Control.Monad.Except   (ExceptT (..), runExceptT)
 import           Crypto.Random          (getRandomBytes)
 import           Data.Bifunctor         (first)
@@ -28,7 +28,6 @@ import           Data.ByteString        (ByteString)
 import qualified Data.ByteString        as BS
 import           Data.Either.Validation (Validation (..))
 import           Data.Foldable          (fold, traverse_)
-import           Data.Functor           (($>))
 import           Data.Functor.Compose   (Compose (..))
 import           Data.List.NonEmpty     (NonEmpty (..))
 import           Data.Text              (Text)
@@ -114,8 +113,8 @@ addDatalogElement add value = do
   result <- add value
   if result then pure $ Success ()
             else do
-                   error <- Internal.getErrorMessage
-                   pure $ Failure $ pure $ (value, fold error)
+                   err <- Internal.getErrorMessage
+                   pure $ Failure $ pure (value, fold err)
 
 type DataLogParsingError = (String, String)
 

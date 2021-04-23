@@ -14,12 +14,10 @@ import qualified Data.ByteString        as ByteString
 import           Data.ByteString.Base64
 import           Data.Either.Validation
 import           Data.Int
-import           Data.Monoid
 import           Data.ProtocolBuffers
 import           Data.Serialize
 import           Data.Text
 import           GHC.Generics           (Generic)
-import           GHC.TypeLits
 
 data Biscuit = Biscuit
   { authority :: Required 1 (Value ByteString)
@@ -279,7 +277,7 @@ v1Test' path = do
   print @Block =<< orFail (runGet decodeMessage (getField authority))
   putStrLn "authority ok"
   let decBlock = eitherToValidation . runGet (decodeMessage @Block)
-      decBlocks = validationToEither $ traverse decBlock (getField blocks)
+      -- decBlocks = validationToEither $ traverse decBlock (getField blocks)
   print blocks
   print (decBlock <$> getField blocks)
   putStrLn "blocks ok"
