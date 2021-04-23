@@ -61,15 +61,16 @@ type ID = ID' 'NotWithinSet 'RegularString
 type QQID = ID' 'NotWithinSet 'QuasiQuote
 
 instance Lift (ID' 'NotWithinSet 'QuasiQuote) where
-  lift (Symbol n)    = apply 'Symbol [lift n]
-  lift (Variable n)  = apply 'Variable [lift n]
-  lift (LInteger i)  = apply 'LInteger [lift i]
-  lift (LString s)   = apply 'LString [lift s]
-  lift (LDate t)     = apply 'LDate [ [| read $(lift (show t)) |] ]
-  lift (LBytes bs)   = apply 'LBytes [lift bs]
-  lift (LBool b)     = apply 'LBool [lift b]
-  lift (Antiquote n) = appE (varE 'toLiteralId) (varE $ mkName n)
-  lift (TermSet _)   = apply 'LBool [lift True] -- todo
+  lift (Symbol n)    = [| Symbol n |]
+  lift (Variable n)  = [| Variable n |]
+  lift (LInteger i)  = [| LInteger i |]
+  lift (LString s)   = [| LString s |]
+  lift (LBytes bs)   = [| LBytes bs |]
+  lift (LBool b)     = [| LBool  b |]
+  lift (TermSet _)   = [| LBool True |] -- todo
+  lift (LDate t)     = let str = show t
+                        in [| LDate (read str) |]
+  lift (Antiquote n) = [| toLiteralId $(varE $ mkName n) |]
 
 instance Lift (ID' 'WithinSet 'QuasiQuote) where
   lift =
@@ -84,9 +85,6 @@ instance Lift (ID' 'WithinSet 'QuasiQuote) where
       Antiquote i -> lift' (Antiquote i)
       Variable v -> absurd v
       TermSet v -> absurd v
-
-apply :: Name -> [Q Exp] -> Q Exp
-apply n = foldl appE (conE n)
 
 class ToLiteralId t where
   toLiteralId :: t -> ID
