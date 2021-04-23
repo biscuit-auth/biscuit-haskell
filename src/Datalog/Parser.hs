@@ -1,18 +1,18 @@
+{-# LANGUAGE AllowAmbiguousTypes   #-}
 {-# LANGUAGE ConstraintKinds       #-}
 {-# LANGUAGE DataKinds             #-}
 {-# LANGUAGE DeriveLift            #-}
 {-# LANGUAGE DerivingStrategies    #-}
-{-# LANGUAGE ExplicitForAll        #-}
 {-# LANGUAGE FlexibleContexts      #-}
 {-# LANGUAGE FlexibleInstances     #-}
-{-# LANGUAGE KindSignatures        #-}
 {-# LANGUAGE LambdaCase            #-}
-{-# LANGUAGE MonoLocalBinds        #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE NamedFieldPuns        #-}
 {-# LANGUAGE OverloadedStrings     #-}
+{-# LANGUAGE ScopedTypeVariables   #-}
 {-# LANGUAGE TemplateHaskell       #-}
 {-# LANGUAGE TypeApplications      #-}
+{-# LANGUAGE TypeFamilies          #-}
 {- HLINT ignore "Reduce duplication" -}
 module Datalog.Parser where
 
@@ -23,6 +23,7 @@ import           Data.Either               (partitionEithers)
 import           Data.Foldable             (fold)
 import           Data.Functor              (void, ($>))
 import           Data.Hex                  (unhex)
+import qualified Data.Set                  as Set
 import           Data.Text                 (Text, pack, unpack)
 import           Data.Text.Encoding        (encodeUtf8)
 import           Data.Time                 (UTCTime, defaultTimeLocale,
@@ -43,9 +44,22 @@ instance ConditionalParse a Void where
 instance ConditionalParse m m where
   ifPresent _ p = p
 
+class SetParser (inSet :: IsWithinSet) (ctx :: ParsedAs) where
+  parseSet :: Parser (SetType inSet ctx)
+
+instance SetParser 'WithinSet ctx where
+  parseSet = fail "nested sets are forbidden"
+
+instance SetParser 'NotWithinSet 'QuasiQuote where
+  parseSet = Set.fromList <$> (char '[' *> commaList0 termParser <* char ']')
+
+instance SetParser 'NotWithinSet 'RegularString where
+  parseSet = Set.fromList <$> (char '[' *> commaList0 termParser <* char ']')
+
 type HasTermParsers inSet ctx =
-  ( ConditionalParse (SliceType inSet 'QuasiQuote) (SliceType inSet ctx)
-  , ConditionalParse (VariableType 'NotWithinSet ctx) (VariableType inSet ctx)
+  ( ConditionalParse (SliceType inSet 'QuasiQuote)       (SliceType inSet ctx)
+  , ConditionalParse (VariableType 'NotWithinSet ctx)    (VariableType inSet ctx)
+  , SetParser inSet ctx
   )
 type HasParsers ctx = HasTermParsers 'NotWithinSet ctx
 
@@ -110,13 +124,15 @@ rfc3339DateParser =
       parseDate = parseTimeM False defaultTimeLocale "%FT%T%Q%EZ"
    in parseDate . unpack =<< getDateInput
 
-termParser :: HasTermParsers inSet ctx
+termParser :: forall inSet ctx
+            . ( HasTermParsers inSet ctx
+              )
            => Parser (ID' inSet ctx)
 termParser = skipSpace *> choice
-  [ Antiquote <$> ifPresent "aq" (string "${" *> many1 letter <* char '}')
-  , Symbol <$> (char '#' *> nameParser)
+  [ Antiquote <$> ifPresent "slice" (string "${" *> many1 letter <* char '}')
   , Variable <$> ifPresent "var" (char '$' *> nameParser)
-  -- , Variable <$> (char '$' *> nameParser)
+  , TermSet <$> parseSet @inSet @ctx
+  , Symbol <$> (char '#' *> nameParser)
   , LBytes <$> hexBsParser
   , LDate <$> rfc3339DateParser
   , LInteger <$> signed decimal

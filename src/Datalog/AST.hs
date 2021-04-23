@@ -16,6 +16,7 @@ module Datalog.AST where
 import           Data.ByteString            (ByteString)
 import           Data.Hex                   (hex)
 import           Data.Set                   (Set)
+import qualified Data.Set                   as Set
 import           Data.Text                  (Text, intercalate, pack)
 import           Data.Text.Encoding         (decodeUtf8)
 import           Data.Time                  (UTCTime)
@@ -55,22 +56,26 @@ deriving instance ( Eq (VariableType inSet ctx)
                   , Eq (SetType inSet ctx)
                   ) => Eq (ID' inSet ctx)
 
+deriving instance ( Ord (VariableType inSet ctx)
+                  , Ord (SliceType inSet ctx)
+                  , Ord (SetType inSet ctx)
+                  ) => Ord (ID' inSet ctx)
+
 -- In a regular AST, antiquotes have already been eliminated
 type ID = ID' 'NotWithinSet 'RegularString
 -- In an AST parsed from a QuasiQuoter, there might be references to haskell variables
 type QQID = ID' 'NotWithinSet 'QuasiQuote
 
 instance Lift (ID' 'NotWithinSet 'QuasiQuote) where
-  lift (Symbol n)    = [| Symbol n |]
-  lift (Variable n)  = [| Variable n |]
-  lift (LInteger i)  = [| LInteger i |]
-  lift (LString s)   = [| LString s |]
-  lift (LBytes bs)   = [| LBytes bs |]
-  lift (LBool b)     = [| LBool  b |]
-  lift (TermSet _)   = [| LBool True |] -- todo
-  lift (LDate t)     = let str = show t
-                        in [| LDate (read str) |]
-  lift (Antiquote n) = [| toLiteralId $(varE $ mkName n) |]
+  lift (Symbol n)      = [| Symbol n |]
+  lift (Variable n)    = [| Variable n |]
+  lift (LInteger i)    = [| LInteger i |]
+  lift (LString s)     = [| LString s |]
+  lift (LBytes bs)     = [| LBytes bs |]
+  lift (LBool b)       = [| LBool  b |]
+  lift (TermSet terms) = [| TermSet terms |]
+  lift (LDate t)       = [| LDate (read $(lift $ show t)) |]
+  lift (Antiquote n)   = [| toLiteralId $(varE $ mkName n) |]
 
 instance Lift (ID' 'WithinSet 'QuasiQuote) where
   lift =
@@ -100,16 +105,28 @@ instance ToLiteralId ByteString where
 
 renderId :: ID -> Text
 renderId = \case
-  Symbol name    -> "#" <> name
-  Variable name  -> "$" <> name
-  LInteger int   -> pack $ show int
-  LString str    -> pack $ show str
-  LDate time     -> pack $ show time
-  LBytes bs      -> "hex:" <> decodeUtf8 (hex bs)
-  LBool True     -> "true"
-  LBool False    -> "false"
-  TermSet _ -> "[todo]"
-  Antiquote v -> absurd v
+  Symbol name   -> "#" <> name
+  Variable name -> "$" <> name
+  LInteger int  -> pack $ show int
+  LString str   -> pack $ show str
+  LDate time    -> pack $ show time
+  LBytes bs     -> "hex:" <> decodeUtf8 (hex bs)
+  LBool True    -> "true"
+  LBool False   -> "false"
+  TermSet terms -> "[" <> intercalate "," (renderInnerId <$> Set.toList terms) <> "]"
+  Antiquote v   -> absurd v
+
+renderInnerId :: ID' 'WithinSet 'RegularString -> Text
+renderInnerId = \case
+  Symbol v    -> renderId (Symbol v)
+  LInteger v  -> renderId (LInteger v)
+  LString v   -> renderId (LString v)
+  LDate v     -> renderId (LDate v)
+  LBytes v    -> renderId (LBytes v)
+  LBool v     -> renderId (LBool v)
+  Antiquote v -> renderId (Antiquote v)
+  Variable v  -> absurd v
+  TermSet v   -> absurd v
 
 data Predicate' (ctx :: ParsedAs) = Predicate
   { name  :: Text
