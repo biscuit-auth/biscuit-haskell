@@ -29,7 +29,6 @@ library
       Biscuit.Internal
       Datalog.AST
       Datalog.Parser
-      DatalogQQ
       Inline
       Lib
       Proto
@@ -46,6 +45,7 @@ library
     , base64
     , bytestring
     , cereal
+    , containers
     , cryptonite
     , either
     , hex
@@ -76,6 +76,7 @@ executable biscuit-haskell-exe
     , biscuit-haskell
     , bytestring
     , cereal
+    , containers
     , cryptonite
     , either
     , hex
@@ -107,6 +108,7 @@ test-suite biscuit-haskell-test
     , biscuit-haskell
     , bytestring
     , cereal
+    , containers
     , cryptonite
     , either
     , hex

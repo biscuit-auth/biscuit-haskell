@@ -1,44 +1,53 @@
-{-# LANGUAGE DeriveLift         #-}
-{-# LANGUAGE DerivingStrategies #-}
-{-# LANGUAGE FlexibleInstances  #-}
-{-# LANGUAGE LambdaCase         #-}
-{-# LANGUAGE NamedFieldPuns     #-}
-{-# LANGUAGE OverloadedStrings  #-}
-{-# LANGUAGE TemplateHaskell    #-}
-{-# LANGUAGE TypeApplications   #-}
+{-# LANGUAGE ConstraintKinds       #-}
+{-# LANGUAGE DataKinds             #-}
+{-# LANGUAGE DeriveLift            #-}
+{-# LANGUAGE DerivingStrategies    #-}
+{-# LANGUAGE ExplicitForAll        #-}
+{-# LANGUAGE FlexibleContexts      #-}
+{-# LANGUAGE FlexibleInstances     #-}
+{-# LANGUAGE KindSignatures        #-}
+{-# LANGUAGE LambdaCase            #-}
+{-# LANGUAGE MonoLocalBinds        #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE NamedFieldPuns        #-}
+{-# LANGUAGE OverloadedStrings     #-}
+{-# LANGUAGE TemplateHaskell       #-}
+{-# LANGUAGE TypeApplications      #-}
+{- HLINT ignore "Reduce duplication" -}
 module Datalog.Parser where
 
-import           Control.Applicative        (liftA2, many, optional, (<|>))
+import           Control.Applicative       (liftA2, optional, (<|>))
 import           Data.Attoparsec.Text
-import           Data.ByteString            (ByteString)
-import qualified Data.ByteString.Char8      as C8
-import           Data.Char
-import           Data.Either                (partitionEithers)
-import           Data.Foldable              (fold)
-import           Data.Functor               (void, ($>))
-import           Data.Hex                   (hex, unhex)
-import           Data.List.NonEmpty         (NonEmpty)
-import           Data.String                (IsString (..))
-import           Data.Text                  (Text, intercalate, pack, unpack)
-import           Data.Text.Encoding         (decodeUtf8, encodeUtf8)
-import           Data.Time                  (UTCTime, defaultTimeLocale,
-                                             parseTimeM)
-import           Data.Void                  (Void)
-import           Instances.TH.Lift          ()
+import           Data.ByteString           (ByteString)
+import           Data.Either               (partitionEithers)
+import           Data.Foldable             (fold)
+import           Data.Functor              (void, ($>))
+import           Data.Hex                  (unhex)
+import           Data.Text                 (Text, pack, unpack)
+import           Data.Text.Encoding        (encodeUtf8)
+import           Data.Time                 (UTCTime, defaultTimeLocale,
+                                            parseTimeM)
+import           Data.Void                 (Void)
+import           Instances.TH.Lift         ()
 import           Language.Haskell.TH
 import           Language.Haskell.TH.Quote
-import           Language.Haskell.TH.Syntax
 
 import           Datalog.AST
 
-class SliceParser antiquote where
-  sliceParser :: Parser (ID' antiquote)
+class ConditionalParse a v where
+  ifPresent :: String -> Parser a -> Parser v
 
-instance SliceParser String where
-  sliceParser = Antiquote <$> (string "${" *> many1 letter <* char '}')
+instance ConditionalParse a Void where
+  ifPresent name _ = fail $ name <> " is not available in this context"
 
-instance SliceParser Void where
-  sliceParser = fail "antiquotes are not supported in this context"
+instance ConditionalParse m m where
+  ifPresent _ p = p
+
+type HasTermParsers inSet ctx =
+  ( ConditionalParse (SliceType inSet 'QuasiQuote) (SliceType inSet ctx)
+  , ConditionalParse (VariableType 'NotWithinSet ctx) (VariableType inSet ctx)
+  )
+type HasParsers ctx = HasTermParsers 'NotWithinSet ctx
 
 -- | Parser for an identifier (predicate name, variable name, symbol name, …)
 nameParser :: Parser Text
@@ -61,7 +70,7 @@ commaList0 :: Parser a -> Parser [a]
 commaList0 p =
   sepBy p (skipSpace *> char ',')
 
-predicateParser :: SliceParser antiquote => Parser (Predicate' antiquote)
+predicateParser :: HasParsers ctx => Parser (Predicate' ctx)
 predicateParser = do
   skipSpace
   name <- nameParser
@@ -71,7 +80,7 @@ predicateParser = do
 
 hexBsParser :: Parser ByteString
 hexBsParser = do
-  string "hex:"
+  void $ string "hex:"
   digits <- unhex . encodeUtf8 <$> takeWhile1 (inClass "0-9a-fA-F")
   either undefined pure digits
 
@@ -101,11 +110,13 @@ rfc3339DateParser =
       parseDate = parseTimeM False defaultTimeLocale "%FT%T%Q%EZ"
    in parseDate . unpack =<< getDateInput
 
-termParser :: SliceParser antiquote => Parser (ID' antiquote)
+termParser :: HasTermParsers inSet ctx
+           => Parser (ID' inSet ctx)
 termParser = skipSpace *> choice
-  [ sliceParser
+  [ Antiquote <$> ifPresent "aq" (string "${" *> many1 letter <* char '}')
   , Symbol <$> (char '#' *> nameParser)
-  , Variable <$> (char '$' *> nameParser)
+  , Variable <$> ifPresent "var" (char '$' *> nameParser)
+  -- , Variable <$> (char '$' *> nameParser)
   , LBytes <$> hexBsParser
   , LDate <$> rfc3339DateParser
   , LInteger <$> signed decimal
@@ -117,7 +128,7 @@ termParser = skipSpace *> choice
 
 -- | same as a predicate, but allows empty
 -- | terms list
-ruleHeadParser :: SliceParser antiquote => Parser (Predicate' antiquote)
+ruleHeadParser :: HasParsers ctx => Parser (Predicate' ctx)
 ruleHeadParser = do
   skipSpace
   name <- nameParser
@@ -125,28 +136,28 @@ ruleHeadParser = do
   terms <- parens (commaList0 termParser)
   pure Predicate{name,terms}
 
-ruleBodyParser :: SliceParser antiquote
-               => Parser [Either (Predicate' antiquote) (Expression' antiquote)]
+ruleBodyParser :: HasParsers ctx
+               => Parser [Either (Predicate' ctx) (Expression' ctx)]
 ruleBodyParser = do
   let predicateOrExprParser =
-            Right <$> (fail "no expr yet")
+            Right <$> fail "no expr yet"
         <|> Left <$> predicateParser
   sepBy1 (skipSpace *> predicateOrExprParser)
          (skipSpace *> char ',')
 
 
-ruleParser :: SliceParser antiquote => Parser (Rule' antiquote)
+ruleParser :: HasParsers ctx => Parser (Rule' ctx)
 ruleParser = do
   rhead <- ruleHeadParser
   skipSpace
-  string "<-"
+  void $ string "<-"
   (body, _) <- partitionEithers <$> ruleBodyParser
   pure Rule{rhead, body}
 
 compileRule :: String -> Q Exp
-compileRule str = case parseOnly (ruleParser @String) (pack str) of
-  Right rule -> [| rule |]
-  Left e     -> fail e
+compileRule str = case parseOnly (ruleParser @'QuasiQuote) (pack str) of
+  Right result -> [| result |]
+  Left e       -> fail e
 
 rule :: QuasiQuoter
 rule = QuasiQuoter
@@ -156,11 +167,11 @@ rule = QuasiQuoter
   , quoteDec = error "not supported"
   }
 
-pRule :: Text -> Either String (Rule' String)
+pRule :: Text -> Either String (Rule' 'QuasiQuote)
 pRule = parseOnly ruleParser
 
-pPred :: Text -> Either String (Predicate' String)
+pPred :: Text -> Either String (Predicate' 'QuasiQuote)
 pPred = parseOnly predicateParser
 
-pTerm :: Text -> Either String (ID' String)
+pTerm :: Text -> Either String QQID
 pTerm = parseOnly termParser

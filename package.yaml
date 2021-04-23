@@ -27,6 +27,7 @@ dependencies:
 - attoparsec
 - bytestring
 - base64
+- containers
 - cryptonite
 - either
 - hex
