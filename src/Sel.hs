@@ -6,6 +6,9 @@ module Sel
   , signBlock
   , verifySignature
   , Keypair(..)
+  , append
+  , new
+  , check
   ) where
 
 import           Control.Monad          (when)
@@ -36,6 +39,13 @@ data Signature
   = Signature
   { d :: [ByteString]
   , z :: ByteString
+  } deriving (Eq, Show)
+
+data Token
+  = Token
+  { messages  :: [ByteString]
+  , keys      :: [ByteString]
+  , signature :: Signature
   } deriving (Eq, Show)
 
 scalarToByteString :: Ptr CUChar -> IO ByteString
@@ -144,6 +154,16 @@ signBlock Keypair{publicKey,privateKey} message =
                                  , z = zBs
                                  }
 
+aggregate :: Signature -> Signature -> IO Signature
+aggregate first second =
+  withPoint $ \zBuf -> withBSLen (z first) $ \(fz, _) -> withBSLen (z second) $ \(sz, _) -> do
+    crypto_core_ristretto255_add zBuf fz sz
+    z <- pointToByteString zBuf
+    pure Signature
+      { d = d first <> d second
+      , z
+      }
+
 verifySignature :: [ByteString]
                 -> [ByteString]
                 -> Signature
@@ -190,6 +210,7 @@ computeHashMSums :: [ByteString] -- publicKeys
 computeHashMSums publicKeys messages f = do
   let pairs = zip publicKeys messages
   withPoint $ \eiXiRes -> do
+    sodium_memzero eiXiRes crypto_core_ristretto255_bytes
     for_ pairs $ \(publicKey, message) ->
       withPoint $ \eiXi -> withPoint $ \eiXiResTmp ->
         withBSLen publicKey $ \(pkBuf, _) ->
@@ -203,6 +224,7 @@ computeHashPSums :: [ByteString] -- parameters
                  -> (Point -> IO a) -> IO a
 computeHashPSums parameters f = do
   withPoint $ \diAiRes -> do
+    sodium_memzero diAiRes crypto_core_ristretto255_bytes
     for_ parameters $ \aa ->
       withPoint $ \diAi -> withPoint $ \diAiResTmp ->
         withBSLen aa $ \(aaBuf, _) ->
@@ -211,6 +233,28 @@ computeHashPSums parameters f = do
             crypto_core_ristretto255_add diAiResTmp diAiRes diAi
             copyPointFrom diAiRes diAiResTmp
     f diAiRes
+
+new :: ByteString -> Keypair -> IO Token
+new message keypair = do
+  signature <- signBlock keypair message
+  pure Token
+    { messages = [message]
+    , keys = [publicKey keypair]
+    , signature
+    }
+
+append :: ByteString -> Keypair -> Token -> IO Token
+append message keypair Token{..} = do
+  newSig <- signBlock keypair message
+  endSig <- aggregate signature newSig
+  pure $ Token
+    { messages = messages <> [message]
+    , keys = keys <> [publicKey keypair]
+    , signature = endSig
+    }
+
+check :: Token -> IO Bool
+check Token{..} = verifySignature keys messages signature
 
 main :: IO ()
 main = do
