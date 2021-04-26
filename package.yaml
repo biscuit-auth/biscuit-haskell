@@ -41,6 +41,7 @@ dependencies:
 - template-haskell
 - th-lift-instances
 - time
+- primitive
 
 library:
   source-dirs: src

@@ -53,6 +53,7 @@ library
     , inline-c
     , libsodium
     , mtl
+    , primitive
     , protobuf
     , random
     , template-haskell
@@ -84,6 +85,7 @@ executable biscuit-haskell-exe
     , inline-c
     , libsodium
     , mtl
+    , primitive
     , protobuf
     , random
     , template-haskell
@@ -116,6 +118,7 @@ test-suite biscuit-haskell-test
     , inline-c
     , libsodium
     , mtl
+    , primitive
     , protobuf
     , random
     , template-haskell

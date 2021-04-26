@@ -8,11 +8,14 @@ module Sel
   , Keypair(..)
   ) where
 
-import           Data.ByteString
+import           Control.Monad          (when)
+import           Data.ByteString        (ByteString, packCStringLen,
+                                         useAsCStringLen)
 import           Data.ByteString.Base64
 import           Data.Foldable          (for_)
 import           Data.Functor           (void)
 import           Data.Hex               (hex)
+import           Data.Primitive.Ptr     (copyPtr)
 import           Foreign.C.Types
 import           Foreign.Marshal.Alloc
 import           Foreign.Ptr
@@ -31,7 +34,7 @@ instance Show Keypair where
 
 data Signature
   = Signature
-  { d :: ByteString
+  { d :: [ByteString]
   , z :: ByteString
   } deriving (Eq, Show)
 
@@ -100,6 +103,9 @@ withBSLen :: ByteString
 withBSLen bs f = useAsCStringLen bs $ \(buf, int) ->
       f (castPtr buf, toEnum int)
 
+copyPointFrom :: Point -> Point -> IO ()
+copyPointFrom to from = copyPtr to from (cs2int crypto_core_ristretto255_bytes)
+
 hashMessage :: ByteString
             -> ByteString
             -> (Scalar -> IO a) -> IO a
@@ -132,17 +138,30 @@ signBlock Keypair{publicKey,privateKey} message =
                 crypto_core_ristretto255_scalar_mul epk e pk
                 withScalar $ \z -> do
                   crypto_core_ristretto255_scalar_sub z rd epk
-                  dBs <- scalarToByteString d
+                  aaBs <- pointToByteString aa
                   zBs <- scalarToByteString z
-                  pure Signature { d = dBs
+                  pure Signature { d = [aaBs]
                                  , z = zBs
                                  }
 
-verifySignature :: ByteString
-                -> ByteString
+verifySignature :: [ByteString]
+                -> [ByteString]
                 -> Signature
                 -> IO Bool
-verifySignature publicKey message Signature{d,z} =
+verifySignature publicKeys messages Signature{d,z} = do
+  when (length publicKeys /= length messages) $ fail "pks / messages mismatch"
+  when (length publicKeys == 0) $ fail "empty pks"
+  withBSLen z $ \(zBuf, _) ->
+    scalarToPoint zBuf $ \zP ->
+      computeHashMSums publicKeys messages $ \eiXiRes ->
+        computeHashPSums d $ \diAiRes ->
+          withPoint $ \res -> withPoint $ \resTmp -> do
+            _ <- crypto_core_ristretto255_add resTmp zP eiXiRes
+            _ <- crypto_core_ristretto255_sub res resTmp diAiRes
+            diff <- sodium_is_zero res crypto_core_ristretto255_scalarbytes
+            pure $ diff == 1
+
+{-
   hashMessage publicKey message $ \e ->
     withScalar $ \dinv ->
       withBSLen d $ \(dBuf, _) -> do
@@ -163,6 +182,35 @@ verifySignature publicKey message Signature{d,z} =
                           crypto_core_ristretto255_scalar_sub diff dBuf candidateD
                           res <- sodium_is_zero diff crypto_core_ristretto255_scalarbytes
                           pure $ res == 1
+                          -}
+
+computeHashMSums :: [ByteString] -- publicKeys
+                -> [ByteString] -- messages
+                -> (Point -> IO a) -> IO a
+computeHashMSums publicKeys messages f = do
+  let pairs = zip publicKeys messages
+  withPoint $ \eiXiRes -> do
+    for_ pairs $ \(publicKey, message) ->
+      withPoint $ \eiXi -> withPoint $ \eiXiResTmp ->
+        withBSLen publicKey $ \(pkBuf, _) ->
+          hashMessage publicKey message $ \ei -> do
+            _ <- crypto_scalarmult_ristretto255 eiXi ei pkBuf
+            crypto_core_ristretto255_add eiXiResTmp eiXiRes eiXi
+            copyPointFrom eiXiRes eiXiResTmp
+    f eiXiRes
+
+computeHashPSums :: [ByteString] -- parameters
+                 -> (Point -> IO a) -> IO a
+computeHashPSums parameters f = do
+  withPoint $ \diAiRes -> do
+    for_ parameters $ \aa ->
+      withPoint $ \diAi -> withPoint $ \diAiResTmp ->
+        withBSLen aa $ \(aaBuf, _) ->
+          hashPoints [aaBuf] $ \di -> do
+            _ <- crypto_scalarmult_ristretto255 diAi di aaBuf
+            crypto_core_ristretto255_add diAiResTmp diAiRes diAi
+            copyPointFrom diAiRes diAiResTmp
+    f diAiRes
 
 main :: IO ()
 main = do
