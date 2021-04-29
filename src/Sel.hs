@@ -156,8 +156,8 @@ signBlock Keypair{publicKey,privateKey} message =
 
 aggregate :: Signature -> Signature -> IO Signature
 aggregate first second =
-  withPoint $ \zBuf -> withBSLen (z first) $ \(fz, _) -> withBSLen (z second) $ \(sz, _) -> do
-    crypto_core_ristretto255_add zBuf fz sz
+  withScalar $ \zBuf -> withBSLen (z first) $ \(fz, _) -> withBSLen (z second) $ \(sz, _) -> do
+    crypto_core_ristretto255_scalar_add zBuf fz sz
     z <- pointToByteString zBuf
     pure Signature
       { d = d first <> d second
