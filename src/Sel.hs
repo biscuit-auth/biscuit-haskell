@@ -216,7 +216,7 @@ computeHashMSums publicKeys messages f = do
         withBSLen publicKey $ \(pkBuf, _) ->
           hashMessage publicKey message $ \ei -> do
             _ <- crypto_scalarmult_ristretto255 eiXi ei pkBuf
-            crypto_core_ristretto255_add eiXiResTmp eiXiRes eiXi
+            _ <- crypto_core_ristretto255_add eiXiResTmp eiXiRes eiXi
             copyPointFrom eiXiRes eiXiResTmp
     f eiXiRes
 
@@ -230,7 +230,7 @@ computeHashPSums parameters f = do
         withBSLen aa $ \(aaBuf, _) ->
           hashPoints [aaBuf] $ \di -> do
             _ <- crypto_scalarmult_ristretto255 diAi di aaBuf
-            crypto_core_ristretto255_add diAiResTmp diAiRes diAi
+            _ <- crypto_core_ristretto255_add diAiResTmp diAiRes diAi
             copyPointFrom diAiRes diAiResTmp
     f diAiRes
 

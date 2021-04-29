@@ -13,7 +13,6 @@ import Foreign.C.Types
 import GHC.ForeignPtr
 import Foreign.Marshal.Alloc
 import Foreign.Ptr
-import Foreign.Storable
 import Data.ByteString.Internal
 import Data.ByteString
 import Data.Coerce (Coercible, coerce)
@@ -60,14 +59,14 @@ serialize :: Biscuit
 serialize = flip withBiscuit $ \b -> do
   size <- fromIntegral <$> {#call biscuit_serialized_size #} b
   allocaBytes size $ \buf -> do
-    {#call biscuit_serialize #} b buf
+    _ <- {#call biscuit_serialize #} b buf
     packCStringLen (castPtr buf, size)
 
 serializeKeyPair :: KeyPair
                  -> IO ByteString
 serializeKeyPair = flip withKeyPair $ \kp ->
    allocaBytes 32 $ \buf -> do
-     {#call key_pair_serialize #} kp buf
+     _ <- {#call key_pair_serialize #} kp buf
      packCStringLen (castPtr buf, 32)
 
 deserializeKeyPair :: ByteString
@@ -82,7 +81,7 @@ serializePublicKey :: PublicKey
                    -> IO ByteString
 serializePublicKey = flip withPublicKey $ \pk ->
    allocaBytes 32 $ \buf -> do
-     {#call public_key_serialize #} pk buf
+     _ <- {#call public_key_serialize #} pk buf
      packCStringLen (castPtr buf, 32)
 
 deserializePublicKey :: ByteString
