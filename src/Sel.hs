@@ -6,6 +6,7 @@ module Sel
   , signBlock
   , verifySignature
   , Keypair(..)
+  , Token(..)
   , append
   , new
   , check

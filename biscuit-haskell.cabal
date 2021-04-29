@@ -99,6 +99,7 @@ test-suite biscuit-haskell-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
+      Spec.Crypto
       Spec.Parser
       Paths_biscuit_haskell
   hs-source-dirs:
