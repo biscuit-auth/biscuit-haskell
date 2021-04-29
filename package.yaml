@@ -72,3 +72,5 @@ tests:
     - -with-rtsopts=-N
     dependencies:
     - biscuit-haskell
+    - tasty
+    - tasty-hunit

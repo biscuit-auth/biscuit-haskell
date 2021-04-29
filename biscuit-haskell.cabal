@@ -98,6 +98,7 @@ test-suite biscuit-haskell-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
+      Spec.Parser
       Paths_biscuit_haskell
   hs-source-dirs:
       test
@@ -121,6 +122,8 @@ test-suite biscuit-haskell-test
     , primitive
     , protobuf
     , random
+    , tasty
+    , tasty-hunit
     , template-haskell
     , text
     , th-lift-instances

@@ -1,2 +1,10 @@
+module Spec where
+
+import           Test.Tasty
+
+import qualified Spec.Parser as Parser
+
 main :: IO ()
-main = putStrLn "Test suite not yet implemented"
+main = defaultMain $ testGroup "biscuit-haskell"
+  [ Parser.specs
+  ]
