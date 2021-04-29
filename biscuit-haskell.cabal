@@ -28,6 +28,7 @@ library
       Biscuit
       Biscuit.Internal
       Datalog.AST
+      Datalog.Executor
       Datalog.Parser
       Inline
       Lib
