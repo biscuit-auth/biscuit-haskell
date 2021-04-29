@@ -12,6 +12,9 @@ extra-libraries:
 extra-source-files:
 - README.md
 - ChangeLog.md
+#c-sources:
+#- csources/ristretto.h
+#- csources/ristretto.c
 
 # Metadata used when publishing your package
 # synopsis:            Short description of your package
