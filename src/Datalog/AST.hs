@@ -61,6 +61,11 @@ deriving instance ( Ord (VariableType inSet ctx)
                   , Ord (SetType inSet ctx)
                   ) => Ord (ID' inSet ctx)
 
+deriving instance ( Show (VariableType inSet ctx)
+                  , Show (SliceType inSet ctx)
+                  , Show (SetType inSet ctx)
+                  ) => Show (ID' inSet ctx)
+
 -- In a regular AST, antiquotes have already been eliminated
 type ID = ID' 'NotWithinSet 'RegularString
 -- In an AST parsed from a QuasiQuoter, there might be references to haskell variables
@@ -133,9 +138,18 @@ data Predicate' (ctx :: ParsedAs) = Predicate
   , terms :: [ID' 'NotWithinSet ctx]
   }
 
+deriving instance ( Eq (ID' 'NotWithinSet ctx)
+                  ) => Eq (Predicate' ctx)
+deriving instance ( Ord (ID' 'NotWithinSet ctx)
+                  ) => Ord (Predicate' ctx)
+deriving instance ( Show (ID' 'NotWithinSet ctx)
+                  ) => Show (Predicate' ctx)
+
+
 deriving instance Lift (ID' 'NotWithinSet ctx) => Lift (Predicate' ctx)
 
 type Predicate = Predicate' 'RegularString
+type Fact = Predicate' 'RegularString
 
 renderPredicate :: Predicate -> Text
 renderPredicate Predicate{name,terms} =
@@ -145,6 +159,15 @@ data Rule' ctx = Rule
   { rhead :: Predicate' ctx
   , body  :: [Predicate' ctx]
   }
+
+deriving instance ( Eq (Predicate' ctx)
+                  ) => Eq (Rule' ctx)
+deriving instance ( Ord (Predicate' ctx)
+                  ) => Ord (Rule' ctx)
+deriving instance ( Show (Predicate' ctx)
+                  ) => Show (Rule' ctx)
+
+type Rule = Rule' 'RegularString
 
 deriving instance Lift (Predicate' ctx) => Lift (Rule' ctx)
 

@@ -175,9 +175,22 @@ compileRule str = case parseOnly (ruleParser @'QuasiQuote) (pack str) of
   Right result -> [| result |]
   Left e       -> fail e
 
+compilePredicate :: String -> Q Exp
+compilePredicate str = case parseOnly (predicateParser @'QuasiQuote) (pack str) of
+  Right result -> [| result |]
+  Left e       -> fail e
+
 rule :: QuasiQuoter
 rule = QuasiQuoter
   { quoteExp = compileRule
+  , quotePat = error "not supported"
+  , quoteType = error "not supported"
+  , quoteDec = error "not supported"
+  }
+
+predicate :: QuasiQuoter
+predicate = QuasiQuoter
+  { quoteExp = compilePredicate
   , quotePat = error "not supported"
   , quoteType = error "not supported"
   , quoteDec = error "not supported"
