@@ -15,10 +15,10 @@ module Sel
 import           Control.Monad          (when)
 import           Data.ByteString        (ByteString, packCStringLen,
                                          useAsCStringLen)
+import           Data.ByteString.Base16 as Hex
 import           Data.ByteString.Base64
 import           Data.Foldable          (for_)
 import           Data.Functor           (void)
-import           Data.Hex               (hex)
 import           Data.Primitive.Ptr     (copyPtr)
 import           Foreign.C.Types
 import           Foreign.Marshal.Alloc
@@ -34,7 +34,7 @@ data Keypair
 
 instance Show Keypair where
   show Keypair{privateKey, publicKey} =
-    show (hex privateKey) <> "/" <> show (hex publicKey)
+    show (Hex.encode privateKey) <> "/" <> show (Hex.encode publicKey)
 
 data Signature
   = Signature

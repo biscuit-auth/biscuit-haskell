@@ -20,10 +20,10 @@ import           Control.Applicative            (liftA2, optional, (<|>))
 import qualified Control.Monad.Combinators.Expr as Expr
 import           Data.Attoparsec.Text
 import           Data.ByteString                (ByteString)
+import           Data.ByteString.Base16         as Hex
 import           Data.Either                    (partitionEithers)
 import           Data.Foldable                  (fold)
 import           Data.Functor                   (void, ($>))
-import           Data.Hex                       (unhex)
 import qualified Data.Set                       as Set
 import           Data.Text                      (Text, pack, unpack)
 import           Data.Text.Encoding             (encodeUtf8)
@@ -183,8 +183,8 @@ binary name op = Expr.InfixL  (EBinary op <$ (skipSpace *> string name))
 hexBsParser :: Parser ByteString
 hexBsParser = do
   void $ string "hex:"
-  digits <- unhex . encodeUtf8 <$> takeWhile1 (inClass "0-9a-fA-F")
-  either undefined pure digits
+  (digits, "") <- Hex.decode . encodeUtf8 <$> takeWhile1 (inClass "0-9a-fA-F")
+  pure digits
 
 litStringParser :: Parser Text
 litStringParser =

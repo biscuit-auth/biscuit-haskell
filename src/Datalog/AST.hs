@@ -14,7 +14,7 @@
 module Datalog.AST where
 
 import           Data.ByteString            (ByteString)
-import           Data.Hex                   (hex)
+import           Data.ByteString.Base16     as Hex
 import           Data.Set                   (Set)
 import qualified Data.Set                   as Set
 import           Data.Text                  (Text, intercalate, pack)
@@ -115,7 +115,7 @@ renderId = \case
   LInteger int  -> pack $ show int
   LString str   -> pack $ show str
   LDate time    -> pack $ show time
-  LBytes bs     -> "hex:" <> decodeUtf8 (hex bs)
+  LBytes bs     -> "hex:" <> decodeUtf8 (Hex.encode bs)
   LBool True    -> "true"
   LBool False   -> "false"
   TermSet terms -> "[" <> intercalate "," (renderInnerId <$> Set.toList terms) <> "]"

@@ -6,9 +6,6 @@ author:              "Author name here"
 maintainer:          "example@example.com"
 copyright:           "2020 Author name here"
 
-extra-libraries:
-- biscuit_auth
-
 extra-source-files:
 - README.md
 - ChangeLog.md
@@ -30,13 +27,10 @@ dependencies:
 - attoparsec
 - bytestring
 - base64
+- base16-bytestring
 - containers
-- cryptonite
 - either
-- hex
-- inline-c
 - libsodium
-- mtl
 - cereal
 - parser-combinators
 - protobuf
@@ -71,6 +65,7 @@ tests:
     main:                Spec.hs
     source-dirs:         test
     ghc-options:
+    - -main-is Spec
     - -threaded
     - -rtsopts
     - -with-rtsopts=-N
