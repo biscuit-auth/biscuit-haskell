@@ -156,25 +156,63 @@ renderPredicate Predicate{name,terms} =
   name <> "(" <> intercalate ", " (fmap renderId terms) <> ")"
 
 data Rule' ctx = Rule
-  { rhead :: Predicate' ctx
-  , body  :: [Predicate' ctx]
+  { rhead       :: Predicate' ctx
+  , body        :: [Predicate' ctx]
+  , expressions :: [Expression' ctx]
   }
 
 deriving instance ( Eq (Predicate' ctx)
+                  , Eq (Expression' ctx)
                   ) => Eq (Rule' ctx)
 deriving instance ( Ord (Predicate' ctx)
+                  , Ord (Expression' ctx)
                   ) => Ord (Rule' ctx)
 deriving instance ( Show (Predicate' ctx)
+                  , Show (Expression' ctx)
                   ) => Show (Rule' ctx)
 
 type Rule = Rule' 'RegularString
 
-deriving instance Lift (Predicate' ctx) => Lift (Rule' ctx)
+deriving instance (Lift (Predicate' ctx), Lift (Expression' ctx)) => Lift (Rule' ctx)
 
 renderRule :: Rule' 'RegularString -> Text
 renderRule Rule{rhead,body} =
   renderPredicate rhead <> " <- " <> intercalate ", " (fmap renderPredicate body)
 
+data Unary =
+    Negate
+  | Parens
+  | Length
+  deriving (Eq, Ord, Show, Lift)
 
-data Expression' (ctx :: ParsedAs) = Void
-  deriving stock (Show, Lift)
+data Binary =
+    LessThan
+  | GreaterThan
+  | LessOrEqual
+  | GreaterOrEqual
+  | Equal
+  | Contains
+  | Prefix
+  | Suffix
+  | Regex
+  | Add
+  | Sub
+  | Mul
+  | Div
+  | And
+  | Or
+  | Intersection
+  | Union
+  deriving (Eq, Ord, Show, Lift)
+
+data Expression' (ctx :: ParsedAs) =
+    EValue (ID' 'NotWithinSet ctx)
+  | EUnary Unary (Expression' ctx)
+  | EBinary Binary (Expression' ctx) (Expression' ctx)
+
+deriving instance Eq (ID' 'NotWithinSet ctx) => Eq (Expression' ctx)
+deriving instance Ord (ID' 'NotWithinSet ctx) => Ord (Expression' ctx)
+deriving instance Lift (ID' 'NotWithinSet ctx) => Lift (Expression' ctx)
+deriving instance Show (ID' 'NotWithinSet ctx) => Show (Expression' ctx)
+
+type Expression = Expression' 'RegularString

@@ -16,20 +16,21 @@
 {- HLINT ignore "Reduce duplication" -}
 module Datalog.Parser where
 
-import           Control.Applicative       (liftA2, optional, (<|>))
+import           Control.Applicative            (liftA2, optional, (<|>))
+import qualified Control.Monad.Combinators.Expr as Expr
 import           Data.Attoparsec.Text
-import           Data.ByteString           (ByteString)
-import           Data.Either               (partitionEithers)
-import           Data.Foldable             (fold)
-import           Data.Functor              (void, ($>))
-import           Data.Hex                  (unhex)
-import qualified Data.Set                  as Set
-import           Data.Text                 (Text, pack, unpack)
-import           Data.Text.Encoding        (encodeUtf8)
-import           Data.Time                 (UTCTime, defaultTimeLocale,
-                                            parseTimeM)
-import           Data.Void                 (Void)
-import           Instances.TH.Lift         ()
+import           Data.ByteString                (ByteString)
+import           Data.Either                    (partitionEithers)
+import           Data.Foldable                  (fold)
+import           Data.Functor                   (void, ($>))
+import           Data.Hex                       (unhex)
+import qualified Data.Set                       as Set
+import           Data.Text                      (Text, pack, unpack)
+import           Data.Text.Encoding             (encodeUtf8)
+import           Data.Time                      (UTCTime, defaultTimeLocale,
+                                                 parseTimeM)
+import           Data.Void                      (Void)
+import           Instances.TH.Lift              ()
 import           Language.Haskell.TH
 import           Language.Haskell.TH.Quote
 
@@ -91,6 +92,93 @@ predicateParser = do
   skipSpace
   terms <- parens (commaList termParser)
   pure Predicate{name,terms}
+
+unary :: HasParsers ctx => Parser (Expression' ctx)
+unary = choice
+  [ unaryParens
+  , unaryNegate
+  , unaryLength
+  ]
+
+unaryParens :: HasParsers ctx => Parser (Expression' ctx)
+unaryParens = do
+  skipSpace
+  _ <- char '('
+  skipSpace
+  e <- expressionParser
+  skipSpace
+  _ <- char ')'
+  pure $ EUnary Parens e
+
+unaryNegate :: HasParsers ctx => Parser (Expression' ctx)
+unaryNegate = do
+  skipSpace
+  _ <- char '!'
+  skipSpace
+  e <- expressionParser
+  pure $ EUnary Negate e
+
+unaryLength :: HasParsers ctx => Parser (Expression' ctx)
+unaryLength = do
+  skipSpace
+  e <- choice
+         [ EValue <$> termParser
+         , unaryParens
+         ]
+  skipSpace
+  _ <- string ".length()"
+  pure $ EUnary Length e
+
+exprTerm :: HasParsers ctx => Parser (Expression' ctx)
+exprTerm = choice
+  [ unary
+  , EValue <$> termParser
+  ]
+
+methodParser :: HasParsers ctx => Parser (Expression' ctx)
+methodParser = do
+  e1 <- exprTerm
+  _ <- char '.'
+  method <- choice
+    [ Contains <$ string "contains"
+    , Prefix   <$ string "starts_with"
+    , Suffix   <$ string "ends_with"
+    , Regex    <$ string "matches"
+    ]
+  _ <- char '('
+  skipSpace
+  e2 <- expressionParser
+  skipSpace
+  _ <- char ')'
+  pure $ EBinary method e1 e2
+
+expressionParser :: HasParsers ctx => Parser (Expression' ctx)
+expressionParser = Expr.makeExprParser (methodParser <|> exprTerm) table
+
+table :: HasParsers ctx
+      => [[Expr.Operator Parser (Expression' ctx)]]
+table = [ [ binary  "*" Mul
+          , binary  "/" Div
+          ]
+        , [ binary  "+" Add
+          , binary  "-" Sub
+          ]
+        , [ binary  "<=" LessOrEqual
+          , binary  ">=" GreaterOrEqual
+          , binary  "<"  LessThan
+          , binary  ">"  GreaterThan
+          , binary  "==" Equal
+          ]
+        , [ binary  "&&" And
+          , binary  "||" Or
+          ]
+        ]
+
+binary :: HasParsers ctx
+       => Text
+       -> Binary
+       -> Expr.Operator Parser (Expression' ctx)
+binary name op = Expr.InfixL  (EBinary op <$ (skipSpace *> string name))
 
 hexBsParser :: Parser ByteString
 hexBsParser = do
@@ -156,7 +244,7 @@ ruleBodyParser :: HasParsers ctx
                => Parser [Either (Predicate' ctx) (Expression' ctx)]
 ruleBodyParser = do
   let predicateOrExprParser =
-            Right <$> fail "no expr yet"
+            Right <$> expressionParser
         <|> Left <$> predicateParser
   sepBy1 (skipSpace *> predicateOrExprParser)
          (skipSpace *> char ',')
@@ -167,8 +255,8 @@ ruleParser = do
   rhead <- ruleHeadParser
   skipSpace
   void $ string "<-"
-  (body, _) <- partitionEithers <$> ruleBodyParser
-  pure Rule{rhead, body}
+  (body, expressions) <- partitionEithers <$> ruleBodyParser
+  pure Rule{rhead, body, expressions}
 
 compileRule :: String -> Q Exp
 compileRule str = case parseOnly (ruleParser @'QuasiQuote) (pack str) of

@@ -38,6 +38,7 @@ dependencies:
 - libsodium
 - mtl
 - cereal
+- parser-combinators
 - protobuf
 - random
 - text
