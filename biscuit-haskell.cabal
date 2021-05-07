@@ -90,6 +90,7 @@ test-suite biscuit-haskell-test
       Spec.Crypto
       Spec.Executor
       Spec.Parser
+      Spec.Quasiquoter
       Paths_biscuit_haskell
   hs-source-dirs:
       test

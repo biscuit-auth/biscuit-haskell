@@ -82,17 +82,19 @@ instance Lift (ID' 'NotWithinSet 'QuasiQuote) where
   lift (LDate t)       = [| LDate (read $(lift $ show t)) |]
   lift (Antiquote n)   = [| toLiteralId $(varE $ mkName n) |]
 
+  liftTyped = unsafeTExpCoerce . lift
+
 instance Lift (ID' 'WithinSet 'QuasiQuote) where
+  liftTyped = unsafeTExpCoerce . lift
   lift =
-    let lift' = lift @(ID' 'NotWithinSet 'QuasiQuote)
-    in \case
-      Symbol i -> lift' (Symbol i)
-      LInteger i -> lift' (LInteger i)
-      LString i -> lift' (LString i)
-      LDate i -> lift' (LDate i)
-      LBytes i -> lift' (LBytes i)
-      LBool i -> lift' (LBool i)
-      Antiquote i -> lift' (Antiquote i)
+    \case
+      Symbol i -> lift (Symbol @'WithinSet @'QuasiQuote i)
+      LInteger i -> lift (LInteger @'WithinSet @'QuasiQuote i)
+      LString i -> lift (LString @'WithinSet @'QuasiQuote i)
+      LDate i -> lift (LDate @'WithinSet @'QuasiQuote i)
+      LBytes i -> lift (LBytes @'WithinSet @'QuasiQuote i)
+      LBool i -> lift (LBool @'WithinSet @'QuasiQuote i)
+      Antiquote i -> lift (Antiquote @'WithinSet @'QuasiQuote i)
       Variable v -> absurd v
       TermSet v -> absurd v
 

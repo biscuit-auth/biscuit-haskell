@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds         #-}
 {-# LANGUAGE OverloadedStrings #-}
 module Spec.Parser (specs) where
 
@@ -14,6 +15,9 @@ import           Datalog.Parser       (expressionParser, predicateParser,
 parseTerm :: Text -> Either String ID
 parseTerm = parseOnly termParser
 
+parseTermQQ :: Text -> Either String QQID
+parseTermQQ = parseOnly termParser
+
 parsePredicate :: Text -> Either String Predicate
 parsePredicate = parseOnly predicateParser
 
@@ -29,6 +33,7 @@ specs = testGroup "datalog parser"
   , simpleFact
   , simpleRule
   , termsGroup
+  , termsGroupQQ
   , constraints
   , constrainedRule
   , constrainedRuleOrdering
@@ -43,6 +48,19 @@ termsGroup = testGroup "Parse terms" $
   , testCase "Date" $ parseTerm "2019-12-02T13:49:53Z" @?=
         Right (LDate $ read "2019-12-02 13:49:53 UTC")
   , testCase "Variable" $ parseTerm "$1" @?= Right (Variable "1")
+  , testCase "Antiquote" $ parseTerm "${toto}" @?= Left "Failed reading: empty"
+  ]
+
+termsGroupQQ :: TestTree
+termsGroupQQ = testGroup "Parse terms (in a QQ setting)" $
+  [ testCase "Symbol" $ parseTermQQ "#ambient" @?= Right (Symbol "ambient")
+  , testCase "String" $ parseTermQQ "\"file1 a hello - 123_\"" @?= Right (LString "file1 a hello - 123_")
+  , testCase "Positive integer" $ parseTermQQ "123" @?= Right (LInteger 123)
+  , testCase "Negative integer" $ parseTermQQ "-42" @?= Right (LInteger (-42))
+  , testCase "Date" $ parseTermQQ "2019-12-02T13:49:53Z" @?=
+        Right (LDate $ read "2019-12-02 13:49:53 UTC")
+  , testCase "Variable" $ parseTermQQ "$1" @?= Right (Variable "1")
+  , testCase "Antiquote" $ parseTermQQ "${toto}" @?= Right (Antiquote "toto")
   ]
 
 simpleFact :: TestTree
