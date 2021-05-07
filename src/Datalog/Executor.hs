@@ -7,32 +7,23 @@ module Datalog.Executor where
 
 import           Debug.Trace
 
-import           Control.Monad      (mfilter)
-import           Control.Monad      (join)
-import qualified Data.List.NonEmpty as NE
-import           Data.Map.Strict    (Map)
-import qualified Data.Map.Strict    as Map
-import           Data.Maybe         (mapMaybe)
-import           Data.Set           (Set)
-import qualified Data.Set           as Set
-import           Data.Text          (Text, intercalate, unpack)
+import           Control.Monad           (mfilter)
+import           Control.Monad           (join)
+import           Data.Bitraversable      (bitraverse)
+import qualified Data.ByteString         as ByteString
+import           Data.Either.Combinators (maybeToRight)
+import qualified Data.List.NonEmpty      as NE
+import           Data.Map.Strict         (Map, (!?))
+import qualified Data.Map.Strict         as Map
+import           Data.Maybe              (mapMaybe)
+import           Data.Set                (Set)
+import qualified Data.Set                as Set
+import           Data.Text               (Text, intercalate, unpack)
+import qualified Data.Text               as Text
 import           Datalog.AST
-import           Datalog.Parser     (predicate, rule)
 
 type Value = ID -- a term that is *not* a variable
 type Name = Text -- a variable name
-
-myWorld :: World
-myWorld = World
-  { rules = Set.fromList
-             [ [rule|grandparent($a,$b) <- parent($a,$c), parent($c,$b)|]
-             ]
-  , facts = Set.fromList
-             [ [predicate|parent("alice", "bob")|]
-             , [predicate|parent("bob", "jean-pierre")|]
-             , [predicate|parent("alice", "toto")|]
-             ]
-  }
 
 data World
  = World
@@ -64,12 +55,18 @@ extend World{rules, facts} =
    in Set.difference allNewFacts facts
 
 getFactsForRule :: Set Fact -> Rule -> Set Fact
-getFactsForRule facts Rule{rhead, body} =
+getFactsForRule facts Rule{rhead, body, expressions} =
   let candidateBindings = getCandidateBindings facts body
       allVariables = extractVariables body
-      legalBindings = reduceCandidateBindings allVariables candidateBindings
+      legalBindingsForFacts = reduceCandidateBindings allVariables candidateBindings
+      legalBindings = Set.filter (\b -> all (satisfies b) expressions) legalBindingsForFacts
       newFacts = mapMaybe (applyBindings rhead) $ Set.toList legalBindings
    in Set.fromList newFacts
+
+satisfies :: Map Name ID
+          -> Expression
+          -> Bool
+satisfies b e = evaluateExpression b e == Right (LBool True)
 
 extractVariables :: [Predicate] -> Set Name
 extractVariables predicates =
@@ -87,21 +84,6 @@ applyBindings p@Predicate{terms} bindings =
       replaceTerm (Variable n) = Map.lookup n bindings
       replaceTerm t            = Just t
    in (\nt -> p { terms = nt}) <$> newTerms
-
-{-
--- pred 1
-[ {(a => "toto", b => "tutu"), (a => "titi", b => "tutu")}
--- pred 2
-, {(b => "tutu", c => "toto"), (b => "toto", c => "tata")}
--- pred 3
-, {(c => "toto", d => "tata"), (c => "toto", d => "tyty")}
-]
-
-res
-{ (a => "toto", b => "tutu", c => "toto")
-, (a => "titi", b => "tutu", c => "toto")
-}
--}
 
 getCombinations :: [[a]] -> [[a]]
 getCombinations (x:xs) = do
@@ -153,3 +135,81 @@ factMatchesPredicate Predicate{name = predicateName, terms = predicateTerms }
    in if namesMatch && lengthsMatch
       then foldMap mergeBindings allMatches
       else mempty
+
+applyVariable :: Map Name ID
+              -> ID
+              -> Either String ID
+applyVariable bindings = \case
+  Variable n -> maybeToRight "Unbound variable" $ bindings !? n
+  t          -> Right t
+
+evalUnary :: Unary -> ID -> Either String ID
+evalUnary Parens t = pure t
+evalUnary Negate (LBool b) = pure (LBool $ not b)
+evalUnary Negate _ = Left "Only booleans support negation"
+evalUnary Length (LString t) = pure . LInteger $ Text.length t
+evalUnary Length (LBytes bs) = pure . LInteger $ ByteString.length bs
+evalUnary Length (TermSet s) = pure . LInteger $ Set.size s
+evalUnary Length _ = Left "Only strings, bytes and sets support `.length()`"
+
+evalBinary :: Binary -> ID -> ID -> Either String ID
+-- eq / ord operations
+evalBinary Equal (Symbol s) (Symbol s')     = pure $ LBool (s == s')
+evalBinary Equal (LInteger i) (LInteger i') = pure $ LBool (i == i')
+evalBinary Equal (LString t) (LString t')   = pure $ LBool (t == t')
+evalBinary Equal (LDate t) (LDate t')       = pure $ LBool (t == t')
+evalBinary Equal (LBytes t) (LBytes t')     = pure $ LBool (t == t')
+evalBinary Equal (LBool t) (LBool t')       = pure $ LBool (t == t')
+evalBinary Equal (TermSet t) (TermSet t')   = pure $ LBool (t == t')
+evalBinary Equal _ _                        = Left "Equality mismatch"
+evalBinary LessThan (LInteger i) (LInteger i') = pure $ LBool (i < i')
+evalBinary LessThan (LDate t) (LDate t')       = pure $ LBool (t < t')
+evalBinary LessThan _ _                        = Left "< mismatch"
+evalBinary GreaterThan (LInteger i) (LInteger i') = pure $ LBool (i > i')
+evalBinary GreaterThan (LDate t) (LDate t')       = pure $ LBool (t > t')
+evalBinary GreaterThan _ _                        = Left "> mismatch"
+evalBinary LessOrEqual (LInteger i) (LInteger i') = pure $ LBool (i <= i')
+evalBinary LessOrEqual (LDate t) (LDate t')       = pure $ LBool (t <= t')
+evalBinary LessOrEqual _ _                        = Left "<= mismatch"
+evalBinary GreaterOrEqual (LInteger i) (LInteger i') = pure $ LBool (i >= i')
+evalBinary GreaterOrEqual (LDate t) (LDate t')       = pure $ LBool (t >= t')
+evalBinary GreaterOrEqual _ _                        = Left ">= mismatch"
+-- string-related operations
+evalBinary Prefix (LString t) (LString t') = pure $ LBool (t' `Text.isPrefixOf` t)
+evalBinary Prefix _ _                      = Left "Only strings support `.starts_with()`"
+evalBinary Suffix (LString t) (LString t') = pure $ LBool (t' `Text.isSuffixOf` t)
+evalBinary Suffix _ _                      = Left "Only strings support `.ends_with()`"
+evalBinary Regex  _ _                      = Left "Rexeges are not supported"
+-- num operations
+evalBinary Add (LInteger i) (LInteger i') = pure $ LInteger (i + i')
+evalBinary Add _ _ = Left "Only integers support addition"
+evalBinary Sub (LInteger i) (LInteger i') = pure $ LInteger (i - i')
+evalBinary Sub _ _ = Left "Only integers support subtraction"
+evalBinary Mul (LInteger i) (LInteger i') = pure $ LInteger (i * i')
+evalBinary Mul _ _ = Left "Only integers support multiplication"
+evalBinary Div (LInteger _) (LInteger 0) = Left "Divide by 0"
+evalBinary Div (LInteger i) (LInteger i') = pure $ LInteger (i `div` i')
+evalBinary Div _ _ = Left "Only integers support division"
+-- boolean operations
+evalBinary And (LBool b) (LBool b') = pure $ LBool (b && b')
+evalBinary And _ _ = Left "Only booleans support &&"
+evalBinary Or (LBool b) (LBool b') = pure $ LBool (b || b')
+evalBinary Or _ _ = Left "Only booleans support ||"
+-- set operations
+evalBinary Contains (TermSet t) (TermSet t') = pure $ LBool (Set.isSubsetOf t' t)
+evalBinary Contains (TermSet t) t' = case toSetTerm t' of
+    Just t'' -> pure $ LBool (Set.member t'' t)
+    Nothing  -> Left "Sets cannot contain nested sets nor variables"
+evalBinary Contains _ _ = Left "Only sets support `.contains()`"
+evalBinary Intersection (TermSet t) (TermSet t') = pure $ TermSet (Set.intersection t t')
+evalBinary Intersection _ _ = Left "Only sets support `.intersection()`"
+evalBinary Union (TermSet t) (TermSet t') = pure $ TermSet (Set.union t t')
+evalBinary Union _ _ = Left "Only sets support `.union()`"
+
+evaluateExpression :: Map Name ID
+                   -> Expression
+                   -> Either String ID
+evaluateExpression b = \case
+    EValue term -> applyVariable b term
+    EUnary op e' -> evalUnary op =<< evaluateExpression b e'
+    EBinary op e' e'' -> uncurry (evalBinary op) =<< join bitraverse (evaluateExpression b) (e', e'')

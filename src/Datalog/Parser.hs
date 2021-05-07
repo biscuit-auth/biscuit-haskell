@@ -140,10 +140,12 @@ methodParser = do
   e1 <- exprTerm
   _ <- char '.'
   method <- choice
-    [ Contains <$ string "contains"
-    , Prefix   <$ string "starts_with"
-    , Suffix   <$ string "ends_with"
-    , Regex    <$ string "matches"
+    [ Contains     <$ string "contains"
+    , Intersection <$ string "intersection"
+    , Union        <$ string "union"
+    , Prefix       <$ string "starts_with"
+    , Suffix       <$ string "ends_with"
+    , Regex        <$ string "matches"
     ]
   _ <- char '('
   skipSpace

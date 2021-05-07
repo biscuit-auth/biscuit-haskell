@@ -110,6 +110,19 @@ instance ToLiteralId Bool where
 instance ToLiteralId ByteString where
   toLiteralId = LBytes
 
+toSetTerm :: ID' 'NotWithinSet 'RegularString
+          -> Maybe (ID' 'WithinSet 'RegularString)
+toSetTerm = \case
+  Symbol i -> Just $ Symbol i
+  LInteger i -> Just $ LInteger i
+  LString i -> Just $ LString i
+  LDate i -> Just $ LDate i
+  LBytes i -> Just $ LBytes i
+  LBool i -> Just $ LBool i
+  Variable _ -> Nothing
+  TermSet _ -> Nothing
+  Antiquote v -> absurd v
+
 renderId :: ID -> Text
 renderId = \case
   Symbol name   -> "#" <> name
@@ -218,3 +231,11 @@ deriving instance Lift (ID' 'NotWithinSet ctx) => Lift (Expression' ctx)
 deriving instance Show (ID' 'NotWithinSet ctx) => Show (Expression' ctx)
 
 type Expression = Expression' 'RegularString
+
+data Op =
+    VOp ID
+  | UOp Unary
+  | BOp Binary
+
+fromStack :: [Op] -> Either String Expression
+fromStack = error "todo"
