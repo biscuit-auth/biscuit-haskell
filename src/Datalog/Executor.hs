@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds         #-}
 {-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE NamedFieldPuns    #-}
@@ -20,10 +21,11 @@ import           Data.Set                (Set)
 import qualified Data.Set                as Set
 import           Data.Text               (Text, intercalate, unpack)
 import qualified Data.Text               as Text
+import           Data.Void               (absurd)
 import           Datalog.AST
 
-type Value = ID -- a term that is *not* a variable
 type Name = Text -- a variable name
+type Bindings = Map Name Value
 
 data World
  = World
@@ -36,11 +38,11 @@ instance Show World where
     [ [ "Rules" ]
     , renderRule <$> (Set.toList rules)
     , [ "Facts" ]
-    , renderPredicate <$> (Set.toList facts)
+    , renderFact <$> (Set.toList facts)
     ]
 
 rF :: Set Fact -> IO ()
-rF = putStrLn . unpack . intercalate "\n" . fmap renderPredicate . Set.toList
+rF = putStrLn . unpack . intercalate "\n" . fmap renderFact . Set.toList
 
 computeAllFacts :: World -> Set Fact
 computeAllFacts w@World{facts} =
@@ -63,7 +65,7 @@ getFactsForRule facts Rule{rhead, body, expressions} =
       newFacts = mapMaybe (applyBindings rhead) $ Set.toList legalBindings
    in Set.fromList newFacts
 
-satisfies :: Map Name ID
+satisfies :: Bindings
           -> Expression
           -> Bool
 satisfies b e = evaluateExpression b e == Right (LBool True)
@@ -77,12 +79,19 @@ extractVariables predicates =
    in Set.fromList $ extractVariables' =<< predicates
 
 
-applyBindings :: Predicate -> Map Name Value -> Maybe Fact
+applyBindings :: Predicate -> Bindings -> Maybe Fact
 applyBindings p@Predicate{terms} bindings =
   let newTerms = traverse replaceTerm terms
-      replaceTerm :: ID -> Maybe ID
-      replaceTerm (Variable n) = Map.lookup n bindings
-      replaceTerm t            = Just t
+      replaceTerm :: ID -> Maybe Value
+      replaceTerm (Variable n)  = Map.lookup n bindings
+      replaceTerm (Symbol t)    = Just $ Symbol t
+      replaceTerm (LInteger t)  = Just $ LInteger t
+      replaceTerm (LString t)   = Just $ LString t
+      replaceTerm (LDate t)     = Just $ LDate t
+      replaceTerm (LBytes t)    = Just $ LBytes t
+      replaceTerm (LBool t)     = Just $ LBool t
+      replaceTerm (TermSet t)   = Just $ TermSet t
+      replaceTerm (Antiquote t) = absurd t
    in (\nt -> p { terms = nt}) <$> newTerms
 
 getCombinations :: [[a]] -> [[a]]
@@ -91,13 +100,13 @@ getCombinations (x:xs) = do
   (y:) <$> getCombinations xs
 getCombinations []     = [[]]
 
-traceBindings :: Map Name ID -> Map Name ID
+traceBindings :: Bindings -> Bindings
 traceBindings m =
   let out = unpack $ intercalate "," $ outB <$> Map.toList m
-      outB (n, v) = n <> " => " <> renderId v
+      outB (n, v) = n <> " => " <> renderFactId v
    in trace ("==\n" <> out <> "\n==") m
 
-mergeBindings :: [Map Name ID] -> Map Name ID
+mergeBindings :: [Bindings] -> Bindings
 mergeBindings =
   -- group all the values unified with each variable
   let combinations = Map.unionsWith (<>) . fmap (fmap pure)
@@ -107,43 +116,61 @@ mergeBindings =
    in keepConsistent . combinations
 
 reduceCandidateBindings :: Set Name
-                        -> [Set (Map Name ID)]
-                        -> Set (Map Name ID)
+                        -> [Set (Bindings)]
+                        -> Set (Bindings)
 reduceCandidateBindings allVariables matches =
-  let allCombinations :: [[Map Name ID]]
+  let allCombinations :: [[Bindings]]
       allCombinations = getCombinations $ Set.toList <$> matches
-      isPartial :: Map Name ID -> Bool
+      isPartial :: Bindings -> Bool
       isPartial = (== allVariables) . Set.fromList . Map.keys
    in Set.fromList $ filter isPartial $ mergeBindings <$> allCombinations
 
 getCandidateBindings :: Set Fact
                      -> [Predicate]
-                     -> [Set (Map Name ID)]
+                     -> [Set (Bindings)]
 getCandidateBindings facts predicates =
    let keepFacts p = Set.map (factMatchesPredicate p) facts
     in keepFacts <$> predicates
 
-factMatchesPredicate :: Predicate -> Fact -> Map Name ID
+isSame :: ID -> Value -> Bool
+isSame (Symbol t)   (Symbol t')   = t == t'
+isSame (LInteger t) (LInteger t') = t == t'
+isSame (LString t)  (LString t')  = t == t'
+isSame (LDate t)    (LDate t')    = t == t'
+isSame (LBytes t)   (LBytes t')   = t == t'
+isSame (LBool t)    (LBool t')    = t == t'
+isSame (TermSet t)  (TermSet t')  = t == t'
+isSame _ _                        = False
+
+factMatchesPredicate :: Predicate -> Fact -> Bindings
 factMatchesPredicate Predicate{name = predicateName, terms = predicateTerms }
                      Predicate{name = factName, terms = factTerms } =
   let namesMatch = predicateName == factName
       lengthsMatch = length predicateTerms == length factTerms
       allMatches = sequenceA $ zipWith yolo predicateTerms factTerms
+      yolo :: ID -> Value -> Maybe Bindings
       yolo (Variable vname) value = Just (Map.singleton vname value)
-      yolo t t' | t == t'   = Just mempty
-                | otherwise = Nothing
+      yolo t t' | isSame t t' = Just mempty
+                | otherwise   = Nothing
    in if namesMatch && lengthsMatch
       then foldMap mergeBindings allMatches
       else mempty
 
-applyVariable :: Map Name ID
+applyVariable :: Bindings
               -> ID
-              -> Either String ID
+              -> Either String Value
 applyVariable bindings = \case
   Variable n -> maybeToRight "Unbound variable" $ bindings !? n
-  t          -> Right t
+  Symbol t   -> Right $ Symbol t
+  LInteger t -> Right $ LInteger t
+  LString t  -> Right $ LString t
+  LDate t    -> Right $ LDate t
+  LBytes t   -> Right $ LBytes t
+  LBool t    -> Right $ LBool t
+  TermSet t  -> Right $ TermSet t
+  Antiquote v -> absurd v
 
-evalUnary :: Unary -> ID -> Either String ID
+evalUnary :: Unary -> Value -> Either String Value
 evalUnary Parens t = pure t
 evalUnary Negate (LBool b) = pure (LBool $ not b)
 evalUnary Negate _ = Left "Only booleans support negation"
@@ -152,7 +179,7 @@ evalUnary Length (LBytes bs) = pure . LInteger $ ByteString.length bs
 evalUnary Length (TermSet s) = pure . LInteger $ Set.size s
 evalUnary Length _ = Left "Only strings, bytes and sets support `.length()`"
 
-evalBinary :: Binary -> ID -> ID -> Either String ID
+evalBinary :: Binary -> Value -> Value -> Either String Value
 -- eq / ord operations
 evalBinary Equal (Symbol s) (Symbol s')     = pure $ LBool (s == s')
 evalBinary Equal (LInteger i) (LInteger i') = pure $ LBool (i == i')
@@ -206,9 +233,9 @@ evalBinary Intersection _ _ = Left "Only sets support `.intersection()`"
 evalBinary Union (TermSet t) (TermSet t') = pure $ TermSet (Set.union t t')
 evalBinary Union _ _ = Left "Only sets support `.union()`"
 
-evaluateExpression :: Map Name ID
+evaluateExpression :: Bindings
                    -> Expression
-                   -> Either String ID
+                   -> Either String Value
 evaluateExpression b = \case
     EValue term -> applyVariable b term
     EUnary op e' -> evalUnary op =<< evaluateExpression b e'

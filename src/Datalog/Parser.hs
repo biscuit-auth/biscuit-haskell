@@ -57,12 +57,12 @@ instance SetParser 'NotWithinSet 'QuasiQuote where
 instance SetParser 'NotWithinSet 'RegularString where
   parseSet = Set.fromList <$> (char '[' *> commaList0 termParser <* char ']')
 
-type HasTermParsers inSet ctx =
-  ( ConditionalParse (SliceType inSet 'QuasiQuote)       (SliceType inSet ctx)
-  , ConditionalParse (VariableType 'NotWithinSet ctx)    (VariableType inSet ctx)
+type HasTermParsers inSet pof ctx =
+  ( ConditionalParse (SliceType 'QuasiQuote)                   (SliceType ctx)
+  , ConditionalParse (VariableType 'NotWithinSet 'InPredicate) (VariableType inSet pof)
   , SetParser inSet ctx
   )
-type HasParsers ctx = HasTermParsers 'NotWithinSet ctx
+type HasParsers pof ctx = HasTermParsers 'NotWithinSet pof ctx
 
 -- | Parser for an identifier (predicate name, variable name, symbol name, …)
 nameParser :: Parser Text
@@ -85,7 +85,7 @@ commaList0 :: Parser a -> Parser [a]
 commaList0 p =
   sepBy p (skipSpace *> char ',')
 
-predicateParser :: HasParsers ctx => Parser (Predicate' ctx)
+predicateParser :: HasParsers pof ctx => Parser (Predicate' pof ctx)
 predicateParser = do
   skipSpace
   name <- nameParser
@@ -93,14 +93,14 @@ predicateParser = do
   terms <- parens (commaList termParser)
   pure Predicate{name,terms}
 
-unary :: HasParsers ctx => Parser (Expression' ctx)
+unary :: HasParsers 'InPredicate ctx => Parser (Expression' ctx)
 unary = choice
   [ unaryParens
   , unaryNegate
   , unaryLength
   ]
 
-unaryParens :: HasParsers ctx => Parser (Expression' ctx)
+unaryParens :: HasParsers 'InPredicate ctx => Parser (Expression' ctx)
 unaryParens = do
   skipSpace
   _ <- char '('
@@ -110,7 +110,7 @@ unaryParens = do
   _ <- char ')'
   pure $ EUnary Parens e
 
-unaryNegate :: HasParsers ctx => Parser (Expression' ctx)
+unaryNegate :: HasParsers 'InPredicate ctx => Parser (Expression' ctx)
 unaryNegate = do
   skipSpace
   _ <- char '!'
@@ -118,7 +118,7 @@ unaryNegate = do
   e <- expressionParser
   pure $ EUnary Negate e
 
-unaryLength :: HasParsers ctx => Parser (Expression' ctx)
+unaryLength :: HasParsers 'InPredicate ctx => Parser (Expression' ctx)
 unaryLength = do
   skipSpace
   e <- choice
@@ -129,13 +129,13 @@ unaryLength = do
   _ <- string ".length()"
   pure $ EUnary Length e
 
-exprTerm :: HasParsers ctx => Parser (Expression' ctx)
+exprTerm :: HasParsers 'InPredicate ctx => Parser (Expression' ctx)
 exprTerm = choice
   [ unary
   , EValue <$> termParser
   ]
 
-methodParser :: HasParsers ctx => Parser (Expression' ctx)
+methodParser :: HasParsers 'InPredicate ctx => Parser (Expression' ctx)
 methodParser = do
   e1 <- exprTerm
   _ <- char '.'
@@ -154,10 +154,10 @@ methodParser = do
   _ <- char ')'
   pure $ EBinary method e1 e2
 
-expressionParser :: HasParsers ctx => Parser (Expression' ctx)
+expressionParser :: HasParsers 'InPredicate ctx => Parser (Expression' ctx)
 expressionParser = Expr.makeExprParser (methodParser <|> exprTerm) table
 
-table :: HasParsers ctx
+table :: HasParsers 'InPredicate ctx
       => [[Expr.Operator Parser (Expression' ctx)]]
 table = [ [ binary  "*" Mul
           , binary  "/" Div
@@ -176,7 +176,7 @@ table = [ [ binary  "*" Mul
           ]
         ]
 
-binary :: HasParsers ctx
+binary :: HasParsers 'InPredicate ctx
        => Text
        -> Binary
        -> Expr.Operator Parser (Expression' ctx)
@@ -214,12 +214,12 @@ rfc3339DateParser =
       parseDate = parseTimeM False defaultTimeLocale "%FT%T%Q%EZ"
    in parseDate . unpack =<< getDateInput
 
-termParser :: forall inSet ctx
-            . ( HasTermParsers inSet ctx
+termParser :: forall inSet pof ctx
+            . ( HasTermParsers inSet pof ctx
               )
-           => Parser (ID' inSet ctx)
+           => Parser (ID' inSet pof ctx)
 termParser = skipSpace *> choice
-  [ Antiquote <$> ifPresent "slice" (string "${" *> many1 letter <* char '}')
+  [ Antiquote <$> ifPresent "slice" (Slice <$> (string "${" *> many1 letter <* char '}'))
   , Variable <$> ifPresent "var" (char '$' *> nameParser)
   , TermSet <$> parseSet @inSet @ctx
   , Symbol <$> (char '#' *> nameParser)
@@ -234,7 +234,7 @@ termParser = skipSpace *> choice
 
 -- | same as a predicate, but allows empty
 -- | terms list
-ruleHeadParser :: HasParsers ctx => Parser (Predicate' ctx)
+ruleHeadParser :: HasParsers 'InPredicate ctx => Parser (Predicate' 'InPredicate ctx)
 ruleHeadParser = do
   skipSpace
   name <- nameParser
@@ -242,8 +242,8 @@ ruleHeadParser = do
   terms <- parens (commaList0 termParser)
   pure Predicate{name,terms}
 
-ruleBodyParser :: HasParsers ctx
-               => Parser [Either (Predicate' ctx) (Expression' ctx)]
+ruleBodyParser :: HasParsers 'InPredicate ctx
+               => Parser [Either (Predicate' 'InPredicate ctx) (Expression' ctx)]
 ruleBodyParser = do
   let predicateOrExprParser =
             Right <$> expressionParser
@@ -252,7 +252,7 @@ ruleBodyParser = do
          (skipSpace *> char ',')
 
 
-ruleParser :: HasParsers ctx => Parser (Rule' ctx)
+ruleParser :: HasParsers 'InPredicate ctx => Parser (Rule' ctx)
 ruleParser = do
   rhead <- ruleHeadParser
   skipSpace
@@ -266,7 +266,12 @@ compileRule str = case parseOnly (ruleParser @'QuasiQuote) (pack str) of
   Left e       -> fail e
 
 compilePredicate :: String -> Q Exp
-compilePredicate str = case parseOnly (predicateParser @'QuasiQuote) (pack str) of
+compilePredicate str = case parseOnly (predicateParser @'InPredicate @'QuasiQuote) (pack str) of
+  Right result -> [| result |]
+  Left e       -> fail e
+
+compileFact :: String -> Q Exp
+compileFact str = case parseOnly (predicateParser @'InFact @'QuasiQuote) (pack str) of
   Right result -> [| result |]
   Left e       -> fail e
 
@@ -286,10 +291,9 @@ predicate = QuasiQuoter
   , quoteDec = error "not supported"
   }
 
--- todo ensure facts don't carry variables
 fact :: QuasiQuoter
 fact = QuasiQuoter
-  { quoteExp = compilePredicate
+  { quoteExp = compileFact
   , quotePat = error "not supported"
   , quoteType = error "not supported"
   , quoteDec = error "not supported"
@@ -298,7 +302,7 @@ fact = QuasiQuoter
 pRule :: Text -> Either String (Rule' 'QuasiQuote)
 pRule = parseOnly ruleParser
 
-pPred :: Text -> Either String (Predicate' 'QuasiQuote)
+pPred :: Text -> Either String (Predicate' 'InPredicate 'QuasiQuote)
 pPred = parseOnly predicateParser
 
 pTerm :: Text -> Either String QQID

@@ -1,22 +1,24 @@
-{-# LANGUAGE DataKinds            #-}
-{-# LANGUAGE DeriveLift           #-}
-{-# LANGUAGE DerivingStrategies   #-}
-{-# LANGUAGE FlexibleContexts     #-}
-{-# LANGUAGE FlexibleInstances    #-}
-{-# LANGUAGE LambdaCase           #-}
-{-# LANGUAGE NamedFieldPuns       #-}
-{-# LANGUAGE OverloadedStrings    #-}
-{-# LANGUAGE StandaloneDeriving   #-}
-{-# LANGUAGE TemplateHaskell      #-}
-{-# LANGUAGE TypeApplications     #-}
-{-# LANGUAGE TypeFamilies         #-}
-{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE DataKinds                  #-}
+{-# LANGUAGE DeriveLift                 #-}
+{-# LANGUAGE DerivingStrategies         #-}
+{-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE LambdaCase                 #-}
+{-# LANGUAGE NamedFieldPuns             #-}
+{-# LANGUAGE OverloadedStrings          #-}
+{-# LANGUAGE StandaloneDeriving         #-}
+{-# LANGUAGE TemplateHaskell            #-}
+{-# LANGUAGE TypeApplications           #-}
+{-# LANGUAGE TypeFamilies               #-}
+{-# LANGUAGE UndecidableInstances       #-}
 module Datalog.AST where
 
 import           Data.ByteString            (ByteString)
 import           Data.ByteString.Base16     as Hex
 import           Data.Set                   (Set)
 import qualified Data.Set                   as Set
+import           Data.String                (IsString)
 import           Data.Text                  (Text, intercalate, pack)
 import           Data.Text.Encoding         (decodeUtf8)
 import           Data.Time                  (UTCTime)
@@ -27,51 +29,64 @@ import           Language.Haskell.TH.Syntax
 
 data IsWithinSet = NotWithinSet | WithinSet
 data ParsedAs = RegularString | QuasiQuote
+data PredicateOrFact = InPredicate | InFact
 
-type family VariableType (inSet :: IsWithinSet) (ctx :: ParsedAs) where
-  VariableType 'NotWithinSet p = Text
-  VariableType 'WithinSet p    = Void
+type family VariableType (inSet :: IsWithinSet) (pof :: PredicateOrFact) where
+  VariableType 'NotWithinSet 'InPredicate = Text
+  VariableType inSet          pof         = Void
 
-type family SliceType (inSet :: IsWithinSet) (ctx :: ParsedAs) where
-  SliceType s 'RegularString = Void
-  SliceType s 'QuasiQuote    = String
+newtype Slice = Slice String
+  deriving newtype (Eq, Show, Ord, IsString)
+
+instance Lift Slice where
+  lift (Slice name) = [| toLiteralId $(varE $ mkName name) |]
+  liftTyped = unsafeTExpCoerce . lift
+
+type family SliceType (ctx :: ParsedAs) where
+  SliceType 'RegularString = Void
+  SliceType 'QuasiQuote    = Slice
 
 type family SetType (inSet :: IsWithinSet) (ctx :: ParsedAs) where
-  SetType 'NotWithinSet m = Set (ID' 'WithinSet m)
-  SetType 'WithinSet    m = Void
+  SetType 'NotWithinSet ctx = Set (ID' 'WithinSet 'InFact ctx)
+  SetType 'WithinSet    ctx = Void
 
-data ID' (inSet :: IsWithinSet) (ctx :: ParsedAs) =
+data ID' (inSet :: IsWithinSet) (pof :: PredicateOrFact) (ctx :: ParsedAs) =
     Symbol Text
-  | Variable (VariableType inSet ctx)
+  | Variable (VariableType inSet pof)
   | LInteger Int
   | LString Text
   | LDate UTCTime
   | LBytes ByteString
   | LBool Bool
-  | Antiquote (SliceType inSet ctx)
+  | Antiquote (SliceType ctx)
   | TermSet (SetType inSet ctx)
 
-deriving instance ( Eq (VariableType inSet ctx)
-                  , Eq (SliceType inSet ctx)
+deriving instance ( Eq (VariableType inSet pof)
+                  , Eq (SliceType ctx)
                   , Eq (SetType inSet ctx)
-                  ) => Eq (ID' inSet ctx)
+                  ) => Eq (ID' inSet pof ctx)
 
-deriving instance ( Ord (VariableType inSet ctx)
-                  , Ord (SliceType inSet ctx)
+deriving instance ( Ord (VariableType inSet pof)
+                  , Ord (SliceType ctx)
                   , Ord (SetType inSet ctx)
-                  ) => Ord (ID' inSet ctx)
+                  ) => Ord (ID' inSet pof ctx)
 
-deriving instance ( Show (VariableType inSet ctx)
-                  , Show (SliceType inSet ctx)
+deriving instance ( Show (VariableType inSet pof)
+                  , Show (SliceType ctx)
                   , Show (SetType inSet ctx)
-                  ) => Show (ID' inSet ctx)
+                  ) => Show (ID' inSet pof ctx)
 
 -- In a regular AST, antiquotes have already been eliminated
-type ID = ID' 'NotWithinSet 'RegularString
+type ID = ID' 'NotWithinSet 'InPredicate 'RegularString
 -- In an AST parsed from a QuasiQuoter, there might be references to haskell variables
-type QQID = ID' 'NotWithinSet 'QuasiQuote
+type QQID = ID' 'NotWithinSet 'InPredicate 'QuasiQuote
+type Value = ID' 'NotWithinSet 'InFact 'RegularString -- a term that is *not* a variable
 
-instance Lift (ID' 'NotWithinSet 'QuasiQuote) where
+instance  ( Lift (VariableType inSet pof)
+          , Lift (SetType inSet ctx)
+          , Lift (SliceType ctx)
+          )
+         => Lift (ID' inSet pof ctx) where
   lift (Symbol n)      = [| Symbol n |]
   lift (Variable n)    = [| Variable n |]
   lift (LInteger i)    = [| LInteger i |]
@@ -80,26 +95,12 @@ instance Lift (ID' 'NotWithinSet 'QuasiQuote) where
   lift (LBool b)       = [| LBool  b |]
   lift (TermSet terms) = [| TermSet terms |]
   lift (LDate t)       = [| LDate (read $(lift $ show t)) |]
-  lift (Antiquote n)   = [| toLiteralId $(varE $ mkName n) |]
+  lift (Antiquote s)   = [| s |]
 
   liftTyped = unsafeTExpCoerce . lift
-
-instance Lift (ID' 'WithinSet 'QuasiQuote) where
-  liftTyped = unsafeTExpCoerce . lift
-  lift =
-    \case
-      Symbol i -> lift (Symbol @'WithinSet @'QuasiQuote i)
-      LInteger i -> lift (LInteger @'WithinSet @'QuasiQuote i)
-      LString i -> lift (LString @'WithinSet @'QuasiQuote i)
-      LDate i -> lift (LDate @'WithinSet @'QuasiQuote i)
-      LBytes i -> lift (LBytes @'WithinSet @'QuasiQuote i)
-      LBool i -> lift (LBool @'WithinSet @'QuasiQuote i)
-      Antiquote i -> lift (Antiquote @'WithinSet @'QuasiQuote i)
-      Variable v -> absurd v
-      TermSet v -> absurd v
 
 class ToLiteralId t where
-  toLiteralId :: t -> ID
+  toLiteralId :: t -> ID' inSet pof 'RegularString
 
 instance ToLiteralId Text where
   toLiteralId = LString
@@ -113,8 +114,8 @@ instance ToLiteralId ByteString where
 instance ToLiteralId UTCTime where
   toLiteralId = LDate
 
-toSetTerm :: ID' 'NotWithinSet 'RegularString
-          -> Maybe (ID' 'WithinSet 'RegularString)
+toSetTerm :: Value
+          -> Maybe (ID' 'WithinSet 'InFact 'RegularString)
 toSetTerm = \case
   Symbol i -> Just $ Symbol i
   LInteger i -> Just $ LInteger i
@@ -122,8 +123,8 @@ toSetTerm = \case
   LDate i -> Just $ LDate i
   LBytes i -> Just $ LBytes i
   LBool i -> Just $ LBool i
-  Variable _ -> Nothing
   TermSet _ -> Nothing
+  Variable v -> absurd v
   Antiquote v -> absurd v
 
 renderId :: ID -> Text
@@ -139,7 +140,20 @@ renderId = \case
   TermSet terms -> "[" <> intercalate "," (renderInnerId <$> Set.toList terms) <> "]"
   Antiquote v   -> absurd v
 
-renderInnerId :: ID' 'WithinSet 'RegularString -> Text
+renderFactId :: ID' 'NotWithinSet 'InFact 'RegularString -> Text
+renderFactId = \case
+  Symbol name   -> "#" <> name
+  LInteger int  -> pack $ show int
+  LString str   -> pack $ show str
+  LDate time    -> pack $ show time
+  LBytes bs     -> "hex:" <> decodeUtf8 (Hex.encode bs)
+  LBool True    -> "true"
+  LBool False   -> "false"
+  TermSet terms -> "[" <> intercalate "," (renderInnerId <$> Set.toList terms) <> "]"
+  Variable v    -> absurd v
+  Antiquote v   -> absurd v
+
+renderInnerId :: ID' 'WithinSet 'InFact 'RegularString -> Text
 renderInnerId = \case
   Symbol v    -> renderId (Symbol v)
   LInteger v  -> renderId (LInteger v)
@@ -151,47 +165,51 @@ renderInnerId = \case
   Variable v  -> absurd v
   TermSet v   -> absurd v
 
-data Predicate' (ctx :: ParsedAs) = Predicate
+data Predicate' (pof :: PredicateOrFact) (ctx :: ParsedAs) = Predicate
   { name  :: Text
-  , terms :: [ID' 'NotWithinSet ctx]
+  , terms :: [ID' 'NotWithinSet pof ctx]
   }
 
-deriving instance ( Eq (ID' 'NotWithinSet ctx)
-                  ) => Eq (Predicate' ctx)
-deriving instance ( Ord (ID' 'NotWithinSet ctx)
-                  ) => Ord (Predicate' ctx)
-deriving instance ( Show (ID' 'NotWithinSet ctx)
-                  ) => Show (Predicate' ctx)
+deriving instance ( Eq (ID' 'NotWithinSet pof ctx)
+                  ) => Eq (Predicate' pof ctx)
+deriving instance ( Ord (ID' 'NotWithinSet pof ctx)
+                  ) => Ord (Predicate' pof ctx)
+deriving instance ( Show (ID' 'NotWithinSet pof ctx)
+                  ) => Show (Predicate' pof ctx)
 
 
-deriving instance Lift (ID' 'NotWithinSet ctx) => Lift (Predicate' ctx)
+deriving instance Lift (ID' 'NotWithinSet pof ctx) => Lift (Predicate' pof ctx)
 
-type Predicate = Predicate' 'RegularString
-type Fact = Predicate' 'RegularString
+type Predicate = Predicate' 'InPredicate 'RegularString
+type Fact = Predicate' 'InFact 'RegularString
 
 renderPredicate :: Predicate -> Text
 renderPredicate Predicate{name,terms} =
   name <> "(" <> intercalate ", " (fmap renderId terms) <> ")"
 
+renderFact :: Fact -> Text
+renderFact Predicate{name,terms} =
+  name <> "(" <> intercalate ", " (fmap renderFactId terms) <> ")"
+
 data Rule' ctx = Rule
-  { rhead       :: Predicate' ctx
-  , body        :: [Predicate' ctx]
+  { rhead       :: Predicate' 'InPredicate ctx
+  , body        :: [Predicate' 'InPredicate ctx]
   , expressions :: [Expression' ctx]
   }
 
-deriving instance ( Eq (Predicate' ctx)
+deriving instance ( Eq (Predicate' 'InPredicate ctx)
                   , Eq (Expression' ctx)
                   ) => Eq (Rule' ctx)
-deriving instance ( Ord (Predicate' ctx)
+deriving instance ( Ord (Predicate' 'InPredicate ctx)
                   , Ord (Expression' ctx)
                   ) => Ord (Rule' ctx)
-deriving instance ( Show (Predicate' ctx)
+deriving instance ( Show (Predicate' 'InPredicate ctx)
                   , Show (Expression' ctx)
                   ) => Show (Rule' ctx)
 
 type Rule = Rule' 'RegularString
 
-deriving instance (Lift (Predicate' ctx), Lift (Expression' ctx)) => Lift (Rule' ctx)
+deriving instance (Lift (Predicate' 'InPredicate ctx), Lift (Expression' ctx)) => Lift (Rule' ctx)
 
 renderRule :: Rule' 'RegularString -> Text
 renderRule Rule{rhead,body} =
@@ -224,14 +242,14 @@ data Binary =
   deriving (Eq, Ord, Show, Lift)
 
 data Expression' (ctx :: ParsedAs) =
-    EValue (ID' 'NotWithinSet ctx)
+    EValue (ID' 'NotWithinSet 'InPredicate ctx)
   | EUnary Unary (Expression' ctx)
   | EBinary Binary (Expression' ctx) (Expression' ctx)
 
-deriving instance Eq (ID' 'NotWithinSet ctx) => Eq (Expression' ctx)
-deriving instance Ord (ID' 'NotWithinSet ctx) => Ord (Expression' ctx)
-deriving instance Lift (ID' 'NotWithinSet ctx) => Lift (Expression' ctx)
-deriving instance Show (ID' 'NotWithinSet ctx) => Show (Expression' ctx)
+deriving instance Eq   (ID' 'NotWithinSet 'InPredicate ctx) => Eq (Expression' ctx)
+deriving instance Ord  (ID' 'NotWithinSet 'InPredicate ctx) => Ord (Expression' ctx)
+deriving instance Lift (ID' 'NotWithinSet 'InPredicate ctx) => Lift (Expression' ctx)
+deriving instance Show (ID' 'NotWithinSet 'InPredicate ctx) => Show (Expression' ctx)
 
 type Expression = Expression' 'RegularString
 

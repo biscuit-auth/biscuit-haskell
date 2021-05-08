@@ -7,7 +7,7 @@ import           Test.Tasty
 import           Test.Tasty.HUnit
 
 import           Datalog.AST
-import           Datalog.Parser   (predicate, rule)
+import           Datalog.Parser   (fact, rule)
 
 specs :: TestTree
 specs = testGroup "Datalog quasiquoter"
@@ -19,8 +19,8 @@ specs = testGroup "Datalog quasiquoter"
 
 basicFact :: TestTree
 basicFact = testCase "Basic fact" $
-  let actual :: Predicate
-      actual = [predicate|right(#authority, "file1", #read)|]
+  let actual :: Fact
+      actual = [fact|right(#authority, "file1", #read)|]
    in actual @?=
     Predicate "right" [ Symbol "authority"
                       , LString "file1"
@@ -41,8 +41,8 @@ antiquotedFact :: TestTree
 antiquotedFact = testCase "Basic fact" $
   let toto :: Text
       toto = "test"
-      actual :: Predicate
-      actual = [predicate|right(#authority, ${toto}, #read)|]
+      actual :: Fact
+      actual = [fact|right(#authority, ${toto}, #read)|]
    in actual @?=
     Predicate "right" [ Symbol "authority"
                       , LString "test"
