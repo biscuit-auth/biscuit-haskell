@@ -45,7 +45,7 @@ import           Data.ByteString           (ByteString)
 import           Data.Text                 (Text)
 import           Language.Haskell.TH.Quote (QuasiQuoter)
 
-import           Datalog.AST               (Fact, Rule)
+import           Datalog.AST               (Fact, Query, Rule)
 
 data KeyPair
 data PublicKey
@@ -55,7 +55,6 @@ data KeyError deriving Show
 data ParseError deriving Show
 data SignatureError deriving Show
 data VerificationError deriving Show
-data Check
 data Limits
 
 -- | Block data. This can be built with a dedicated `block` quasiquoter,
@@ -70,7 +69,7 @@ blockFact :: Fact -> Block
 blockFact = error "todo"
 blockRule :: Rule -> Block
 blockRule = error "todo"
-blockCheck :: Check -> Block
+blockCheck :: Query -> Block
 blockCheck = error "todo"
 blockContext :: Text -> Block
 blockContext = error "todo"
@@ -90,7 +89,7 @@ verifierFact :: Fact -> Verifier
 verifierFact = error "todo"
 verifierRule :: Rule -> Verifier
 verifierRule = error "todo"
-verifierCheck :: Check -> Verifier
+verifierCheck :: Query -> Verifier
 verifierCheck = error "todo"
 
 -- | Create a new keypair with a random private key

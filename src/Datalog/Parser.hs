@@ -33,6 +33,7 @@ import           Data.Void                      (Void)
 import           Instances.TH.Lift              ()
 import           Language.Haskell.TH
 import           Language.Haskell.TH.Quote
+import           Language.Haskell.TH.Syntax     (Lift)
 
 import           Datalog.AST
 
@@ -242,41 +243,38 @@ ruleHeadParser = do
   pure Predicate{name,terms}
 
 ruleBodyParser :: HasParsers 'InPredicate ctx
-               => Parser [Either (Predicate' 'InPredicate ctx) (Expression' ctx)]
+               => Parser ([Predicate' 'InPredicate ctx], [Expression' ctx])
 ruleBodyParser = do
   let predicateOrExprParser =
             Right <$> expressionParser
         <|> Left <$> predicateParser
-  sepBy1 (skipSpace *> predicateOrExprParser)
-         (skipSpace *> char ',')
-
+  elems <- sepBy1 (skipSpace *> predicateOrExprParser)
+                  (skipSpace *> char ',')
+  pure $ partitionEithers elems
 
 ruleParser :: HasParsers 'InPredicate ctx => Parser (Rule' ctx)
 ruleParser = do
   rhead <- ruleHeadParser
   skipSpace
   void $ string "<-"
-  (body, expressions) <- partitionEithers <$> ruleBodyParser
+  (body, expressions) <- ruleBodyParser
   pure Rule{rhead, body, expressions}
 
-compileRule :: String -> Q Exp
-compileRule str = case parseOnly (ruleParser @'QuasiQuote) (pack str) of
-  Right result -> [| result |]
-  Left e       -> fail e
+queryParser :: HasParsers 'InPredicate ctx => Parser (Query' ctx)
+queryParser =
+  fmap (uncurry QueryItem) <$> sepBy1 ruleBodyParser (skipSpace *> string "or ")
 
-compilePredicate :: String -> Q Exp
-compilePredicate str = case parseOnly (predicateParser @'InPredicate @'QuasiQuote) (pack str) of
-  Right result -> [| result |]
-  Left e       -> fail e
+checkParser :: HasParsers 'InPredicate ctx => Parser (Query' ctx)
+checkParser = string "check if " *> queryParser
 
-compileFact :: String -> Q Exp
-compileFact str = case parseOnly (predicateParser @'InFact @'QuasiQuote) (pack str) of
+compileParser :: Lift a => Parser a -> String -> Q Exp
+compileParser p str = case parseOnly p (pack str) of
   Right result -> [| result |]
   Left e       -> fail e
 
 rule :: QuasiQuoter
 rule = QuasiQuoter
-  { quoteExp = compileRule
+  { quoteExp = compileParser (ruleParser @'QuasiQuote)
   , quotePat = error "not supported"
   , quoteType = error "not supported"
   , quoteDec = error "not supported"
@@ -284,7 +282,7 @@ rule = QuasiQuoter
 
 predicate :: QuasiQuoter
 predicate = QuasiQuoter
-  { quoteExp = compilePredicate
+  { quoteExp = compileParser (predicateParser @'InPredicate @'QuasiQuote)
   , quotePat = error "not supported"
   , quoteType = error "not supported"
   , quoteDec = error "not supported"
@@ -292,7 +290,15 @@ predicate = QuasiQuoter
 
 fact :: QuasiQuoter
 fact = QuasiQuoter
-  { quoteExp = compileFact
+  { quoteExp = compileParser (predicateParser @'InFact @'QuasiQuote)
+  , quotePat = error "not supported"
+  , quoteType = error "not supported"
+  , quoteDec = error "not supported"
+  }
+
+check :: QuasiQuoter
+check = QuasiQuoter
+  { quoteExp = compileParser (checkParser @'QuasiQuote)
   , quotePat = error "not supported"
   , quoteType = error "not supported"
   , quoteDec = error "not supported"

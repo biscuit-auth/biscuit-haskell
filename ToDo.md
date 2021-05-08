@@ -7,7 +7,7 @@
 - [ ] check all sensitive buffers are filled with zeroes after use
 - [ ] investigate zeroing the pk bytestring buffer on free
 - [x] forbid use of variables in facts (through the AST)
-- [ ] parse `check if` conditions
+- [x] parse `check if` conditions
 - [ ] parse `allow` / `deny` conditions
 - [ ] implement verifier limits (facts count, iterations count, timeout)
 - [ ] parse whole policies (with an associated quasiquoter)

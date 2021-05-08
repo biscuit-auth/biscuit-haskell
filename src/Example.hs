@@ -8,7 +8,7 @@ import           Data.Functor    (($>))
 import           Data.Time       (getCurrentTime)
 
 import           Biscuit
-import           Datalog.Parser  (fact, rule)
+import           Datalog.Parser  (check, fact)
 
 privateKey :: PrivateKey
 privateKey = either (error . show) id $ parsePrivateKeyB64 "todo"
@@ -23,7 +23,7 @@ creation = do
         ]
   biscuit <- mkBiscuit privateKey authority
   let block1 = fold
-        [ blockRule [rule|test($var) <- other_pred($var, "value")|]
+        [ blockCheck [check|check if current_time(#ambient, $time), $time < 2021-05-08T00:00:00Z|]
         ]
   newBiscuit <- addBlock block1 biscuit
   pure $ serializeB64 newBiscuit

@@ -9,8 +9,8 @@ import           Test.Tasty
 import           Test.Tasty.HUnit
 
 import           Datalog.AST
-import           Datalog.Parser       (expressionParser, predicateParser,
-                                       ruleParser, termParser)
+import           Datalog.Parser       (checkParser, expressionParser,
+                                       predicateParser, ruleParser, termParser)
 
 parseTerm :: Text -> Either String ID
 parseTerm = parseOnly termParser
@@ -27,6 +27,9 @@ parseRule = parseOnly ruleParser
 parseExpression :: Text -> Either String Expression
 parseExpression = parseOnly expressionParser
 
+parseCheck :: Text -> Either String Query
+parseCheck = parseOnly checkParser
+
 specs :: TestTree
 specs = testGroup "datalog parser"
   [ factWithDate
@@ -37,6 +40,7 @@ specs = testGroup "datalog parser"
   , constraints
   , constrainedRule
   , constrainedRuleOrdering
+  , checkParsing
   ]
 
 termsGroup :: TestTree
@@ -261,4 +265,21 @@ operatorPrecedences = testGroup "mixed-precedence operators"
                  )
                  (EValue $ LInteger 3)
               )
+  ]
+
+checkParsing :: TestTree
+checkParsing = testGroup "check blocks"
+  [ testCase "Simple check" $
+      parseCheck "check if true" @?=
+        Right [QueryItem [] [EValue $ LBool True]]
+  , testCase "Multiple groups" $
+      parseCheck
+        "check if fact(#ambient, $var), $var == true or \
+        \other(#authority, $var), $var == 2" @?=
+          Right
+            [ QueryItem [Predicate "fact" [Symbol "ambient", Variable "var"]]
+                        [EBinary Equal (EValue (Variable "var")) (EValue (LBool True))]
+            , QueryItem [Predicate "other" [Symbol "authority", Variable "var"]]
+                        [EBinary Equal (EValue (Variable "var")) (EValue (LInteger 2))]
+            ]
   ]

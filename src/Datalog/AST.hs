@@ -191,6 +191,26 @@ renderFact :: Fact -> Text
 renderFact Predicate{name,terms} =
   name <> "(" <> intercalate ", " (fmap renderFactId terms) <> ")"
 
+data QueryItem' ctx = QueryItem
+  { qBody        :: [Predicate' 'InPredicate ctx]
+  , qExpressions :: [Expression' ctx]
+  }
+
+type Query' ctx = [QueryItem' ctx]
+type Query = Query' 'RegularString
+
+deriving instance ( Eq (Predicate' 'InPredicate ctx)
+                  , Eq (Expression' ctx)
+                  ) => Eq (QueryItem' ctx)
+deriving instance ( Ord (Predicate' 'InPredicate ctx)
+                  , Ord (Expression' ctx)
+                  ) => Ord (QueryItem' ctx)
+deriving instance ( Show (Predicate' 'InPredicate ctx)
+                  , Show (Expression' ctx)
+                  ) => Show (QueryItem' ctx)
+
+deriving instance (Lift (Predicate' 'InPredicate ctx), Lift (Expression' ctx)) => Lift (QueryItem' ctx)
+
 data Rule' ctx = Rule
   { rhead       :: Predicate' 'InPredicate ctx
   , body        :: [Predicate' 'InPredicate ctx]
