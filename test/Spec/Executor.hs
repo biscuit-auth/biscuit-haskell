@@ -40,7 +40,7 @@ grandparent = testCase "Basic grandparent rule" $
         ]
 
 expr :: Text -> Expression
-expr = either error id . (parseOnly expressionParser)
+expr = either error id . parseOnly expressionParser
 
 exprEval :: TestTree
 exprEval = do

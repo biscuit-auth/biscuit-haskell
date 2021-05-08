@@ -3,13 +3,11 @@
 {-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE NamedFieldPuns    #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE QuasiQuotes       #-}
 module Datalog.Executor where
 
 import           Debug.Trace
 
-import           Control.Monad           (mfilter)
-import           Control.Monad           (join)
+import           Control.Monad           (join, mfilter)
 import           Data.Bitraversable      (bitraverse)
 import qualified Data.ByteString         as ByteString
 import           Data.Either.Combinators (maybeToRight)
@@ -34,11 +32,11 @@ data World
  }
 
 instance Show World where
-  show World{rules,facts} = unpack $ intercalate "\n" $ join $
+  show World{rules,facts} = unpack . intercalate "\n" $ join
     [ [ "Rules" ]
-    , renderRule <$> (Set.toList rules)
+    , renderRule <$> Set.toList rules
     , [ "Facts" ]
-    , renderFact <$> (Set.toList facts)
+    , renderFact <$> Set.toList facts
     ]
 
 rF :: Set Fact -> IO ()
@@ -116,8 +114,8 @@ mergeBindings =
    in keepConsistent . combinations
 
 reduceCandidateBindings :: Set Name
-                        -> [Set (Bindings)]
-                        -> Set (Bindings)
+                        -> [Set Bindings]
+                        -> Set Bindings
 reduceCandidateBindings allVariables matches =
   let allCombinations :: [[Bindings]]
       allCombinations = getCombinations $ Set.toList <$> matches
@@ -127,7 +125,7 @@ reduceCandidateBindings allVariables matches =
 
 getCandidateBindings :: Set Fact
                      -> [Predicate]
-                     -> [Set (Bindings)]
+                     -> [Set Bindings]
 getCandidateBindings facts predicates =
    let keepFacts p = Set.map (factMatchesPredicate p) facts
     in keepFacts <$> predicates

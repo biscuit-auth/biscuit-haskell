@@ -40,7 +40,7 @@ specs = testGroup "datalog parser"
   ]
 
 termsGroup :: TestTree
-termsGroup = testGroup "Parse terms" $
+termsGroup = testGroup "Parse terms"
   [ testCase "Symbol" $ parseTerm "#ambient" @?= Right (Symbol "ambient")
   , testCase "String" $ parseTerm "\"file1 a hello - 123_\"" @?= Right (LString "file1 a hello - 123_")
   , testCase "Positive integer" $ parseTerm "123" @?= Right (LInteger 123)
@@ -52,7 +52,7 @@ termsGroup = testGroup "Parse terms" $
   ]
 
 termsGroupQQ :: TestTree
-termsGroupQQ = testGroup "Parse terms (in a QQ setting)" $
+termsGroupQQ = testGroup "Parse terms (in a QQ setting)"
   [ testCase "Symbol" $ parseTermQQ "#ambient" @?= Right (Symbol "ambient")
   , testCase "String" $ parseTermQQ "\"file1 a hello - 123_\"" @?= Right (LString "file1 a hello - 123_")
   , testCase "Positive integer" $ parseTermQQ "123" @?= Right (LInteger 123)
@@ -216,7 +216,7 @@ constraints = testGroup "Parse expressions"
   ]
 
 operatorPrecedences :: TestTree
-operatorPrecedences = testGroup "mixed-precedence operators" $
+operatorPrecedences = testGroup "mixed-precedence operators"
   [ testCase "< +" $
       parseExpression " 1 < $test + 2 " @?=
         Right (EBinary LessThan

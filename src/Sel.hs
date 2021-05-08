@@ -223,7 +223,7 @@ computeHashMSums publicKeys messages f = do
 
 computeHashPSums :: [ByteString] -- parameters
                  -> (Point -> IO a) -> IO a
-computeHashPSums parameters f = do
+computeHashPSums parameters f =
   withPoint $ \diAiRes -> do
     sodium_memzero diAiRes crypto_core_ristretto255_bytes
     for_ parameters $ \aa ->

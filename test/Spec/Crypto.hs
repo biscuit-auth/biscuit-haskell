@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{- HLINT ignore "Reduce duplication" -}
 module Spec.Crypto (specs) where
 
 import           Test.Tasty

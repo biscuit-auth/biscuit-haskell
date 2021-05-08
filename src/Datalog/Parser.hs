@@ -115,8 +115,7 @@ unaryNegate = do
   skipSpace
   _ <- char '!'
   skipSpace
-  e <- expressionParser
-  pure $ EUnary Negate e
+  EUnary Negate <$> expressionParser
 
 unaryLength :: HasParsers 'InPredicate ctx => Parser (Expression' ctx)
 unaryLength = do
