@@ -286,6 +286,15 @@ predicate = QuasiQuoter
   , quoteDec = error "not supported"
   }
 
+-- todo ensure facts don't carry variables
+fact :: QuasiQuoter
+fact = QuasiQuoter
+  { quoteExp = compilePredicate
+  , quotePat = error "not supported"
+  , quoteType = error "not supported"
+  , quoteDec = error "not supported"
+  }
+
 pRule :: Text -> Either String (Rule' 'QuasiQuote)
 pRule = parseOnly ruleParser
 

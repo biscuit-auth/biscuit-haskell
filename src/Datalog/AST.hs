@@ -110,6 +110,9 @@ instance ToLiteralId Bool where
 instance ToLiteralId ByteString where
   toLiteralId = LBytes
 
+instance ToLiteralId UTCTime where
+  toLiteralId = LDate
+
 toSetTerm :: ID' 'NotWithinSet 'RegularString
           -> Maybe (ID' 'WithinSet 'RegularString)
 toSetTerm = \case

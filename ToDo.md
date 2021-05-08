@@ -1,6 +1,6 @@
 # ToDo
 
-- [ ] user-facing API
+- [x] spec user-facing API
 - [ ] implement user-facing API
 - [ ] handle revocation ids
 - [ ] enforce `#authority` / `#ambient` restrictions in blocks
