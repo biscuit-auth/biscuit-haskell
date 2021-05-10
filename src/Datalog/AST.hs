@@ -14,6 +14,7 @@
 {-# LANGUAGE UndecidableInstances       #-}
 module Datalog.AST where
 
+import           Control.Applicative        ((<|>))
 import           Data.ByteString            (ByteString)
 import           Data.ByteString.Base16     as Hex
 import           Data.Set                   (Set)
@@ -290,9 +291,10 @@ fromStack = error "todo"
 
 type Block = Block' 'RegularString
 data Block' (ctx :: ParsedAs) = Block
-  { bRules  :: [Rule' ctx]
-  , bFacts  :: [Predicate' 'InFact ctx]
-  , bChecks :: [Check' ctx]
+  { bRules   :: [Rule' ctx]
+  , bFacts   :: [Predicate' 'InFact ctx]
+  , bChecks  :: [Check' ctx]
+  , bContext :: Maybe Text
   }
 
 deriving instance ( Eq (Predicate' 'InFact ctx)
@@ -314,12 +316,14 @@ instance Semigroup (Block' ctx) where
   b1 <> b2 = Block { bRules = bRules b1 <> bRules b2
                    , bFacts = bFacts b1 <> bFacts b2
                    , bChecks = bChecks b1 <> bChecks b2
+                   , bContext = bContext b2 <|> bContext b1
                    }
 
 instance Monoid (Block' ctx) where
   mempty = Block { bRules = []
                  , bFacts = []
                  , bChecks = []
+                 , bContext = Nothing
                  }
 
 type Verifier = Verifier' 'RegularString
@@ -363,9 +367,9 @@ deriving instance ( Show (Predicate' 'InFact ctx)
 
 elementToBlock :: BlockElement' ctx -> Block' ctx
 elementToBlock = \case
-   BlockRule r  -> Block [r] [] []
-   BlockFact f  -> Block [] [f] []
-   BlockCheck c -> Block [] [] [c]
+   BlockRule r  -> Block [r] [] [] Nothing
+   BlockFact f  -> Block [] [f] [] Nothing
+   BlockCheck c -> Block [] [] [c] Nothing
    BlockComment -> mempty
 
 data VerifierElement' ctx

@@ -436,6 +436,7 @@ verifierParsing = testGroup "Simple verifiers"
            ]
           bFacts = []
           bChecks = []
+          bContext = Nothing
           vPolicies =
             [ (Allow, [QueryItem [ p "operation" [sAmb, sRead]
                                  , p "article"   [sAmb, vBlogId, vArticleId]

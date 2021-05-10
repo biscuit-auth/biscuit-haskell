@@ -12,6 +12,7 @@ module Biscuit
   , verifierFact
   , verifierRule
   , verifierCheck
+  , verifierPolicy
   , newKeyPair
   , getPublicKey
   , getPrivateKey
@@ -42,7 +43,9 @@ module Biscuit
 import           Data.ByteString (ByteString)
 import           Data.Text       (Text)
 
-import           Datalog.AST     (Block, Fact, Query, Rule, Verifier)
+import           Datalog.AST     (Block, BlockElement' (..), Check, Fact,
+                                  Policy, Rule, Verifier, VerifierElement' (..),
+                                  bContext, elementToBlock, elementToVerifier)
 
 data KeyPair
 data PublicKey
@@ -55,20 +58,22 @@ data VerificationError deriving Show
 data Limits
 
 blockFact :: Fact -> Block
-blockFact = error "todo"
+blockFact = elementToBlock . BlockFact
 blockRule :: Rule -> Block
-blockRule = error "todo"
-blockCheck :: Query -> Block
-blockCheck = error "todo"
+blockRule = elementToBlock . BlockRule
+blockCheck :: Check -> Block
+blockCheck = elementToBlock . BlockCheck
 blockContext :: Text -> Block
-blockContext = error "todo"
+blockContext c = mempty { bContext = Just c }
 
 verifierFact :: Fact -> Verifier
-verifierFact = error "todo"
+verifierFact = elementToVerifier . BlockElement . BlockFact
 verifierRule :: Rule -> Verifier
-verifierRule = error "todo"
-verifierCheck :: Query -> Verifier
-verifierCheck = error "todo"
+verifierRule = elementToVerifier . BlockElement . BlockRule
+verifierCheck :: Check -> Verifier
+verifierCheck = elementToVerifier . BlockElement . BlockCheck
+verifierPolicy :: Policy -> Verifier
+verifierPolicy = elementToVerifier . VerifierPolicy
 
 -- | Create a new keypair with a random private key
 newKeyPair :: IO KeyPair
@@ -158,7 +163,6 @@ verifyBiscuitWithLimits = error "todo"
 -- bothering with constructing a verifier.
 checkBiscuitSignature :: Biscuit -> PublicKey -> IO (Either SignatureError ())
 checkBiscuitSignature = error "todo"
-
 
 ----- these functions are not meant to be in the top-level module, but they are not
 -- implemented yet, so i'm putting them there for now
