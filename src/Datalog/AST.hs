@@ -199,6 +199,13 @@ data QueryItem' ctx = QueryItem
 type Query' ctx = [QueryItem' ctx]
 type Query = Query' 'RegularString
 
+type Check' ctx = Query' ctx
+type Check = Query
+data PolicyType = Allow | Deny
+  deriving (Eq, Show, Ord, Lift)
+type Policy' ctx = (PolicyType, Query' ctx)
+type Policy = (PolicyType, Query)
+
 deriving instance ( Eq (Predicate' 'InPredicate ctx)
                   , Eq (Expression' ctx)
                   ) => Eq (QueryItem' ctx)
@@ -280,3 +287,97 @@ data Op =
 
 fromStack :: [Op] -> Either String Expression
 fromStack = error "todo"
+
+type Block = Block' 'RegularString
+data Block' (ctx :: ParsedAs) = Block
+  { bRules  :: [Rule' ctx]
+  , bFacts  :: [Predicate' 'InFact ctx]
+  , bChecks :: [Check' ctx]
+  }
+
+deriving instance ( Eq (Predicate' 'InFact ctx)
+                  , Eq (Rule' ctx)
+                  , Eq (QueryItem' ctx)
+                  ) => Eq (Block' ctx)
+
+deriving instance ( Show (Predicate' 'InFact ctx)
+                  , Show (Rule' ctx)
+                  , Show (QueryItem' ctx)
+                  ) => Show (Block' ctx)
+
+deriving instance ( Lift (Predicate' 'InFact ctx)
+                  , Lift (Rule' ctx)
+                  , Lift (QueryItem' ctx)
+                  ) => Lift (Block' ctx)
+
+instance Semigroup (Block' ctx) where
+  b1 <> b2 = Block { bRules = bRules b1 <> bRules b2
+                   , bFacts = bFacts b1 <> bFacts b2
+                   , bChecks = bChecks b1 <> bChecks b2
+                   }
+
+instance Monoid (Block' ctx) where
+  mempty = Block { bRules = []
+                 , bFacts = []
+                 , bChecks = []
+                 }
+
+type Verifier = Verifier' 'RegularString
+data Verifier' (ctx :: ParsedAs) = Verifier
+  { vPolicies :: [Policy' ctx]
+  , vBlock    :: Block' ctx
+  }
+
+instance Semigroup (Verifier' ctx) where
+  v1 <> v2 = Verifier { vPolicies = vPolicies v1 <> vPolicies v2
+                      , vBlock = vBlock v1 <> vBlock v2
+                      }
+
+instance Monoid (Verifier' ctx) where
+  mempty = Verifier { vPolicies = []
+                    , vBlock = mempty
+                    }
+
+deriving instance ( Eq (Block' ctx)
+                  , Eq (QueryItem' ctx)
+                  ) => Eq (Verifier' ctx)
+
+deriving instance ( Show (Block' ctx)
+                  , Show (QueryItem' ctx)
+                  ) => Show (Verifier' ctx)
+
+deriving instance ( Lift (Block' ctx)
+                  , Lift (QueryItem' ctx)
+                  ) => Lift (Verifier' ctx)
+
+data BlockElement' ctx
+  = BlockFact (Predicate' 'InFact ctx)
+  | BlockRule (Rule' ctx)
+  | BlockCheck (Check' ctx)
+  | BlockComment
+
+deriving instance ( Show (Predicate' 'InFact ctx)
+                  , Show (Rule' ctx)
+                  , Show (QueryItem' ctx)
+                  ) => Show (BlockElement' ctx)
+
+elementToBlock :: BlockElement' ctx -> Block' ctx
+elementToBlock = \case
+   BlockRule r  -> Block [r] [] []
+   BlockFact f  -> Block [] [f] []
+   BlockCheck c -> Block [] [] [c]
+   BlockComment -> mempty
+
+data VerifierElement' ctx
+  = VerifierPolicy (Policy' ctx)
+  | BlockElement (BlockElement' ctx)
+
+deriving instance ( Show (Predicate' 'InFact ctx)
+                  , Show (Rule' ctx)
+                  , Show (QueryItem' ctx)
+                  ) => Show (VerifierElement' ctx)
+
+elementToVerifier :: VerifierElement' ctx -> Verifier' ctx
+elementToVerifier = \case
+  VerifierPolicy p -> Verifier [p] mempty
+  BlockElement be  -> Verifier [] (elementToBlock be)

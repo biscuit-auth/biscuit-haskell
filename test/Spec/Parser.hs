@@ -1,5 +1,6 @@
 {-# LANGUAGE DataKinds         #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards   #-}
 module Spec.Parser (specs) where
 
 import           Data.Attoparsec.Text (parseOnly)
@@ -10,7 +11,8 @@ import           Test.Tasty.HUnit
 
 import           Datalog.AST
 import           Datalog.Parser       (checkParser, expressionParser,
-                                       predicateParser, ruleParser, termParser)
+                                       policyParser, predicateParser,
+                                       ruleParser, termParser, verifierParser)
 
 parseTerm :: Text -> Either String ID
 parseTerm = parseOnly termParser
@@ -27,20 +29,29 @@ parseRule = parseOnly ruleParser
 parseExpression :: Text -> Either String Expression
 parseExpression = parseOnly expressionParser
 
-parseCheck :: Text -> Either String Query
+parseCheck :: Text -> Either String Check
 parseCheck = parseOnly checkParser
+
+parseVerifier :: Text -> Either String Verifier
+parseVerifier = parseOnly verifierParser
+
+parsePolicy :: Text -> Either String Policy
+parsePolicy = parseOnly policyParser
 
 specs :: TestTree
 specs = testGroup "datalog parser"
   [ factWithDate
   , simpleFact
   , simpleRule
+  , multilineRule
   , termsGroup
   , termsGroupQQ
   , constraints
   , constrainedRule
   , constrainedRuleOrdering
   , checkParsing
+  , policyParsing
+  , verifierParsing
   ]
 
 termsGroup :: TestTree
@@ -80,6 +91,14 @@ factWithDate = testCase "Parse fact containing a date" $
 simpleRule :: TestTree
 simpleRule = testCase "Parse simple rule" $
   parseRule "right(#authority, $0, #read) <- resource( #ambient, $0), operation(#ambient, #read)" @?=
+    Right (Rule (Predicate "right" [Symbol "authority", Variable "0", Symbol "read"])
+                [ Predicate "resource" [Symbol "ambient", Variable "0"]
+                , Predicate "operation" [Symbol "ambient", Symbol "read"]
+                ] [])
+
+multilineRule :: TestTree
+multilineRule = testCase "Parse multiline rule" $
+  parseRule "right(#authority, $0, #read) <-\n resource( #ambient, $0),\n operation(#ambient, #read)" @?=
     Right (Rule (Predicate "right" [Symbol "authority", Variable "0", Symbol "read"])
                 [ Predicate "resource" [Symbol "ambient", Variable "0"]
                 , Predicate "operation" [Symbol "ambient", Symbol "read"]
@@ -282,4 +301,152 @@ checkParsing = testGroup "check blocks"
             , QueryItem [Predicate "other" [Symbol "authority", Variable "var"]]
                         [EBinary Equal (EValue (Variable "var")) (EValue (LInteger 2))]
             ]
+  ]
+
+policyParsing :: TestTree
+policyParsing = testGroup "policy blocks"
+  [ testCase "Simple allow policy" $
+      parsePolicy "allow if true" @?=
+        Right (Allow, [QueryItem [] [EValue $ LBool True]])
+  , testCase "Simple deny policy" $
+      parsePolicy "deny if true" @?=
+        Right (Deny, [QueryItem [] [EValue $ LBool True]])
+  , testCase "Allow with multiple groups" $
+      parsePolicy
+        "allow if fact(#ambient, $var), $var == true or \
+        \other(#authority, $var), $var == 2" @?=
+          Right
+            ( Allow
+            , [ QueryItem [Predicate "fact" [Symbol "ambient", Variable "var"]]
+                        [EBinary Equal (EValue (Variable "var")) (EValue (LBool True))]
+              , QueryItem [Predicate "other" [Symbol "authority", Variable "var"]]
+                          [EBinary Equal (EValue (Variable "var")) (EValue (LInteger 2))]
+              ]
+            )
+  , testCase "Deny with multiple groups" $
+      parsePolicy
+        "deny if fact(#ambient, $var), $var == true or \
+        \other(#authority, $var), $var == 2" @?=
+          Right
+            ( Deny
+            , [ QueryItem [Predicate "fact" [Symbol "ambient", Variable "var"]]
+                        [EBinary Equal (EValue (Variable "var")) (EValue (LBool True))]
+              , QueryItem [Predicate "other" [Symbol "authority", Variable "var"]]
+                          [EBinary Equal (EValue (Variable "var")) (EValue (LInteger 2))]
+              ]
+            )
+  , testCase "Deny with multiple groups, multiline" $
+      parsePolicy
+        "deny if\n\
+           \fact(#ambient, $var), $var == true or\n\
+           \other(#authority, $var), $var == 2" @?=
+          Right
+            ( Deny
+            , [ QueryItem [Predicate "fact" [Symbol "ambient", Variable "var"]]
+                        [EBinary Equal (EValue (Variable "var")) (EValue (LBool True))]
+              , QueryItem [Predicate "other" [Symbol "authority", Variable "var"]]
+                          [EBinary Equal (EValue (Variable "var")) (EValue (LInteger 2))]
+              ]
+            )
+  ]
+
+verifierParsing :: TestTree
+verifierParsing = testGroup "Simple verifiers"
+  [ testCase "Just a deny" $
+      parseVerifier "deny if true;" @?=
+        Right (Verifier [(Deny, [QueryItem [] [EValue (LBool True)]])] mempty
+              )
+  , testCase "Allow and deny" $
+      parseVerifier "allow if operation(#ambient, #read);\n deny if true;" @?=
+        Right (Verifier
+                 [  (Allow, [QueryItem [Predicate "operation" [Symbol "ambient", Symbol "read"]] []])
+                 , (Deny, [QueryItem [] [EValue (LBool True)]])
+                 ]
+                 mempty
+              )
+  , testCase "Complete verifier" $ do
+      let spec :: Text
+          spec =
+            "// the owner has all rights\n\
+            \right(#authority, $blog_id, $article_id, $operation) <-\n\
+            \    article(#ambient, $blog_id, $article_id),\n\
+            \    operation(#ambient, $operation),\n\
+            \    user(#authority, $user_id),\n\
+            \    owner(#authority, $user_id, $blog_id);\n\
+            \// premium users can access some restricted articles\n\
+            \right(#authority, $blog_id, $article_id, #read) <-\n\
+            \  article(#ambient, $blog_id, $article_id),\n\
+            \  premium_readable(#authority, $blog_id, $article_id),\n\
+            \  user(#authority, $user_id),\n\
+            \  premium_user(#authority, $user_id, $blog_id);\n\
+            \// define teams and roles\n\
+            \right(#authority, $blog_id, $article_id, $operation) <-\n\
+            \  article(#ambient, $blog_id, $article_id),\n\
+            \  operation(#ambient, $operation),\n\
+            \  user(#authority, $user_id),\n\
+            \  member(#authority, $user_id, $team_id),\n\
+            \  team_role(#authority, $team_id, $blog_id, #contributor),\n\
+            \  [#read, #write].contains($operation);\n\
+            \// unauthenticated users have read access on published articles\n\
+            \allow if\n\
+            \  operation(#ambient, #read),\n\
+            \  article(#ambient, $blog_id, $article_id),\n\
+            \  readable(#authority, $blog_id, $article_id);\n\
+            \// authorize if got the rights on this blog and article\n\
+            \allow if\n\
+            \  blog(#ambient, $blog_id),\n\
+            \  article(#ambient, $blog_id, $article_id),\n\
+            \  operation(#ambient, $operation),\n\
+            \  right(#authority, $blog_id, $article_id, $operation);\n\
+            \// catch all rule in case the allow did not match\n\
+            \deny if true;\
+            \ "
+          p = Predicate
+          sAuth = Symbol "authority"
+          sAmb = Symbol "ambient"
+          sRead = Symbol "read"
+          sWrite = Symbol "write"
+          sContributor = Symbol "contributor"
+          vBlogId = Variable "blog_id"
+          vArticleId = Variable "article_id"
+          vUserId = Variable "user_id"
+          vTeamId = Variable "team_id"
+          vOp = Variable "operation"
+          bRules =
+            [ Rule (p "right" [sAuth, vBlogId, vArticleId, vOp])
+                   [ p "article" [sAmb, vBlogId, vArticleId]
+                   , p "operation" [sAmb, vOp]
+                   , p "user" [sAuth, vUserId]
+                   , p "owner" [sAuth, vUserId, vBlogId]
+                   ] []
+            , Rule (p "right" [sAuth, vBlogId, vArticleId, sRead])
+                   [ p "article" [sAmb, vBlogId, vArticleId]
+                   , p "premium_readable" [sAuth, vBlogId, vArticleId]
+                   , p "user" [sAuth, vUserId]
+                   , p "premium_user" [sAuth, vUserId, vBlogId]
+                   ] []
+            , Rule (p "right" [sAuth, vBlogId, vArticleId, vOp])
+                   [ p "article" [sAmb, vBlogId, vArticleId]
+                   , p "operation" [sAmb, vOp]
+                   , p "user" [sAuth, vUserId]
+                   , p "member" [sAuth, vUserId, vTeamId]
+                   , p "team_role" [sAuth, vTeamId, vBlogId, sContributor]
+                   ] [EBinary Contains (EValue (TermSet $ Set.fromList [sRead, sWrite]))
+                                       (EValue vOp)]
+           ]
+          bFacts = []
+          bChecks = []
+          vPolicies =
+            [ (Allow, [QueryItem [ p "operation" [sAmb, sRead]
+                                 , p "article"   [sAmb, vBlogId, vArticleId]
+                                 , p "readable"  [sAuth, vBlogId, vArticleId]
+                                 ] []])
+            , (Allow, [QueryItem [ p "blog" [sAmb, vBlogId]
+                                 , p "article" [sAmb, vBlogId, vArticleId]
+                                 , p "operation" [sAmb, vOp]
+                                 , p "right" [sAuth, vBlogId, vArticleId, vOp]
+                                 ] []])
+            , (Deny, [QueryItem [] [EValue (LBool True)]])
+            ]
+      parseVerifier spec @?= Right Verifier{vBlock = Block{..}, ..}
   ]

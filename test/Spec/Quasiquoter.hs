@@ -38,7 +38,7 @@ basicRule = testCase "Basic rule" $
          ] []
 
 antiquotedFact :: TestTree
-antiquotedFact = testCase "Basic fact" $
+antiquotedFact = testCase "Sliced fact" $
   let toto :: Text
       toto = "test"
       actual :: Fact
@@ -50,7 +50,7 @@ antiquotedFact = testCase "Basic fact" $
                       ]
 
 antiquotedRule :: TestTree
-antiquotedRule = testCase "Basic rule" $
+antiquotedRule = testCase "Sliced rule" $
   let toto :: Text
       toto = "test"
       actual :: Rule

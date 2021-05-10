@@ -36,16 +36,13 @@ module Biscuit
   , verifyBiscuitWithLimits
   , checkBiscuitSignature
 
-  , verifier
-  , block
   , defaultLimits
   ) where
 
-import           Data.ByteString           (ByteString)
-import           Data.Text                 (Text)
-import           Language.Haskell.TH.Quote (QuasiQuoter)
+import           Data.ByteString (ByteString)
+import           Data.Text       (Text)
 
-import           Datalog.AST               (Fact, Query, Rule)
+import           Datalog.AST     (Block, Fact, Query, Rule, Verifier)
 
 data KeyPair
 data PublicKey
@@ -57,14 +54,6 @@ data SignatureError deriving Show
 data VerificationError deriving Show
 data Limits
 
--- | Block data. This can be built with a dedicated `block` quasiquoter,
--- | but also by combining elements with a provided monoid
-data Block
-instance Semigroup Block where
-  (<>) = error "todo"
-instance Monoid Block where
-  mempty = error "todo"
-
 blockFact :: Fact -> Block
 blockFact = error "todo"
 blockRule :: Rule -> Block
@@ -73,17 +62,6 @@ blockCheck :: Query -> Block
 blockCheck = error "todo"
 blockContext :: Text -> Block
 blockContext = error "todo"
-
--- | Verifier data. This is a collection of
--- rules, facts, checks and policies. This can
--- be built with a dedicated `policy` quasiquoter,
--- but also by combining elements with a provided
--- monoid
-data Verifier
-instance Semigroup Verifier where
-  (<>) = error "todo"
-instance Monoid Verifier where
-  mempty = error "todo"
 
 verifierFact :: Fact -> Verifier
 verifierFact = error "todo"
@@ -184,9 +162,5 @@ checkBiscuitSignature = error "todo"
 
 ----- these functions are not meant to be in the top-level module, but they are not
 -- implemented yet, so i'm putting them there for now
-verifier :: QuasiQuoter
-verifier = error "todo"
-block :: QuasiQuoter
-block = error "todo"
 defaultLimits :: Limits
 defaultLimits = error "todo"

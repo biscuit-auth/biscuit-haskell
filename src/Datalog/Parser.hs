@@ -11,6 +11,7 @@
 {-# LANGUAGE OverloadedStrings     #-}
 {-# LANGUAGE ScopedTypeVariables   #-}
 {-# LANGUAGE TemplateHaskell       #-}
+{-# LANGUAGE TupleSections         #-}
 {-# LANGUAGE TypeApplications      #-}
 {-# LANGUAGE TypeFamilies          #-}
 {- HLINT ignore "Reduce duplication" -}
@@ -21,6 +22,7 @@ import qualified Control.Monad.Combinators.Expr as Expr
 import           Data.Attoparsec.Text
 import           Data.ByteString                (ByteString)
 import           Data.ByteString.Base16         as Hex
+import           Data.Char                      (isSpace)
 import           Data.Either                    (partitionEithers)
 import           Data.Foldable                  (fold)
 import           Data.Functor                   (void, ($>))
@@ -210,7 +212,7 @@ rfc3339DateParser =
   --  - a comma (before another term)
   --  - a closing paren (the end of a term list)
   --  - a closing bracket (the end of a set)
-  let getDateInput = takeWhile1 (notInClass ", )]")
+  let getDateInput = takeWhile1 (notInClass ", )];")
       parseDate = parseTimeM False defaultTimeLocale "%FT%T%Q%EZ"
    in parseDate . unpack =<< getDateInput
 
@@ -262,10 +264,60 @@ ruleParser = do
 
 queryParser :: HasParsers 'InPredicate ctx => Parser (Query' ctx)
 queryParser =
-  fmap (uncurry QueryItem) <$> sepBy1 ruleBodyParser (skipSpace *> string "or ")
+  fmap (uncurry QueryItem) <$> sepBy1 ruleBodyParser (skipSpace *> asciiCI "or" <* satisfy isSpace)
 
-checkParser :: HasParsers 'InPredicate ctx => Parser (Query' ctx)
+checkParser :: HasParsers 'InPredicate ctx => Parser (Check' ctx)
 checkParser = string "check if " *> queryParser
+
+commentParser :: Parser ()
+commentParser = do
+  skipSpace
+  _ <- string "//"
+  _ <- skipWhile ((&&) <$> (/= '\r') <*> (/= '\n'))
+  void $ choice [ void (char '\n')
+                , void (string "\r\n")
+                , endOfInput
+                ]
+
+blockElementParser :: HasParsers 'InPredicate ctx => Parser (BlockElement' ctx)
+blockElementParser = choice
+  [ BlockRule    <$> ruleParser <* skipSpace <* char ';'
+  , BlockFact    <$> predicateParser <* skipSpace <* char ';'
+  , BlockCheck   <$> checkParser <* skipSpace <* char ';'
+  , BlockComment <$  commentParser
+  ]
+
+verifierElementParser :: HasParsers 'InPredicate ctx => Parser (VerifierElement' ctx)
+verifierElementParser = choice
+  [ VerifierPolicy  <$> policyParser <* skipSpace <* char ';'
+  , BlockElement    <$> blockElementParser
+  ]
+
+verifierParser :: ( HasParsers 'InPredicate ctx
+                  , HasParsers 'InFact ctx
+                  , Show (VerifierElement' ctx)
+                  )
+               => Parser (Verifier' ctx)
+verifierParser = do
+  elems <- many1 (skipSpace *> verifierElementParser)
+  pure $ foldMap elementToVerifier elems
+
+blockParser :: ( HasParsers 'InPredicate ctx
+               , HasParsers 'InFact ctx
+               , Show (BlockElement' ctx)
+               )
+            => Parser (Block' ctx)
+blockParser = do
+  elems <- many1 (skipSpace *> blockElementParser)
+  pure $ foldMap elementToBlock elems
+
+policyParser :: HasParsers 'InPredicate ctx => Parser (Policy' ctx)
+policyParser = do
+  policy <- choice
+              [ Allow <$ string "allow if"
+              , Deny  <$ string "deny if"
+              ]
+  (policy, ) <$> queryParser
 
 compileParser :: Lift a => Parser a -> String -> Q Exp
 compileParser p str = case parseOnly p (pack str) of
@@ -304,11 +356,18 @@ check = QuasiQuoter
   , quoteDec = error "not supported"
   }
 
-pRule :: Text -> Either String (Rule' 'QuasiQuote)
-pRule = parseOnly ruleParser
+block :: QuasiQuoter
+block = QuasiQuoter
+  { quoteExp = compileParser (blockParser @'QuasiQuote)
+  , quotePat = error "not supported"
+  , quoteType = error "not supported"
+  , quoteDec = error "not supported"
+  }
 
-pPred :: Text -> Either String (Predicate' 'InPredicate 'QuasiQuote)
-pPred = parseOnly predicateParser
-
-pTerm :: Text -> Either String QQID
-pTerm = parseOnly termParser
+verifier :: QuasiQuoter
+verifier = QuasiQuoter
+  { quoteExp = compileParser (verifierParser @'QuasiQuote)
+  , quotePat = error "not supported"
+  , quoteType = error "not supported"
+  , quoteDec = error "not supported"
+  }
