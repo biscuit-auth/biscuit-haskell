@@ -1,22 +1,35 @@
-{-# LANGUAGE NamedFieldPuns  #-}
-{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE DerivingStrategies         #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE NamedFieldPuns             #-}
+{-# LANGUAGE RecordWildCards            #-}
 module Sel
-  ( main
-  , mkKeyPair
-  , signBlock
+  ( signBlock
   , verifySignature
-  , Keypair(..)
   , Token(..)
   , append
   , new
   , check
+
+
+  --
+  , Keypair (..)
+  , PrivateKey
+  , PublicKey
+  , Signature
+  , parsePrivateKey
+  , parsePublicKey
+  , serializePrivateKey
+  , serializePublicKey
+  , newKeypair
+  , fromPrivateKey
+  , aggregate
   ) where
 
 import           Control.Monad          (when)
 import           Data.ByteString        (ByteString, packCStringLen,
                                          useAsCStringLen)
+import qualified Data.ByteString        as BS
 import           Data.ByteString.Base16 as Hex
-import           Data.ByteString.Base64
 import           Data.Foldable          (for_)
 import           Data.Functor           (void)
 import           Data.Primitive.Ptr     (copyPtr)
@@ -25,27 +38,70 @@ import           Foreign.Marshal.Alloc
 import           Foreign.Ptr
 import           Libsodium
 
--- todo newtype ByteStrings
+newtype PrivateKey = PrivateKey ByteString
+  deriving newtype (Eq, Ord)
+
+instance Show PrivateKey where
+  show (PrivateKey bs) = show $ Hex.encode bs
+
+parsePrivateKey :: ByteString -> Maybe PrivateKey
+parsePrivateKey bs = if BS.length bs == cs2int crypto_core_ristretto255_scalarbytes
+                     then Just (PrivateKey bs)
+                     else Nothing
+
+serializePrivateKey :: PrivateKey -> ByteString
+serializePrivateKey (PrivateKey bs) = bs
+
+newtype PublicKey = PublicKey ByteString
+  deriving newtype (Eq, Ord)
+
+parsePublicKey :: ByteString -> Maybe PublicKey
+parsePublicKey bs = if BS.length bs == cs2int crypto_core_ristretto255_bytes
+                     then Just (PublicKey bs)
+                     else Nothing
+
+serializePublicKey :: PublicKey -> ByteString
+serializePublicKey (PublicKey bs) = bs
+
+instance Show PublicKey where
+  show (PublicKey bs) = show $ Hex.encode bs
+
 data Keypair
   = Keypair
-  { privateKey :: ByteString
-  , publicKey  :: ByteString
+  { privateKey :: PrivateKey
+  , publicKey  :: PublicKey
   } deriving (Eq, Ord)
 
 instance Show Keypair where
   show Keypair{privateKey, publicKey} =
-    show (Hex.encode privateKey) <> "/" <> show (Hex.encode publicKey)
+    show privateKey <> "/" <> show publicKey
+
+newKeypair :: IO Keypair
+newKeypair =
+  randomScalar $ \scalarBuf ->
+    scalarToPoint scalarBuf $ \pointBuf -> do
+      privateKey <- PrivateKey <$> scalarToByteString scalarBuf
+      publicKey <- PublicKey <$> pointToByteString pointBuf
+      pure Keypair{..}
+
+fromPrivateKey :: PrivateKey -> IO Keypair
+fromPrivateKey (PrivateKey privBs) =
+  withBSLen privBs $ \(scalarBuf, _) ->
+    scalarToPoint scalarBuf $ \pointBuf -> do
+      privateKey <- PrivateKey <$> scalarToByteString scalarBuf
+      publicKey <- PublicKey <$> pointToByteString pointBuf
+      pure Keypair{..}
 
 data Signature
   = Signature
-  { d :: [ByteString]
-  , z :: ByteString
+  { parameters :: [ByteString]
+  , z          :: ByteString
   } deriving (Eq, Show)
 
 data Token
   = Token
   { messages  :: [ByteString]
-  , keys      :: [ByteString]
+  , keys      :: [PublicKey]
   , signature :: Signature
   } deriving (Eq, Show)
 
@@ -81,14 +137,6 @@ scalarToPoint scalar f =
   withPoint $ \pointBuf -> do
     void $ crypto_scalarmult_ristretto255_base pointBuf scalar
     f pointBuf
-
-mkKeyPair :: IO Keypair
-mkKeyPair =
-  randomScalar $ \scalarBuf ->
-    scalarToPoint scalarBuf $ \pointBuf -> do
-      privateKey <- scalarToByteString scalarBuf
-      publicKey <- pointToByteString pointBuf
-      pure Keypair{..}
 
 type Scalar = Ptr CUChar
 type Point = Ptr CUChar
@@ -137,21 +185,23 @@ hashMessage publicKey message f =
 signBlock :: Keypair
           -> ByteString
           -> IO Signature
-signBlock Keypair{publicKey,privateKey} message =
+signBlock Keypair{publicKey,privateKey} message = do
+  let PublicKey pubBs = publicKey
+      PrivateKey prvBs = privateKey
   randomScalar $ \r ->
     scalarToPoint r $ \aa ->
       hashPoints [aa] $ \d ->
-        hashMessage publicKey message $ \e ->
+        hashMessage pubBs message $ \e ->
           withScalar $ \rd -> do
             crypto_core_ristretto255_scalar_mul rd r d
             withScalar $ \epk ->
-              withBSLen privateKey $ \(pk, _) -> do
+              withBSLen prvBs $ \(pk, _) -> do
                 crypto_core_ristretto255_scalar_mul epk e pk
                 withScalar $ \z -> do
                   crypto_core_ristretto255_scalar_sub z rd epk
                   aaBs <- pointToByteString aa
                   zBs <- scalarToByteString z
-                  pure Signature { d = [aaBs]
+                  pure Signature { parameters = [aaBs]
                                  , z = zBs
                                  }
 
@@ -161,58 +211,35 @@ aggregate first second =
     crypto_core_ristretto255_scalar_add zBuf fz sz
     z <- pointToByteString zBuf
     pure Signature
-      { d = d first <> d second
+      { parameters = parameters first <> parameters second
       , z
       }
 
-verifySignature :: [ByteString]
+verifySignature :: [PublicKey]
                 -> [ByteString]
                 -> Signature
                 -> IO Bool
-verifySignature publicKeys messages Signature{d,z} = do
+verifySignature publicKeys messages Signature{parameters,z} = do
   when (length publicKeys /= length messages) $ fail "pks / messages mismatch"
   when (length publicKeys == 0) $ fail "empty pks"
   withBSLen z $ \(zBuf, _) ->
     scalarToPoint zBuf $ \zP ->
       computeHashMSums publicKeys messages $ \eiXiRes ->
-        computeHashPSums d $ \diAiRes ->
+        computeHashPSums parameters $ \diAiRes ->
           withPoint $ \res -> withPoint $ \resTmp -> do
             _ <- crypto_core_ristretto255_add resTmp zP eiXiRes
             _ <- crypto_core_ristretto255_sub res resTmp diAiRes
             diff <- sodium_is_zero res crypto_core_ristretto255_scalarbytes
             pure $ diff == 1
 
-{-
-  hashMessage publicKey message $ \e ->
-    withScalar $ \dinv ->
-      withBSLen d $ \(dBuf, _) -> do
-        void $ crypto_core_ristretto255_scalar_invert dinv dBuf
-        withScalar $ \zdinv ->
-          withBSLen z $ \(zBuf, _) -> do
-            crypto_core_ristretto255_scalar_mul zdinv zBuf dinv
-            scalarToPoint zdinv $ \zzdinv ->
-              withScalar $ \edinv -> do
-                crypto_core_ristretto255_scalar_mul edinv e dinv
-                withPoint $ \toto ->
-                  withBSLen publicKey $ \(pubBuf, _) -> do
-                    void $ crypto_scalarmult_ristretto255 toto edinv pubBuf
-                    withPoint $ \aa -> do
-                      void $ crypto_core_ristretto255_add aa zzdinv toto
-                      hashPoints [aa] $ \candidateD ->
-                        withScalar $ \diff -> do
-                          crypto_core_ristretto255_scalar_sub diff dBuf candidateD
-                          res <- sodium_is_zero diff crypto_core_ristretto255_scalarbytes
-                          pure $ res == 1
-                          -}
-
-computeHashMSums :: [ByteString] -- publicKeys
-                -> [ByteString] -- messages
-                -> (Point -> IO a) -> IO a
+computeHashMSums :: [PublicKey]
+                 -> [ByteString] -- messages
+                 -> (Point -> IO a) -> IO a
 computeHashMSums publicKeys messages f = do
   let pairs = zip publicKeys messages
   withPoint $ \eiXiRes -> do
     sodium_memzero eiXiRes crypto_core_ristretto255_bytes
-    for_ pairs $ \(publicKey, message) ->
+    for_ pairs $ \(PublicKey publicKey, message) ->
       withPoint $ \eiXi -> withPoint $ \eiXiResTmp ->
         withBSLen publicKey $ \(pkBuf, _) ->
           hashMessage publicKey message $ \ei -> do
@@ -257,17 +284,5 @@ append message keypair Token{..} = do
 check :: Token -> IO Bool
 check Token{..} = verifySignature keys messages signature
 
-main :: IO ()
-main = do
-  bs <- getRandom crypto_core_ristretto255_hashbytes
-  print $ encodeBase64 bs
-
 cs2int :: CSize -> Int
 cs2int = fromInteger . toInteger
-
-getRandom :: CSize -> IO ByteString
-getRandom s =
-  let si = cs2int s
-   in allocaBytes si $ \buf -> do
-       randombytes_buf buf s
-       packCStringLen (castPtr buf, si)

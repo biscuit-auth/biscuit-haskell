@@ -32,6 +32,7 @@ library
       Example
       Proto
       Sel
+      Token
   other-modules:
       Paths_biscuit_haskell
   hs-source-dirs:

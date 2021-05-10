@@ -13,18 +13,18 @@ module Biscuit
   , verifierRule
   , verifierCheck
   , verifierPolicy
-  , newKeyPair
-  , getPublicKey
-  , getPrivateKey
+  , newKeypair
+  , publicKey
+  , privateKey
   , fromPrivateKey
   , serializePrivateKey
   , serializePublicKey
-  , serializePrivateKeyB64
-  , serializePublicKeyB64
+  , serializePrivateKeyHex
+  , serializePublicKeyHex
   , parsePrivateKey
   , parsePublicKey
-  , parsePrivateKeyB64
-  , parsePublicKeyB64
+  , parsePrivateKeyHex
+  , parsePublicKeyHex
   , mkBiscuit
   , addBlock
   , parse
@@ -46,12 +46,12 @@ import           Data.Text       (Text)
 import           Datalog.AST     (Block, BlockElement' (..), Check, Fact,
                                   Policy, Rule, Verifier, VerifierElement' (..),
                                   bContext, elementToBlock, elementToVerifier)
+import           Sel             (Keypair (..), PrivateKey, PublicKey,
+                                  fromPrivateKey, newKeypair, parsePrivateKey,
+                                  parsePublicKey, serializePrivateKey,
+                                  serializePublicKey)
 
-data KeyPair
-data PublicKey
-data PrivateKey
 data Biscuit
-data KeyError deriving Show
 data ParseError deriving Show
 data SignatureError deriving Show
 data VerificationError deriving Show
@@ -75,35 +75,14 @@ verifierCheck = elementToVerifier . BlockElement . BlockCheck
 verifierPolicy :: Policy -> Verifier
 verifierPolicy = elementToVerifier . VerifierPolicy
 
--- | Create a new keypair with a random private key
-newKeyPair :: IO KeyPair
-newKeyPair = error "todo"
-
-getPublicKey :: KeyPair -> PublicKey
-getPublicKey = error "todo"
-
-getPrivateKey :: KeyPair -> PrivateKey
-getPrivateKey = error "todo"
-
-fromPrivateKey :: PrivateKey -> IO KeyPair
-fromPrivateKey = error "todo"
-
-serializePrivateKey :: PrivateKey -> ByteString
-serializePrivateKey = error "todo"
-serializePublicKey :: PublicKey -> ByteString
-serializePublicKey = error "todo"
-serializePrivateKeyB64 :: PrivateKey -> ByteString
-serializePrivateKeyB64 = error "todo"
-serializePublicKeyB64 :: PublicKey -> ByteString
-serializePublicKeyB64 = error "todo"
-parsePrivateKey :: ByteString -> Either KeyError PrivateKey
-parsePrivateKey = error "todo"
-parsePublicKey :: ByteString -> Either KeyError PublicKey
-parsePublicKey = error "todo"
-parsePrivateKeyB64 :: ByteString -> Either KeyError PrivateKey
-parsePrivateKeyB64 = error "todo"
-parsePublicKeyB64 :: ByteString -> Either KeyError PublicKey
-parsePublicKeyB64 = error "todo"
+serializePrivateKeyHex :: PrivateKey -> ByteString
+serializePrivateKeyHex = error "todo"
+serializePublicKeyHex :: PublicKey -> ByteString
+serializePublicKeyHex = error "todo"
+parsePrivateKeyHex :: ByteString -> Maybe PrivateKey
+parsePrivateKeyHex = error "todo"
+parsePublicKeyHex :: ByteString -> Maybe PublicKey
+parsePublicKeyHex = error "todo"
 
 -- | Create a new biscuit with the provided authority block
 mkBiscuit :: PrivateKey -> Block -> IO Biscuit

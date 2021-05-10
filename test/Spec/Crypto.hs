@@ -17,15 +17,15 @@ specs = testGroup "biscuit crypto"
 
 singleBlockRoundtrip :: TestTree
 singleBlockRoundtrip = testCase "Single block roundtrip" $ do
-  rootKp <- mkKeyPair
+  rootKp <- newKeypair
   signed <- new "content" rootKp
   result <- check signed
   result @?= True
 
 multiBlockRoundtrip :: TestTree
 multiBlockRoundtrip = testCase "Multi block roundtrip" $ do
-  rootKp <- mkKeyPair
-  blockKp <- mkKeyPair
+  rootKp <- newKeypair
+  blockKp <- newKeypair
   init' <- new "content" rootKp
   withBlock <- append "block" blockKp init'
   result <- check withBlock
@@ -33,8 +33,8 @@ multiBlockRoundtrip = testCase "Multi block roundtrip" $ do
 
 tamperedAuthority :: TestTree
 tamperedAuthority = testCase "Tampered authority" $ do
-  rootKp <- mkKeyPair
-  blockKp <- mkKeyPair
+  rootKp <- newKeypair
+  blockKp <- newKeypair
   init' <- new "content" rootKp
   result <- check $ init' { messages = ["modified"] }
   result @?= False
@@ -44,8 +44,8 @@ tamperedAuthority = testCase "Tampered authority" $ do
 
 tamperedBlock :: TestTree
 tamperedBlock = testCase "Tampered block" $ do
-  rootKp <- mkKeyPair
-  blockKp <- mkKeyPair
+  rootKp <- newKeypair
+  blockKp <- newKeypair
   init' <- new "content" rootKp
   withBlock <- append "block" blockKp init'
   result <- check $ withBlock { messages = ["content", "modified"] }
