@@ -18,7 +18,8 @@ publicKey' = maybe (error "Error parsing public key") id $ parsePublicKeyHex "to
 creation :: IO ByteString
 creation = do
   let authority = [block|resource(#authority,"file1");|]
-  biscuit <- mkBiscuit privateKey' authority
+  keypair <- fromPrivateKey privateKey'
+  biscuit <- mkBiscuit keypair authority
   let block1 = [block|check if current_time(#ambient, $time), $time < 2021-05-08T00:00:00Z;|]
   newBiscuit <- addBlock block1 biscuit
   pure $ serializeB64 newBiscuit

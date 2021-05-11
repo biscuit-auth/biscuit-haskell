@@ -2,6 +2,7 @@
 {- HLINT ignore "Reduce duplication" -}
 module Spec.Crypto (specs) where
 
+import           Data.List.NonEmpty (NonEmpty ((:|)))
 import           Test.Tasty
 import           Test.Tasty.HUnit
 
@@ -18,35 +19,54 @@ specs = testGroup "biscuit crypto"
 singleBlockRoundtrip :: TestTree
 singleBlockRoundtrip = testCase "Single block roundtrip" $ do
   rootKp <- newKeypair
-  signed <- new "content" rootKp
-  result <- check signed
+  let pub = publicKey rootKp
+      content = "content"
+      token = (pub, content) :| []
+  sig <- signBlock rootKp content
+  result <- verifySignature token sig
   result @?= True
 
 multiBlockRoundtrip :: TestTree
 multiBlockRoundtrip = testCase "Multi block roundtrip" $ do
-  rootKp <- newKeypair
-  blockKp <- newKeypair
-  init' <- new "content" rootKp
-  withBlock <- append "block" blockKp init'
-  result <- check withBlock
+  kp' <- newKeypair
+  kp <- newKeypair
+  let pub = publicKey kp
+      pub' = publicKey kp'
+      content = "content"
+      content' = "block"
+      token = (pub, content) :| [(pub', content')]
+  sig    <- signBlock kp content
+  sig'   <- aggregate sig =<< signBlock kp' content'
+  result <- verifySignature token sig'
   result @?= True
 
 tamperedAuthority :: TestTree
 tamperedAuthority = testCase "Tampered authority" $ do
-  rootKp <- newKeypair
-  blockKp <- newKeypair
-  init' <- new "content" rootKp
-  result <- check $ init' { messages = ["modified"] }
+  kp' <- newKeypair
+  kp <- newKeypair
+  let pub = publicKey kp
+      pub' = publicKey kp'
+      content = "content"
+      content' = "block"
+      token  = (pub, "modified") :| []
+      token' = (pub, "modified") :| [(pub', content')]
+  sig    <- signBlock kp content
+  sig'   <- aggregate sig =<< signBlock kp' content'
+  result <- verifySignature token sig'
   result @?= False
-  withBlock <- append "block" blockKp init'
-  result' <- check $ withBlock { messages = ["modified", "block"] }
+  result' <- verifySignature token' sig'
   result' @?= False
 
 tamperedBlock :: TestTree
 tamperedBlock = testCase "Tampered block" $ do
-  rootKp <- newKeypair
-  blockKp <- newKeypair
-  init' <- new "content" rootKp
-  withBlock <- append "block" blockKp init'
-  result <- check $ withBlock { messages = ["content", "modified"] }
+  kp' <- newKeypair
+  kp <- newKeypair
+  let pub = publicKey kp
+      pub' = publicKey kp'
+      content = "content"
+      content' = "block"
+      token = (pub, content) :| [(pub', "modified")]
+  sig    <- signBlock kp content
+  sig'   <- aggregate sig =<< signBlock kp' content'
+  result <- verifySignature token sig'
   result @?= False

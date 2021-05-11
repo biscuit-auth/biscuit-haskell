@@ -7,7 +7,37 @@
 {-# LANGUAGE OverloadedStrings     #-}
 {-# LANGUAGE TypeApplications      #-}
 
-module Proto where
+module Proto
+  ( Biscuit (..)
+  , Signature (..)
+  , Block (..)
+  , FactV1 (..)
+  , RuleV1 (..)
+  , CheckV1 (..)
+  , PredicateV1 (..)
+  , IDV1 (..)
+  , ExpressionV1 (..)
+  , IDSet (..)
+  , Op (..)
+  , OpUnary (..)
+  , UnaryKind (..)
+  , OpBinary (..)
+  , BinaryKind (..)
+  , getField
+  , decodeBlockList
+  , decodeBlock
+
+  --
+  , decodeCBiscuit
+  , decodeBiscuit
+  , decodeAuthority
+  , decoded
+  , toto
+  , v1Test
+  , v1Test'
+  , v1Test''
+  , allSamples
+  ) where
 
 import           Data.ByteString        (ByteString)
 import qualified Data.ByteString        as ByteString
@@ -28,17 +58,17 @@ data Biscuit = Biscuit
     deriving anyclass (Decode, Encode)
 
 data CBiscuit = CBiscuit
-  { authority :: Required 1 (Message Block)
-  , blocks    :: Repeated 2 (Message Block)
-  , keys      :: Repeated 3 (Value ByteString)
-  , signature :: Required 4 (Message Signature)
+  { cAuthority :: Required 1 (Message Block)
+  , cBlocks    :: Repeated 2 (Message Block)
+  , cKeys      :: Repeated 3 (Value ByteString)
+  , cSignature :: Required 4 (Message Signature)
   } deriving (Generic, Show)
     deriving anyclass (Decode, Encode)
 
 data SealedBiscuit = SealedBiscuit
-  { authority :: Required 1 (Value ByteString)
-  , blocks    :: Repeated 2 (Value ByteString)
-  , signature :: Required 3 (Value ByteString)
+  { sAuthority :: Required 1 (Value ByteString)
+  , sBlocks    :: Repeated 2 (Value ByteString)
+  , sSignature :: Required 3 (Value ByteString)
   } deriving (Generic, Show)
     deriving anyclass (Decode, Encode)
 
@@ -89,7 +119,7 @@ data IDV1 =
     IDSymbol (Required 1 (Value Int64))
   | IDVariable (Required 2 (Value Int32))
   | IDInteger (Required 3 (Value Int64))
-  | IDString (Required 4 (Value String))
+  | IDString (Required 4 (Value Text))
   | IDDate (Required 5 (Value Int64))
   | IDBytes (Required 6 (Value ByteString))
   | IDBool (Required 7 (Value Bool))
@@ -242,9 +272,21 @@ decodeBiscuit :: ByteString
               -> Either String Biscuit
 decodeBiscuit = runGet decodeMessage . decodeBase64Lenient
 
+decodeBlockList :: ByteString
+                -> Either String Biscuit
+decodeBlockList = runGet decodeMessage
+
 decodeAuthority :: ByteString
                 -> Either String Block
 decodeAuthority = runGet decodeMessage
+
+decodeBlock :: ByteString
+                -> Either String Block
+decodeBlock = runGet decodeMessage
+
+decodeCBiscuit :: ByteString
+              -> Either String CBiscuit
+decodeCBiscuit = runGet decodeMessage
 
 decoded :: Biscuit
 decoded = either undefined id $ decodeBiscuit "CqYBCAASBnVzZXJJZBIOcmVhZE9ubHlBY2Nlc3MSCnJlc291cmNlSWQSBHJlYWQSBnVzZXJpZBoQCg4IBxIECAAQABIECAIgeypeClwKDggIEgQIARgJEgQIARgHEg4IAxIECAAQARIECAAQChIOCAISBAgAEAESBAgBGAkSDggHEgQIABAAEgQIARgHEhoIBBIECAAQABIECAEYCxIECAEYCRIECAAQChog/Be2qmYgERRHvdH/IN/Z5AAWSCFDjkSNXLZEvdNBY3QiRAogdNr/SGkItGP0piqRIQSXI2k1vZFrYOBQJf1mD71oZlgSICDINewl2TXZmtLDrGQVQhzz8YMbsmTai2rjk5ky7uIL"
@@ -258,8 +300,8 @@ v1Test :: FilePath -> IO (Block, [Block])
 v1Test path = do
   let orFail = either (fail . show) pure
   ser <- ByteString.readFile path
-  CBiscuit{authority,blocks} <- orFail $ runGet decodeMessage ser
-  pure (getField authority, getField blocks)
+  CBiscuit{cAuthority,cBlocks} <- orFail $ runGet decodeMessage ser
+  pure (getField cAuthority, getField cBlocks)
 
 v1Test'' :: FilePath -> IO ()
 v1Test'' path = do

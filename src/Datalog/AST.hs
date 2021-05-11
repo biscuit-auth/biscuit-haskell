@@ -15,6 +15,7 @@
 module Datalog.AST where
 
 import           Control.Applicative        ((<|>))
+import           Control.Monad              ((<=<))
 import           Data.ByteString            (ByteString)
 import           Data.ByteString.Base16     as Hex
 import           Data.Set                   (Set)
@@ -287,7 +288,18 @@ data Op =
   | BOp Binary
 
 fromStack :: [Op] -> Either String Expression
-fromStack = error "todo"
+fromStack =
+  let go stack []                    = Right stack
+      go stack        (VOp t : rest) = go (EValue t : stack) rest
+      go (e:stack)    (UOp o : rest) = go (EUnary o e : stack) rest
+      go []           (UOp _ : _)    = Left "Empty stack on unary op"
+      go (e:e':stack) (BOp o : rest) = go (EBinary o e' e : stack) rest
+      go [_]          (BOp _ : _)    = Left "Unary stack on binary op"
+      go []           (BOp _ : _)    = Left "Empty stack on binary op"
+      final []  = Left "Empty stack"
+      final [x] = Right x
+      final _   = Left "Stack containing more than one element"
+   in final <=< go []
 
 type Block = Block' 'RegularString
 data Block' (ctx :: ParsedAs) = Block

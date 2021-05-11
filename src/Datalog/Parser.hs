@@ -267,7 +267,7 @@ queryParser =
   fmap (uncurry QueryItem) <$> sepBy1 ruleBodyParser (skipSpace *> asciiCI "or" <* satisfy isSpace)
 
 checkParser :: HasParsers 'InPredicate ctx => Parser (Check' ctx)
-checkParser = string "check if " *> queryParser
+checkParser = string "check if" *> queryParser
 
 commentParser :: Parser ()
 commentParser = do

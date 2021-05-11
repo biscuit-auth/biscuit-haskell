@@ -3,35 +3,28 @@
 {-# LANGUAGE NamedFieldPuns             #-}
 {-# LANGUAGE RecordWildCards            #-}
 module Sel
-  ( signBlock
-  , verifySignature
-  , Token(..)
-  , append
-  , new
-  , check
-
-
-  --
-  , Keypair (..)
+  ( Keypair (..)
   , PrivateKey
   , PublicKey
-  , Signature
+  , Signature (..)
   , parsePrivateKey
   , parsePublicKey
   , serializePrivateKey
   , serializePublicKey
   , newKeypair
   , fromPrivateKey
+  , signBlock
   , aggregate
+  , verifySignature
   ) where
 
-import           Control.Monad          (when)
 import           Data.ByteString        (ByteString, packCStringLen,
                                          useAsCStringLen)
 import qualified Data.ByteString        as BS
 import           Data.ByteString.Base16 as Hex
 import           Data.Foldable          (for_)
 import           Data.Functor           (void)
+import           Data.List.NonEmpty     (NonEmpty)
 import           Data.Primitive.Ptr     (copyPtr)
 import           Foreign.C.Types
 import           Foreign.Marshal.Alloc
@@ -215,16 +208,13 @@ aggregate first second =
       , z
       }
 
-verifySignature :: [PublicKey]
-                -> [ByteString]
+verifySignature :: NonEmpty (PublicKey,ByteString)
                 -> Signature
                 -> IO Bool
-verifySignature publicKeys messages Signature{parameters,z} = do
-  when (length publicKeys /= length messages) $ fail "pks / messages mismatch"
-  when (length publicKeys == 0) $ fail "empty pks"
+verifySignature messagesAndPks Signature{parameters,z} = do
   withBSLen z $ \(zBuf, _) ->
     scalarToPoint zBuf $ \zP ->
-      computeHashMSums publicKeys messages $ \eiXiRes ->
+      computeHashMSums messagesAndPks $ \eiXiRes ->
         computeHashPSums parameters $ \diAiRes ->
           withPoint $ \res -> withPoint $ \resTmp -> do
             _ <- crypto_core_ristretto255_add resTmp zP eiXiRes
@@ -232,14 +222,12 @@ verifySignature publicKeys messages Signature{parameters,z} = do
             diff <- sodium_is_zero res crypto_core_ristretto255_scalarbytes
             pure $ diff == 1
 
-computeHashMSums :: [PublicKey]
-                 -> [ByteString] -- messages
+computeHashMSums :: NonEmpty (PublicKey, ByteString)
                  -> (Point -> IO a) -> IO a
-computeHashMSums publicKeys messages f = do
-  let pairs = zip publicKeys messages
+computeHashMSums messagesAndPks f = do
   withPoint $ \eiXiRes -> do
     sodium_memzero eiXiRes crypto_core_ristretto255_bytes
-    for_ pairs $ \(PublicKey publicKey, message) ->
+    for_ messagesAndPks $ \(PublicKey publicKey, message) ->
       withPoint $ \eiXi -> withPoint $ \eiXiResTmp ->
         withBSLen publicKey $ \(pkBuf, _) ->
           hashMessage publicKey message $ \ei -> do
@@ -262,27 +250,5 @@ computeHashPSums parameters f =
             copyPointFrom diAiRes diAiResTmp
     f diAiRes
 
-new :: ByteString -> Keypair -> IO Token
-new message keypair = do
-  signature <- signBlock keypair message
-  pure Token
-    { messages = [message]
-    , keys = [publicKey keypair]
-    , signature
-    }
-
-append :: ByteString -> Keypair -> Token -> IO Token
-append message keypair Token{..} = do
-  newSig <- signBlock keypair message
-  endSig <- aggregate signature newSig
-  pure $ Token
-    { messages = messages <> [message]
-    , keys = keys <> [publicKey keypair]
-    , signature = endSig
-    }
-
-check :: Token -> IO Bool
-check Token{..} = verifySignature keys messages signature
-
-cs2int :: CSize -> Int
+cs2int :: CSize -> Int
 cs2int = fromInteger . toInteger

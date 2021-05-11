@@ -1,10 +1,12 @@
 {-# LANGUAGE EmptyDataDeriving #-}
+{-# LANGUAGE OverloadedStrings #-}
 module Biscuit
   ( PrivateKey
   , PublicKey
   , Biscuit
   , Block
   , Verifier
+  , ParseError (..)
   , blockFact
   , blockRule
   , blockCheck
@@ -40,20 +42,28 @@ module Biscuit
   , defaultLimits
   ) where
 
-import           Data.ByteString (ByteString)
-import           Data.Text       (Text)
+import           Control.Monad              ((<=<))
+import           Data.Bifunctor             (first)
+import           Data.ByteString            (ByteString)
+import qualified Data.ByteString.Base16     as Hex
+import qualified Data.ByteString.Base64.URL as B64
+import           Data.Either.Combinators    (maybeToRight)
+import           Data.Text                  (Text)
 
-import           Datalog.AST     (Block, BlockElement' (..), Check, Fact,
-                                  Policy, Rule, Verifier, VerifierElement' (..),
-                                  bContext, elementToBlock, elementToVerifier)
-import           Sel             (Keypair (..), PrivateKey, PublicKey,
-                                  fromPrivateKey, newKeypair, parsePrivateKey,
-                                  parsePublicKey, serializePrivateKey,
-                                  serializePublicKey)
+import           Datalog.AST                (Block, BlockElement' (..), Check,
+                                             Fact, Policy, Rule, Verifier,
+                                             VerifierElement' (..), bContext,
+                                             elementToBlock, elementToVerifier)
+import           Sel                        (Keypair (..), PrivateKey,
+                                             PublicKey, fromPrivateKey,
+                                             newKeypair, parsePrivateKey,
+                                             parsePublicKey,
+                                             serializePrivateKey,
+                                             serializePublicKey)
+import           Token                      (Biscuit, ParseError (..), addBlock,
+                                             checkBiscuitSignature, mkBiscuit,
+                                             parseBiscuit)
 
-data Biscuit
-data ParseError deriving Show
-data SignatureError deriving Show
 data VerificationError deriving Show
 data Limits
 
@@ -75,37 +85,33 @@ verifierCheck = elementToVerifier . BlockElement . BlockCheck
 verifierPolicy :: Policy -> Verifier
 verifierPolicy = elementToVerifier . VerifierPolicy
 
+fromHex :: MonadFail m => ByteString -> m ByteString
+fromHex input = do
+  (decoded, "") <- pure $ Hex.decode input
+  pure decoded
+
 serializePrivateKeyHex :: PrivateKey -> ByteString
-serializePrivateKeyHex = error "todo"
+serializePrivateKeyHex = Hex.encode . serializePrivateKey
 serializePublicKeyHex :: PublicKey -> ByteString
-serializePublicKeyHex = error "todo"
+serializePublicKeyHex = Hex.encode . serializePublicKey
 parsePrivateKeyHex :: ByteString -> Maybe PrivateKey
-parsePrivateKeyHex = error "todo"
+parsePrivateKeyHex = parsePrivateKey <=< fromHex
 parsePublicKeyHex :: ByteString -> Maybe PublicKey
-parsePublicKeyHex = error "todo"
-
--- | Create a new biscuit with the provided authority block
-mkBiscuit :: PrivateKey -> Block -> IO Biscuit
-mkBiscuit = error "todo"
-
--- | Add a block to an existing biscuit. The block will be signed
--- with a randomly-generated keypair
-addBlock :: Block -> Biscuit -> IO Biscuit
-addBlock = error "todo"
+parsePublicKeyHex = parsePublicKey <=< fromHex
 
 -- | Parse a biscuit from a raw bytestring. If you want to parse
 -- from a URL-compatible base 64 bytestring, consider using `parseB64`
 -- instead
 parse :: ByteString -> Either ParseError Biscuit
-parse = error "todo"
+parse = parseBiscuit
 
 -- | Parse a biscuit from a URL-compatible base 64 encoded bytestring
 parseB64 :: ByteString -> Either ParseError Biscuit
-parseB64 = error "todo"
+parseB64 = parse <=< first (const InvalidB64Encoding) . B64.decodeBase64
 
 -- | Parse a biscuit from an hex-encoded bytestring
 parseHex :: ByteString -> Either ParseError Biscuit
-parseHex = error "todo"
+parseHex = parse <=< maybeToRight InvalidHexEncoding . fromHex
 
 -- | Serialize a biscuit to a binary format. If you intend to send
 -- the biscuit over a text channel, consider using `serializeB64` or
@@ -115,12 +121,12 @@ serialize = error "todo"
 
 -- | Serialize a biscuit to URL-compatible base 64, as recommended by the spec
 serializeB64 :: Biscuit -> ByteString
-serializeB64 = error "todo"
+serializeB64 = Hex.encode . serialize
 
 -- | Serialize a biscuit to a hex (base 16) string. Be advised that the specs
 -- recommends base 64 instead.
 serializeHex :: Biscuit -> ByteString
-serializeHex = error "todo"
+serializeHex = B64.encodeBase64' . serialize
 
 -- | Given a provided verifier (a set of facts, rules, checks and policies),
 -- and a public key, verify a biscuit
@@ -137,11 +143,6 @@ verifyBiscuit = error "todo"
 -- - blocks restrictions (eg disallow rules and facts in non-authority blocks)
 verifyBiscuitWithLimits :: Limits -> Biscuit -> Verifier -> PublicKey -> IO (Either VerificationError ())
 verifyBiscuitWithLimits = error "todo"
-
--- | Only check a biscuit signature. This can be used to perform an early check, before
--- bothering with constructing a verifier.
-checkBiscuitSignature :: Biscuit -> PublicKey -> IO (Either SignatureError ())
-checkBiscuitSignature = error "todo"
 
 ----- these functions are not meant to be in the top-level module, but they are not
 -- implemented yet, so i'm putting them there for now

@@ -31,6 +31,7 @@ library
       Datalog.Parser
       Example
       Proto
+      ProtoBufAdapter
       Sel
       Token
   other-modules:
@@ -94,6 +95,7 @@ test-suite biscuit-haskell-test
       Spec.Executor
       Spec.Parser
       Spec.Quasiquoter
+      Spec.Samples
       Paths_biscuit_haskell
   hs-source-dirs:
       test
