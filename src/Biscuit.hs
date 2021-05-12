@@ -62,7 +62,7 @@ import           Sel                        (Keypair (..), PrivateKey,
                                              serializePublicKey)
 import           Token                      (Biscuit, ParseError (..), addBlock,
                                              checkBiscuitSignature, mkBiscuit,
-                                             parseBiscuit)
+                                             parseBiscuit, serializeBiscuit)
 
 data VerificationError deriving Show
 data Limits
@@ -117,7 +117,7 @@ parseHex = parse <=< maybeToRight InvalidHexEncoding . fromHex
 -- the biscuit over a text channel, consider using `serializeB64` or
 -- `serializeHex` instead
 serialize :: Biscuit -> ByteString
-serialize = error "todo"
+serialize = serializeBiscuit
 
 -- | Serialize a biscuit to URL-compatible base 64, as recommended by the spec
 serializeB64 :: Biscuit -> ByteString

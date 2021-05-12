@@ -24,8 +24,11 @@ module Proto
   , OpBinary (..)
   , BinaryKind (..)
   , getField
+  , putField
   , decodeBlockList
   , decodeBlock
+  , encodeBlockList
+  , encodeBlock
 
   --
   , decodeCBiscuit
@@ -268,21 +271,29 @@ data VerifierPolicies = VerifierPolicies
   } deriving stock (Generic, Show)
     deriving anyclass (Decode, Encode)
 
-decodeBiscuit :: ByteString
-              -> Either String Biscuit
-decodeBiscuit = runGet decodeMessage . decodeBase64Lenient
-
 decodeBlockList :: ByteString
                 -> Either String Biscuit
 decodeBlockList = runGet decodeMessage
+
+decodeBlock :: ByteString
+            -> Either String Block
+decodeBlock = runGet decodeMessage
+
+encodeBlockList :: Biscuit -> ByteString
+encodeBlockList = runPut . encodeMessage
+
+encodeBlock :: Block -> ByteString
+encodeBlock = runPut . encodeMessage
+
+
+decodeBiscuit :: ByteString
+              -> Either String Biscuit
+decodeBiscuit = runGet decodeMessage . decodeBase64Lenient
 
 decodeAuthority :: ByteString
                 -> Either String Block
 decodeAuthority = runGet decodeMessage
 
-decodeBlock :: ByteString
-                -> Either String Block
-decodeBlock = runGet decodeMessage
 
 decodeCBiscuit :: ByteString
               -> Either String CBiscuit

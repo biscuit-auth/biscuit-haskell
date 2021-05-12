@@ -18,7 +18,7 @@ readFromFile path =
   parse <$> ByteString.readFile ("test/samples/" <> path)
 
 getAuthority :: Biscuit -> Block
-getAuthority = snd . authority
+getAuthority = snd . snd . authority
 
 getBlocks :: Biscuit -> [Block]
 getBlocks = fmap (snd . snd) . blocks

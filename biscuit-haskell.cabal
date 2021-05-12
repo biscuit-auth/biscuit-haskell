@@ -95,6 +95,7 @@ test-suite biscuit-haskell-test
       Spec.Executor
       Spec.Parser
       Spec.Quasiquoter
+      Spec.Roundtrip
       Spec.Samples
       Paths_biscuit_haskell
   hs-source-dirs:

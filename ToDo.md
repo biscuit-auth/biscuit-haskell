@@ -14,3 +14,6 @@
 - [x] parse whole block (with an associated quasiquoter)
 - [ ] move the modules under a `Crypto` namespace
 - [ ] try building with cabal
+- [ ] add CI
+- [x] convert protobuf messages into `AST` values
+- [x] convert `AST` values into protobuf messages

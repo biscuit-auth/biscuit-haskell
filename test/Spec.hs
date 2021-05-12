@@ -6,6 +6,7 @@ import qualified Spec.Crypto      as Crypto
 import qualified Spec.Executor    as Executor
 import qualified Spec.Parser      as Parser
 import qualified Spec.Quasiquoter as Quasiquoter
+import qualified Spec.Roundtrip   as Roundtrip
 import qualified Spec.Samples     as Samples
 
 main :: IO ()
@@ -14,5 +15,6 @@ main = defaultMain $ testGroup "biscuit-haskell"
   , Executor.specs
   , Parser.specs
   , Quasiquoter.specs
+  , Roundtrip.specs
   , Samples.specs
   ]

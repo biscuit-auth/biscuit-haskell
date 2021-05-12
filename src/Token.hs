@@ -8,6 +8,7 @@ module Token
   , addBlock
   , checkBiscuitSignature
   , parseBiscuit
+  , serializeBiscuit
   ) where
 
 import           Control.Monad           (when)
@@ -18,11 +19,12 @@ import           Data.List.NonEmpty      (NonEmpty ((:|)))
 
 import           Datalog.AST             (Block)
 import qualified Proto                   as PB
-import           ProtoBufAdapter         (Symbols, extractSymbols, pbToBlock)
+import           ProtoBufAdapter         (Symbols, blockToPb, commonSymbols,
+                                          extractSymbols, pbToBlock)
 import           Sel                     (Keypair (publicKey), PublicKey,
                                           Signature (..), aggregate, newKeypair,
-                                          parsePublicKey, signBlock,
-                                          verifySignature)
+                                          parsePublicKey, serializePublicKey,
+                                          signBlock, verifySignature)
 
 -- Protobuf serialization does not have a guaranteed deterministic behaviour,
 -- so we need to keep the initial serialized payload around in order to compute
@@ -31,7 +33,8 @@ type ExistingBlock = (ByteString, Block)
 
 data Biscuit
   = Biscuit
-  { authority :: ExistingBlock
+  { symbols   :: Symbols
+  , authority :: (PublicKey, ExistingBlock)
   , blocks    :: [(PublicKey, ExistingBlock)]
   , signature :: Signature
   }
@@ -40,10 +43,12 @@ data Biscuit
 -- | Create a new biscuit with the provided authority block
 mkBiscuit :: Keypair -> Block -> IO Biscuit
 mkBiscuit keypair authority = do
-  let authoritySerialized = error "todo" -- protobuf
+  let authorityPub = publicKey keypair
+      (s, authoritySerialized) = PB.encodeBlock <$> (blockToPb commonSymbols 0 authority)
   signature <- signBlock keypair authoritySerialized
-  pure $ Biscuit { authority = (authoritySerialized, authority)
+  pure $ Biscuit { authority = (authorityPub, (authoritySerialized, authority))
                  , blocks = []
+                 , symbols = commonSymbols <> s
                  , signature
                  }
 
@@ -51,11 +56,12 @@ mkBiscuit keypair authority = do
 -- with a randomly-generated keypair
 addBlock :: Block -> Biscuit -> IO Biscuit
 addBlock newBlock b@Biscuit{..} = do
-  let newBlockSerialized = error "todo" -- protobuf
+  let (s, newBlockSerialized) = PB.encodeBlock <$> (blockToPb symbols (length blocks) newBlock)
   keypair <- newKeypair
   newSig <- signBlock keypair newBlockSerialized
   endSig <- aggregate signature newSig
   pure $ b { blocks = blocks <> [(publicKey keypair, (newBlockSerialized, newBlock))]
+           , symbols = symbols <> s
            , signature = endSig
            }
 
@@ -63,7 +69,7 @@ addBlock newBlock b@Biscuit{..} = do
 -- bothering with constructing a verifier.
 checkBiscuitSignature :: Biscuit -> PublicKey -> IO Bool
 checkBiscuitSignature Biscuit{..} publicKey =
-  let publicKeysAndMessages = (publicKey, fst authority) :| (fmap fst <$> blocks)
+  let publicKeysAndMessages = (publicKey, fst $ snd authority) :| (fmap fst <$> blocks)
    in verifySignature publicKeysAndMessages signature
 
 data ParseError
@@ -83,17 +89,36 @@ parseBiscuit bs = do
   when ((length pbBlocks) + 1 /= length pbKeys) $ Left (InvalidProtobufSer $ "Length mismatch " <> show (length pbBlocks, length pbKeys))
   rawAuthority <- first InvalidProtobufSer $ PB.decodeBlock pbAuthority
   rawBlocks    <- traverse (first InvalidProtobufSer . PB.decodeBlock) pbBlocks
-  let s = extractSymbols $ rawAuthority : rawBlocks
+  let s = extractSymbols commonSymbols $ rawAuthority : rawBlocks
 
 
-  authority    <- (pbAuthority,) <$> (blockFromPB s) rawAuthority
-  parsedBlocks <- zip pbBlocks <$> traverse (blockFromPB s) rawBlocks
-  parsedKeys   <- maybeToRight (InvalidProtobufSer "Invalid pubkeys") $ traverse parsePublicKey pbKeys
+  parsedAuthority <- (pbAuthority,) <$> (blockFromPB s) rawAuthority
+  parsedBlocks    <- zip pbBlocks <$> traverse (blockFromPB s) rawBlocks
+  parsedKeys      <- maybeToRight (InvalidProtobufSer "Invalid pubkeys") $ traverse parsePublicKey pbKeys
   let blocks = zip (drop 1 parsedKeys) parsedBlocks
+      authority = (head parsedKeys, parsedAuthority)
+      symbols = s
       signature = Signature { parameters = PB.getField $ PB.parameters pbSignature
                             , z = PB.getField $ PB.z pbSignature
                             }
   pure Biscuit{..}
 
+serializeBiscuit :: Biscuit -> ByteString
+serializeBiscuit Biscuit{..} =
+  let authorityBs = fst $ snd authority
+      blocksBs = fst . snd <$> blocks
+      keys = serializePublicKey . fst <$> authority : blocks
+      Signature{..} = signature
+      sigPb = PB.Signature
+                { parameters = PB.putField parameters
+                , z = PB.putField z
+                }
+   in PB.encodeBlockList PB.Biscuit
+       { authority = PB.putField $ authorityBs
+       , blocks    = PB.putField $ blocksBs
+       , keys      = PB.putField $ keys
+       , signature = PB.putField $ sigPb
+       }
+
 blockFromPB :: Symbols -> PB.Block -> Either ParseError Block
-blockFromPB s = first InvalidProtobuf . pbToBlock s
+blockFromPB s pbBlock  = first InvalidProtobuf $ pbToBlock s pbBlock

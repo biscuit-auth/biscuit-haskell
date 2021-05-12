@@ -7,6 +7,7 @@
 {-# LANGUAGE LambdaCase                 #-}
 {-# LANGUAGE NamedFieldPuns             #-}
 {-# LANGUAGE OverloadedStrings          #-}
+{-# LANGUAGE RecordWildCards            #-}
 {-# LANGUAGE StandaloneDeriving         #-}
 {-# LANGUAGE TemplateHaskell            #-}
 {-# LANGUAGE TypeApplications           #-}
@@ -18,10 +19,11 @@ import           Control.Applicative        ((<|>))
 import           Control.Monad              ((<=<))
 import           Data.ByteString            (ByteString)
 import           Data.ByteString.Base16     as Hex
+import           Data.Foldable              (fold)
 import           Data.Set                   (Set)
 import qualified Data.Set                   as Set
 import           Data.String                (IsString)
-import           Data.Text                  (Text, intercalate, pack)
+import           Data.Text                  (Text, intercalate, pack, unpack)
 import           Data.Text.Encoding         (decodeUtf8)
 import           Data.Time                  (UTCTime)
 import           Data.Void                  (Void, absurd)
@@ -83,6 +85,7 @@ type ID = ID' 'NotWithinSet 'InPredicate 'RegularString
 -- In an AST parsed from a QuasiQuoter, there might be references to haskell variables
 type QQID = ID' 'NotWithinSet 'InPredicate 'QuasiQuote
 type Value = ID' 'NotWithinSet 'InFact 'RegularString -- a term that is *not* a variable
+type SetValue = ID' 'WithinSet 'InFact 'RegularString
 
 instance  ( Lift (VariableType inSet pof)
           , Lift (SetType inSet ctx)
@@ -167,6 +170,31 @@ renderInnerId = \case
   Variable v  -> absurd v
   TermSet v   -> absurd v
 
+listSymbolsInTerm :: ID -> Set.Set Text
+listSymbolsInTerm = \case
+  Symbol name   -> Set.singleton name
+  Variable name -> Set.singleton name
+  TermSet terms -> foldMap listSymbolsInSetValue terms
+  Antiquote v   -> absurd v
+  _             -> mempty
+
+listSymbolsInValue :: Value -> Set.Set Text
+listSymbolsInValue = \case
+  Symbol name   -> Set.singleton name
+  TermSet terms -> foldMap listSymbolsInSetValue terms
+  Variable  v   -> absurd v
+  Antiquote v   -> absurd v
+  _             -> mempty
+
+listSymbolsInSetValue :: SetValue -> Set.Set Text
+listSymbolsInSetValue = \case
+  Symbol name   -> Set.singleton name
+  TermSet   v   -> absurd v
+  Variable  v   -> absurd v
+  Antiquote v   -> absurd v
+  _             -> mempty
+
+
 data Predicate' (pof :: PredicateOrFact) (ctx :: ParsedAs) = Predicate
   { name  :: Text
   , terms :: [ID' 'NotWithinSet pof ctx]
@@ -192,6 +220,16 @@ renderPredicate Predicate{name,terms} =
 renderFact :: Fact -> Text
 renderFact Predicate{name,terms} =
   name <> "(" <> intercalate ", " (fmap renderFactId terms) <> ")"
+
+listSymbolsInFact :: Fact -> Set.Set Text
+listSymbolsInFact Predicate{..} =
+     Set.singleton name
+  <> foldMap listSymbolsInValue terms
+
+listSymbolsInPredicate :: Predicate -> Set.Set Text
+listSymbolsInPredicate Predicate{..} =
+     Set.singleton name
+  <> foldMap listSymbolsInTerm terms
 
 data QueryItem' ctx = QueryItem
   { qBody        :: [Predicate' 'InPredicate ctx]
@@ -220,6 +258,30 @@ deriving instance ( Show (Predicate' 'InPredicate ctx)
 
 deriving instance (Lift (Predicate' 'InPredicate ctx), Lift (Expression' ctx)) => Lift (QueryItem' ctx)
 
+renderQueryItem :: QueryItem' 'RegularString -> Text
+renderQueryItem QueryItem{..} =
+  intercalate ",\n" $ fold
+    [ renderPredicate <$> qBody
+    , renderExpression <$> qExpressions
+    ]
+
+renderCheck :: Check -> Text
+renderCheck is = "check if " <>
+  (intercalate "\n or " $ renderQueryItem <$> is)
+
+listSymbolsInQueryItem :: QueryItem' 'RegularString -> Set.Set Text
+listSymbolsInQueryItem QueryItem{..} =
+     Set.singleton "query" -- query items are serialized as `Rule`s
+                           -- so an empty rule head is added: `query()`
+                           -- It means that query items implicitly depend on
+                           -- the `query` symbol being defined.
+  <> foldMap listSymbolsInPredicate qBody
+  <> foldMap listSymbolsInExpression qExpressions
+
+listSymbolsInCheck :: Check -> Set.Set Text
+listSymbolsInCheck =
+  foldMap listSymbolsInQueryItem
+
 data Rule' ctx = Rule
   { rhead       :: Predicate' 'InPredicate ctx
   , body        :: [Predicate' 'InPredicate ctx]
@@ -241,8 +303,14 @@ type Rule = Rule' 'RegularString
 deriving instance (Lift (Predicate' 'InPredicate ctx), Lift (Expression' ctx)) => Lift (Rule' ctx)
 
 renderRule :: Rule' 'RegularString -> Text
-renderRule Rule{rhead,body} =
-  renderPredicate rhead <> " <- " <> intercalate ", " (fmap renderPredicate body)
+renderRule Rule{rhead,body,expressions} =
+  renderPredicate rhead <> " <- " <> intercalate ", " (fmap renderPredicate body <> fmap renderExpression expressions)
+
+listSymbolsInRule :: Rule -> Set.Set Text
+listSymbolsInRule Rule{..} =
+     listSymbolsInPredicate rhead
+  <> foldMap listSymbolsInPredicate body
+  <> foldMap listSymbolsInExpression expressions
 
 data Unary =
     Negate
@@ -282,6 +350,12 @@ deriving instance Show (ID' 'NotWithinSet 'InPredicate ctx) => Show (Expression'
 
 type Expression = Expression' 'RegularString
 
+listSymbolsInExpression :: Expression -> Set.Set Text
+listSymbolsInExpression = \case
+  EValue t -> listSymbolsInTerm t
+  EUnary _ e -> listSymbolsInExpression e
+  EBinary _ e e' -> foldMap listSymbolsInExpression [e, e']
+
 data Op =
     VOp ID
   | UOp Unary
@@ -301,6 +375,46 @@ fromStack =
       final _   = Left "Stack containing more than one element"
    in final <=< go []
 
+toStack :: Expression -> [Op]
+toStack expr =
+  let go e s = case e of
+        EValue t      -> VOp t : s
+        EUnary o i    -> go i $ UOp o : s
+        EBinary o l r -> go l $ go r $ BOp o : s
+   in go expr []
+
+renderExpression :: Expression -> Text
+renderExpression =
+  let rOp t e e' = renderExpression e
+                <> " " <> t <> " "
+                <> renderExpression e'
+      rm m e e' = renderExpression e
+               <> "." <> m <> "("
+               <> renderExpression e'
+               <> ")"
+   in \case
+        EValue t -> renderId t
+        EUnary Negate e -> "!" <> renderExpression e
+        EUnary Parens e -> "(" <> renderExpression e <> ")"
+        EUnary Length e -> renderExpression e <> ".length()"
+        EBinary LessThan e e'       -> rOp "<" e e'
+        EBinary GreaterThan e e'    -> rOp ">" e e'
+        EBinary LessOrEqual e e'    -> rOp "<=" e e'
+        EBinary GreaterOrEqual e e' -> rOp ">=" e e'
+        EBinary Equal e e'          -> rOp "==" e e'
+        EBinary Contains e e' -> rm "contains" e e'
+        EBinary Prefix e e'   -> rm "starts_with" e e'
+        EBinary Suffix e e'   -> rm "ends_with" e e'
+        EBinary Regex e e'    -> rm "matches" e e'
+        EBinary Intersection e e' -> rm "intersection" e e'
+        EBinary Union e e'        -> rm "union" e e'
+        EBinary Add e e' -> rOp "+" e e'
+        EBinary Sub e e' -> rOp "-" e e'
+        EBinary Mul e e' -> rOp "*" e e'
+        EBinary Div e e' -> rOp "/" e e'
+        EBinary And e e' -> rOp "&&" e e'
+        EBinary Or e e'  -> rOp "||" e e'
+
 type Block = Block' 'RegularString
 data Block' (ctx :: ParsedAs) = Block
   { bRules   :: [Rule' ctx]
@@ -309,15 +423,25 @@ data Block' (ctx :: ParsedAs) = Block
   , bContext :: Maybe Text
   }
 
+renderBlock :: Block -> Text
+renderBlock Block{..} =
+  intercalate ";\n" $ fold
+    [ renderRule <$> bRules
+    , renderFact <$> bFacts
+    , renderCheck <$> bChecks
+    ]
+
 deriving instance ( Eq (Predicate' 'InFact ctx)
                   , Eq (Rule' ctx)
                   , Eq (QueryItem' ctx)
                   ) => Eq (Block' ctx)
 
-deriving instance ( Show (Predicate' 'InFact ctx)
-                  , Show (Rule' ctx)
-                  , Show (QueryItem' ctx)
-                  ) => Show (Block' ctx)
+-- deriving instance ( Show (Predicate' 'InFact ctx)
+--                   , Show (Rule' ctx)
+--                   , Show (QueryItem' ctx)
+--                   ) => Show (Block' ctx)
+instance Show Block where
+  show = unpack . renderBlock
 
 deriving instance ( Lift (Predicate' 'InFact ctx)
                   , Lift (Rule' ctx)
@@ -337,6 +461,13 @@ instance Monoid (Block' ctx) where
                  , bChecks = []
                  , bContext = Nothing
                  }
+
+listSymbolsInBlock :: Block' 'RegularString -> Set.Set Text
+listSymbolsInBlock Block {..} = fold
+  [ foldMap listSymbolsInRule bRules
+  , foldMap listSymbolsInFact bFacts
+  , foldMap listSymbolsInCheck bChecks
+  ]
 
 type Verifier = Verifier' 'RegularString
 data Verifier' (ctx :: ParsedAs) = Verifier
