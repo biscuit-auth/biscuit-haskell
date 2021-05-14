@@ -1,19 +1,32 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE QuasiQuotes       #-}
 {- HLINT ignore "Reduce duplication" -}
 module Spec.Crypto (specs) where
 
+import           Data.ByteString    (ByteString)
 import           Data.List.NonEmpty (NonEmpty ((:|)))
 import           Test.Tasty
 import           Test.Tasty.HUnit
 
-import           Sel
+import           Biscuit
+import           Datalog.Parser     (block)
+import qualified Sel                as Sel
+import           Token              (Biscuit (..))
 
 specs :: TestTree
 specs = testGroup "biscuit crypto"
-  [ singleBlockRoundtrip
-  , multiBlockRoundtrip
-  , tamperedAuthority
-  , tamperedBlock
+  [ testGroup "signature algorithm"
+      [ singleBlockRoundtrip
+      , multiBlockRoundtrip
+      , tamperedAuthority
+      , tamperedBlock
+      ]
+  , testGroup "high-level functions"
+      [ singleBlockRoundtrip'
+      , multiBlockRoundtrip'
+      , tamperedAuthority'
+      , tamperedBlock'
+      ]
   ]
 
 singleBlockRoundtrip :: TestTree
@@ -22,8 +35,8 @@ singleBlockRoundtrip = testCase "Single block roundtrip" $ do
   let pub = publicKey rootKp
       content = "content"
       token = (pub, content) :| []
-  sig <- signBlock rootKp content
-  result <- verifySignature token sig
+  sig <- Sel.signBlock rootKp content
+  result <- Sel.verifySignature token sig
   result @?= True
 
 multiBlockRoundtrip :: TestTree
@@ -35,9 +48,9 @@ multiBlockRoundtrip = testCase "Multi block roundtrip" $ do
       content = "content"
       content' = "block"
       token = (pub, content) :| [(pub', content')]
-  sig    <- signBlock kp content
-  sig'   <- aggregate sig =<< signBlock kp' content'
-  result <- verifySignature token sig'
+  sig    <- Sel.signBlock kp content
+  sig'   <- Sel.aggregate sig =<< Sel.signBlock kp' content'
+  result <- Sel.verifySignature token sig'
   result @?= True
 
 tamperedAuthority :: TestTree
@@ -50,11 +63,11 @@ tamperedAuthority = testCase "Tampered authority" $ do
       content' = "block"
       token  = (pub, "modified") :| []
       token' = (pub, "modified") :| [(pub', content')]
-  sig    <- signBlock kp content
-  sig'   <- aggregate sig =<< signBlock kp' content'
-  result <- verifySignature token sig'
+  sig    <- Sel.signBlock kp content
+  sig'   <- Sel.aggregate sig =<< Sel.signBlock kp' content'
+  result <- Sel.verifySignature token sig'
   result @?= False
-  result' <- verifySignature token' sig'
+  result' <- Sel.verifySignature token' sig'
   result' @?= False
 
 tamperedBlock :: TestTree
@@ -66,7 +79,52 @@ tamperedBlock = testCase "Tampered block" $ do
       content = "content"
       content' = "block"
       token = (pub, content) :| [(pub', "modified")]
-  sig    <- signBlock kp content
-  sig'   <- aggregate sig =<< signBlock kp' content'
-  result <- verifySignature token sig'
+  sig    <- Sel.signBlock kp content
+  sig'   <- Sel.aggregate sig =<< Sel.signBlock kp' content'
+  result <- Sel.verifySignature token sig'
+  result @?= False
+
+singleBlockRoundtrip' :: TestTree
+singleBlockRoundtrip' = testCase "Single block roundtrip" $ do
+  rootKp <- newKeypair
+  let pub = publicKey rootKp
+  b <- mkBiscuit rootKp [block|right(#authority,#read);|]
+  result <- checkBiscuitSignature b pub
+  result @?= True
+
+multiBlockRoundtrip' :: TestTree
+multiBlockRoundtrip' = testCase "Multi block roundtrip" $ do
+  kp <- newKeypair
+  let pub = publicKey kp
+  b <- mkBiscuit kp [block|right(#authority,#read);|]
+  b' <- addBlock [block|check if true;|] b
+  result <- checkBiscuitSignature b' pub
+  result @?= True
+
+tamper :: (PublicKey, (ByteString, Block))
+       -> (PublicKey, (ByteString, Block))
+tamper (pk, (_, b)) = (pk, ("tampered", b))
+
+tamperedAuthority' :: TestTree
+tamperedAuthority' = testCase "Tampered authority" $ do
+  kp <- newKeypair
+  let pub = publicKey kp
+  b <- mkBiscuit kp [block|right(#authority,#read);|]
+  b' <- addBlock [block|check if true;|] b
+  let modified = b'
+        { authority = tamper $ authority b
+        }
+  result <- checkBiscuitSignature modified pub
+  result @?= False
+
+tamperedBlock' :: TestTree
+tamperedBlock' = testCase "Tampered block" $ do
+  kp <- newKeypair
+  let pub = publicKey kp
+  b <- mkBiscuit kp [block|right(#authority,#read);|]
+  b' <- addBlock [block|check if true;|] b
+  let modified = b'
+        { blocks = tamper <$> blocks b
+        }
+  result <- checkBiscuitSignature modified pub
   result @?= False

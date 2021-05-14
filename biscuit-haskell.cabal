@@ -49,6 +49,7 @@ library
     , containers
     , either
     , libsodium
+    , mtl
     , parser-combinators
     , primitive
     , protobuf
@@ -77,6 +78,7 @@ executable biscuit-haskell-exe
     , containers
     , either
     , libsodium
+    , mtl
     , parser-combinators
     , primitive
     , protobuf
@@ -97,6 +99,7 @@ test-suite biscuit-haskell-test
       Spec.Quasiquoter
       Spec.Roundtrip
       Spec.Samples
+      Spec.Verification
       Paths_biscuit_haskell
   hs-source-dirs:
       test
@@ -112,6 +115,7 @@ test-suite biscuit-haskell-test
     , containers
     , either
     , libsodium
+    , mtl
     , parser-combinators
     , primitive
     , protobuf

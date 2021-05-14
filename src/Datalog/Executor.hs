@@ -3,14 +3,14 @@
 {-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE NamedFieldPuns    #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards   #-}
 module Datalog.Executor where
-
-import           Debug.Trace
 
 import           Control.Monad           (join, mfilter)
 import           Data.Bitraversable      (bitraverse)
 import qualified Data.ByteString         as ByteString
 import           Data.Either.Combinators (maybeToRight)
+import           Data.Foldable           (traverse_)
 import qualified Data.List.NonEmpty      as NE
 import           Data.Map.Strict         (Map, (!?))
 import qualified Data.Map.Strict         as Map
@@ -23,13 +23,19 @@ import           Data.Void               (absurd)
 import           Datalog.AST
 
 type Name = Text -- a variable name
-type Bindings = Map Name Value
+type Bindings  = Map Name Value
 
 data World
  = World
  { rules :: Set Rule
  , facts :: Set Fact
  }
+
+instance Semigroup World where
+  w1 <> w2 = World { rules = rules w1 <> rules w2, facts = facts w1 <> facts w2 }
+
+instance Monoid World where
+  mempty = World mempty mempty
 
 instance Show World where
   show World{rules,facts} = unpack . intercalate "\n" $ join
@@ -41,6 +47,44 @@ instance Show World where
 
 rF :: Set Fact -> IO ()
 rF = putStrLn . unpack . intercalate "\n" . fmap renderFact . Set.toList
+
+collectWorld :: Block -> World
+collectWorld Block{bRules,bFacts} =
+  World
+    { rules = Set.fromList bRules
+    , facts = Set.fromList bFacts
+    }
+
+runVerifier :: Block
+            -> [Block]
+            -> Verifier
+            -> IO (Either () ())
+runVerifier authority blocks Verifier{..} = do
+  let initialWorld = foldMap collectWorld $ vBlock : authority : blocks
+      allFacts = computeAllFacts initialWorld
+      allChecks = foldMap bChecks $ vBlock : authority : blocks
+      checkResults = traverse_ (checkCheck allFacts) allChecks
+      policiesResults = mapMaybe (checkPolicy allFacts) vPolicies
+      policyResult = case policiesResults of
+        p : _ -> p
+        []    -> Right () -- no policy matched. Check what to do in that case
+  pure $ case (checkResults, policyResult) of
+    (Right (), Right ()) -> Right ()
+    _                    -> Left () -- todo accumulate errors
+
+checkCheck :: Set Fact -> Check -> Either () ()
+checkCheck facts items =
+  if any (isQueryItemSatisfied facts) items
+  then Right ()
+  else Left ()
+
+checkPolicy :: Set Fact -> Policy -> Maybe (Either () ())
+checkPolicy _ _ = Nothing -- todo
+
+isQueryItemSatisfied :: Set Fact -> QueryItem' 'RegularString -> Bool
+isQueryItemSatisfied facts QueryItem{qBody, qExpressions} =
+  let bindings = getBindingsForRuleBody facts qBody qExpressions
+   in Set.size bindings > 0
 
 computeAllFacts :: World -> Set Fact
 computeAllFacts w@World{facts} =
@@ -101,12 +145,6 @@ getCombinations (x:xs) = do
   y <- x
   (y:) <$> getCombinations xs
 getCombinations []     = [[]]
-
-traceBindings :: Bindings -> Bindings
-traceBindings m =
-  let out = unpack $ intercalate "," $ outB <$> Map.toList m
-      outB (n, v) = n <> " => " <> renderFactId v
-   in trace ("==\n" <> out <> "\n==") m
 
 mergeBindings :: [Bindings] -> Bindings
 mergeBindings =

@@ -4,20 +4,25 @@
 module Token
   ( Biscuit (..)
   , ParseError (..)
+  , VerificationError (..)
   , mkBiscuit
   , addBlock
   , checkBiscuitSignature
   , parseBiscuit
   , serializeBiscuit
+  , verifyBiscuit
   ) where
 
 import           Control.Monad           (when)
+import           Control.Monad.Except    (runExceptT, throwError)
+import           Control.Monad.IO.Class  (liftIO)
 import           Data.Bifunctor          (first)
 import           Data.ByteString         (ByteString)
 import           Data.Either.Combinators (maybeToRight)
 import           Data.List.NonEmpty      (NonEmpty ((:|)))
 
-import           Datalog.AST             (Block)
+import           Datalog.AST             (Block, Verifier)
+import           Datalog.Executor        (runVerifier)
 import qualified Proto                   as PB
 import           ProtoBufAdapter         (Symbols, blockToPb, commonSymbols,
                                           extractSymbols, pbToBlock)
@@ -122,3 +127,23 @@ serializeBiscuit Biscuit{..} =
 
 blockFromPB :: Symbols -> PB.Block -> Either ParseError Block
 blockFromPB s pbBlock  = first InvalidProtobuf $ pbToBlock s pbBlock
+
+data VerificationError
+  = SignatureError
+  | DatalogError
+  deriving (Eq, Show)
+
+-- | Given a provided verifier (a set of facts, rules, checks and policies),
+-- and a public key, verify a biscuit
+-- - make sure the biscuit has been signed with the private key associated to the public key
+-- - make sure the biscuit is valid for the provided verifier
+verifyBiscuit :: Biscuit -> Verifier -> PublicKey -> IO (Either VerificationError ())
+verifyBiscuit b@Biscuit{..} verifier pub = runExceptT $ do
+  sigCheck <- liftIO $ checkBiscuitSignature b pub
+  when (not sigCheck) $ throwError SignatureError
+  let authorityBlock = snd . snd $ authority
+      attBlocks = snd . snd <$> blocks
+  verifResult <- liftIO $ runVerifier authorityBlock attBlocks verifier
+  case verifResult of
+    Left ()  -> throwError DatalogError
+    Right () -> pure ()

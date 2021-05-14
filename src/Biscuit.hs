@@ -7,6 +7,7 @@ module Biscuit
   , Block
   , Verifier
   , ParseError (..)
+  , VerificationError (..)
   , blockFact
   , blockRule
   , blockCheck
@@ -60,11 +61,12 @@ import           Sel                        (Keypair (..), PrivateKey,
                                              parsePublicKey,
                                              serializePrivateKey,
                                              serializePublicKey)
-import           Token                      (Biscuit, ParseError (..), addBlock,
+import           Token                      (Biscuit, ParseError (..),
+                                             VerificationError (..), addBlock,
                                              checkBiscuitSignature, mkBiscuit,
-                                             parseBiscuit, serializeBiscuit)
+                                             parseBiscuit, serializeBiscuit,
+                                             verifyBiscuit)
 
-data VerificationError deriving Show
 data Limits
 
 blockFact :: Fact -> Block
@@ -127,13 +129,6 @@ serializeB64 = Hex.encode . serialize
 -- recommends base 64 instead.
 serializeHex :: Biscuit -> ByteString
 serializeHex = B64.encodeBase64' . serialize
-
--- | Given a provided verifier (a set of facts, rules, checks and policies),
--- and a public key, verify a biscuit
--- - make sure the biscuit has been signed with the private key associated to the public key
--- - make sure the biscuit is valid for the provided verifier
-verifyBiscuit :: Biscuit -> Verifier -> PublicKey -> IO (Either VerificationError ())
-verifyBiscuit = error "todo"
 
 -- | Same as `verifyBiscuit`, but allows providing runtime restrictions
 -- - timeout
