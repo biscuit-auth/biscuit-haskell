@@ -1,18 +1,18 @@
 # ToDo
 
 - [x] spec user-facing API
-- [/] implement user-facing API
+- [x] implement user-facing API
   - [x] parse
   - [x] serialize
   - [x] create biscuit
   - [x] attenuate existing biscuit
   - [x] verify signature
-  - [ ] run checks & policies
+  - [x] run checks & policies
 
 - [ ] Datalog engine
   - [x] forbid use of variables in facts (through the AST)
   - [ ] handle revocation ids
-  - [ ] enforce `#authority` / `#ambient` restrictions in blocks
+  - [x] enforce `#authority` / `#ambient` restrictions in blocks
   - [ ] implement verifier limits (facts count, iterations count, timeout)
 
 - [ ] Harden crypto

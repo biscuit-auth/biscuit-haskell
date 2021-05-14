@@ -27,6 +27,7 @@ grandparent = testCase "Basic grandparent rule" $
         { rules = Set.fromList
                    [ [rule|grandparent($a,$b) <- parent($a,$c), parent($c,$b)|]
                    ]
+        , blockRules = mempty
         , facts = Set.fromList
                    [ [fact|parent("alice", "bob")|]
                    , [fact|parent("bob", "jean-pierre")|]
@@ -131,6 +132,7 @@ rulesWithConstraints = testCase "Rule with constraints" $
                    [ [rule|valid_date("file1") <- time(#ambient, $0), resource(#ambient, "file1"), $0 <= 2019-12-04T09:46:41+00:00|]
                    , [rule|valid_date("file2") <- time(#ambient, $0), resource(#ambient, "file2"), $0 <= 2010-12-04T09:46:41+00:00|]
                    ]
+        , blockRules = mempty
         , facts = Set.fromList
                    [ [fact|time(#ambient, 2019-12-04T01:00:00Z)|]
                    , [fact|resource(#ambient, "file1")|]
@@ -150,6 +152,7 @@ ruleHeadWithNoVars = testCase "Rule head with no variables" $
         { rules = Set.fromList
                    [ [rule|operation(#authority,#read) <- test($yolo, #nothing)|]
                    ]
+        , blockRules = mempty
         , facts = Set.fromList
                    [ [fact|test(#whatever, #notNothing)|]
                    ]

@@ -12,7 +12,7 @@ import           Biscuit
 import           Datalog.Parser   (block, verifier)
 
 specs :: TestTree
-specs = testGroup "Serde roundtrips"
+specs = testGroup "Datalog checks"
   [ singleBlock
   , unboundVarRule
   , symbolRestrictions
@@ -34,9 +34,17 @@ unboundVarRule = testCase "Rule with unbound variable" $ do
   res @?= Left DatalogError
 
 symbolRestrictions :: TestTree
-symbolRestrictions = testCase "Symbol restrictions" $ do
-  keypair <- newKeypair
-  b1 <- mkBiscuit keypair [block|check if operation(#ambient, #read);|]
-  b2 <- addBlock [block|operation($ambient, #read) <- operation($ambient, $any);|] b1
-  res <- verifyBiscuit b2 [verifier|operation(#ambient,#write);allow if true;|] (publicKey keypair)
-  res @?= Left DatalogError
+symbolRestrictions = testGroup "Restricted symbols in blocks"
+  [ testCase "In facts" $ do
+      keypair <- newKeypair
+      b1 <- mkBiscuit keypair [block|check if operation(#ambient, #read);|]
+      b2 <- addBlock [block|operation(#ambient, #read);|] b1
+      res <- verifyBiscuit b2 [verifier|allow if true;|] (publicKey keypair)
+      res @?= Left DatalogError
+  , testCase "In rules" $ do
+      keypair <- newKeypair
+      b1 <- mkBiscuit keypair [block|check if operation(#ambient, #read);|]
+      b2 <- addBlock [block|operation($ambient, #read) <- operation($ambient, $any);|] b1
+      res <- verifyBiscuit b2 [verifier|operation(#ambient,#write);allow if true;|] (publicKey keypair)
+      res @?= Left DatalogError
+  ]

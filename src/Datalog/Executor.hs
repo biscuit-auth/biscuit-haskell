@@ -27,20 +27,27 @@ type Bindings  = Map Name Value
 
 data World
  = World
- { rules :: Set Rule
- , facts :: Set Fact
+ { rules      :: Set Rule
+ , blockRules :: Set Rule
+ , facts      :: Set Fact
  }
 
 instance Semigroup World where
-  w1 <> w2 = World { rules = rules w1 <> rules w2, facts = facts w1 <> facts w2 }
+  w1 <> w2 = World
+               { rules = rules w1 <> rules w2
+               , blockRules = blockRules w1 <> blockRules w2
+               , facts = facts w1 <> facts w2
+               }
 
 instance Monoid World where
-  mempty = World mempty mempty
+  mempty = World mempty mempty mempty
 
 instance Show World where
-  show World{rules,facts} = unpack . intercalate "\n" $ join
-    [ [ "Rules" ]
+  show World{..} = unpack . intercalate "\n" $ join
+    [ [ "Authority & Verifier Rules" ]
     , renderRule <$> Set.toList rules
+    , [ "Block Rules" ]
+    , renderRule <$> Set.toList blockRules
     , [ "Facts" ]
     , renderFact <$> Set.toList facts
     ]
@@ -48,19 +55,30 @@ instance Show World where
 rF :: Set Fact -> IO ()
 rF = putStrLn . unpack . intercalate "\n" . fmap renderFact . Set.toList
 
-collectWorld :: Block -> World
-collectWorld Block{bRules,bFacts} =
+-- does the fact contain `#ambient` or `#authority`
+isRestricted :: Fact -> Bool
+isRestricted Predicate{terms} =
+  let restrictedSymbol (Symbol s ) = s == "ambient" || s == "authority"
+      restrictedSymbol _           = False
+   in any restrictedSymbol terms
+
+collectWorld :: Verifier -> Block -> [Block] -> World
+collectWorld Verifier{vBlock} authority blocks =
   World
-    { rules = Set.fromList bRules
-    , facts = Set.fromList bFacts
+    { rules = Set.fromList $ bRules vBlock <> bRules authority
+    , blockRules = Set.fromList $ foldMap bRules blocks
+    , facts = Set.fromList $
+              bFacts vBlock
+           <> bFacts authority
+           <> filter (not . isRestricted) (bFacts =<< blocks)
     }
 
 runVerifier :: Block
             -> [Block]
             -> Verifier
             -> IO (Either () ())
-runVerifier authority blocks Verifier{..} = do
-  let initialWorld = foldMap collectWorld $ vBlock : authority : blocks
+runVerifier authority blocks v@Verifier{..} = do
+  let initialWorld = collectWorld v authority blocks
       allFacts = computeAllFacts initialWorld
       allChecks = foldMap bChecks $ vBlock : authority : blocks
       checkResults = traverse_ (checkCheck allFacts) allChecks
@@ -94,9 +112,11 @@ computeAllFacts w@World{facts} =
       else computeAllFacts (w { facts = facts <> newFacts })
 
 extend :: World -> Set Fact
-extend World{rules, facts} =
-  let allNewFacts = foldMap (getFactsForRule facts) rules
-   in Set.difference allNewFacts facts
+extend World{..} =
+  let buildFacts = foldMap (getFactsForRule facts)
+      allNewFacts = buildFacts rules
+      allNewBlockFacts = Set.filter (not . isRestricted) $ buildFacts blockRules
+   in Set.difference (allNewFacts <> allNewBlockFacts) facts
 
 getFactsForRule :: Set Fact -> Rule -> Set Fact
 getFactsForRule facts Rule{rhead, body, expressions} =
