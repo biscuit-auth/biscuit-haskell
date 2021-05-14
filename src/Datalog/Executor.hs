@@ -56,12 +56,16 @@ extend World{rules, facts} =
 
 getFactsForRule :: Set Fact -> Rule -> Set Fact
 getFactsForRule facts Rule{rhead, body, expressions} =
+  let legalBindings = getBindingsForRuleBody facts body expressions
+      newFacts = mapMaybe (applyBindings rhead) $ Set.toList legalBindings
+   in Set.fromList newFacts
+
+getBindingsForRuleBody :: Set Fact -> [Predicate] -> [Expression] -> Set Bindings
+getBindingsForRuleBody facts body expressions =
   let candidateBindings = getCandidateBindings facts body
       allVariables = extractVariables body
       legalBindingsForFacts = reduceCandidateBindings allVariables candidateBindings
-      legalBindings = Set.filter (\b -> all (satisfies b) expressions) legalBindingsForFacts
-      newFacts = mapMaybe (applyBindings rhead) $ Set.toList legalBindings
-   in Set.fromList newFacts
+   in Set.filter (\b -> all (satisfies b) expressions) legalBindingsForFacts
 
 satisfies :: Bindings
           -> Expression
@@ -119,15 +123,16 @@ reduceCandidateBindings :: Set Name
 reduceCandidateBindings allVariables matches =
   let allCombinations :: [[Bindings]]
       allCombinations = getCombinations $ Set.toList <$> matches
-      isPartial :: Bindings -> Bool
-      isPartial = (== allVariables) . Set.fromList . Map.keys
-   in Set.fromList $ filter isPartial $ mergeBindings <$> allCombinations
+      isComplete :: Bindings -> Bool
+      isComplete = (== allVariables) . Set.fromList . Map.keys
+   in Set.fromList $ filter isComplete $ mergeBindings <$> allCombinations
 
 getCandidateBindings :: Set Fact
                      -> [Predicate]
                      -> [Set Bindings]
 getCandidateBindings facts predicates =
-   let keepFacts p = Set.map (factMatchesPredicate p) facts
+   let mapMaybeS f = foldMap (foldMap Set.singleton . f)
+       keepFacts p = mapMaybeS (factMatchesPredicate p) facts
     in keepFacts <$> predicates
 
 isSame :: ID -> Value -> Bool
@@ -140,7 +145,7 @@ isSame (LBool t)    (LBool t')    = t == t'
 isSame (TermSet t)  (TermSet t')  = t == t'
 isSame _ _                        = False
 
-factMatchesPredicate :: Predicate -> Fact -> Bindings
+factMatchesPredicate :: Predicate -> Fact -> Maybe Bindings
 factMatchesPredicate Predicate{name = predicateName, terms = predicateTerms }
                      Predicate{name = factName, terms = factTerms } =
   let namesMatch = predicateName == factName
@@ -151,8 +156,8 @@ factMatchesPredicate Predicate{name = predicateName, terms = predicateTerms }
       yolo t t' | isSame t t' = Just mempty
                 | otherwise   = Nothing
    in if namesMatch && lengthsMatch
-      then foldMap mergeBindings allMatches
-      else mempty
+      then mergeBindings <$> allMatches
+      else Nothing
 
 applyVariable :: Bindings
               -> ID

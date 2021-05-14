@@ -11,13 +11,14 @@ import           Test.Tasty.HUnit
 
 import           Datalog.AST
 import           Datalog.Executor
-import           Datalog.Parser       (expressionParser, predicate, rule)
+import           Datalog.Parser       (expressionParser, fact, rule)
 
 specs :: TestTree
 specs = testGroup "Datalog evaluation"
   [ grandparent
   , exprEval
   , rulesWithConstraints
+  , ruleHeadWithNoVars
   ]
 
 grandparent :: TestTree
@@ -27,16 +28,16 @@ grandparent = testCase "Basic grandparent rule" $
                    [ [rule|grandparent($a,$b) <- parent($a,$c), parent($c,$b)|]
                    ]
         , facts = Set.fromList
-                   [ [predicate|parent("alice", "bob")|]
-                   , [predicate|parent("bob", "jean-pierre")|]
-                   , [predicate|parent("alice", "toto")|]
+                   [ [fact|parent("alice", "bob")|]
+                   , [fact|parent("bob", "jean-pierre")|]
+                   , [fact|parent("alice", "toto")|]
                    ]
         }
    in computeAllFacts world @?= Set.fromList
-        [ [predicate|parent("alice", "bob")|]
-        , [predicate|parent("bob", "jean-pierre")|]
-        , [predicate|parent("alice", "toto")|]
-        , [predicate|grandparent("alice", "jean-pierre")|]
+        [ [fact|parent("alice", "bob")|]
+        , [fact|parent("bob", "jean-pierre")|]
+        , [fact|parent("alice", "toto")|]
+        , [fact|grandparent("alice", "jean-pierre")|]
         ]
 
 expr :: Text -> Expression
@@ -131,14 +132,28 @@ rulesWithConstraints = testCase "Rule with constraints" $
                    , [rule|valid_date("file2") <- time(#ambient, $0), resource(#ambient, "file2"), $0 <= 2010-12-04T09:46:41+00:00|]
                    ]
         , facts = Set.fromList
-                   [ [predicate|time(#ambient, 2019-12-04T01:00:00Z)|]
-                   , [predicate|resource(#ambient, "file1")|]
-                   , [predicate|resource(#ambient, "file2")|]
+                   [ [fact|time(#ambient, 2019-12-04T01:00:00Z)|]
+                   , [fact|resource(#ambient, "file1")|]
+                   , [fact|resource(#ambient, "file2")|]
                    ]
         }
    in computeAllFacts world @?= Set.fromList
-        [ [predicate|time(#ambient, 2019-12-04T01:00:00Z)|]
-        , [predicate|resource(#ambient, "file1")|]
-        , [predicate|resource(#ambient, "file2")|]
-        , [predicate|valid_date("file1")|]
+        [ [fact|time(#ambient, 2019-12-04T01:00:00Z)|]
+        , [fact|resource(#ambient, "file1")|]
+        , [fact|resource(#ambient, "file2")|]
+        , [fact|valid_date("file1")|]
+        ]
+
+ruleHeadWithNoVars :: TestTree
+ruleHeadWithNoVars = testCase "Rule head with no variables" $
+  let world = World
+        { rules = Set.fromList
+                   [ [rule|operation(#authority,#read) <- test($yolo, #nothing)|]
+                   ]
+        , facts = Set.fromList
+                   [ [fact|test(#whatever, #notNothing)|]
+                   ]
+        }
+   in computeAllFacts world @?= Set.fromList
+        [ [fact|test(#whatever, #notNothing)|]
         ]
