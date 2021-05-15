@@ -6,6 +6,7 @@
 {-# LANGUAGE RecordWildCards   #-}
 module Datalog.Executor where
 
+import           Control.Monad           (when)
 import           Control.Monad           (join, mfilter)
 import           Data.Bitraversable      (bitraverse)
 import qualified Data.ByteString         as ByteString
@@ -26,6 +27,16 @@ import           Timer                   (timer)
 
 type Name = Text -- a variable name
 type Bindings  = Map Name Value
+
+data ExecutionError
+  = Timeout
+  | TooManyFacts
+  | TooManyIterations
+  | FactsInBlocks
+  | EvaluationError
+  | FailedCheck Check
+  | DenyRuleMatched Query
+  deriving (Eq, Show)
 
 data Limits
   = Limits
@@ -96,45 +107,49 @@ collectWorld Verifier{vBlock} authority blocks =
 runVerifier :: Block
             -> [Block]
             -> Verifier
-            -> IO (Either () ())
+            -> IO (Either ExecutionError ())
 runVerifier = runVerifierWithLimits defaultLimits
 
 runVerifierWithLimits :: Limits
                       -> Block
                       -> [Block]
                       -> Verifier
-                      -> IO (Either () ())
+                      -> IO (Either ExecutionError ())
 runVerifierWithLimits l@Limits{..} authority blocks v = do
   resultOrTimeout <- timer maxTime $ runVerifier' l authority blocks v
   pure $ case resultOrTimeout of
-    Nothing -> Left ()
+    Nothing -> Left Timeout
     Just r  -> r
 
 runVerifier' :: Limits
              -> Block
              -> [Block]
              -> Verifier
-             -> IO (Either () ())
+             -> IO (Either ExecutionError ())
 runVerifier' Limits{..} authority blocks v@Verifier{..} = do
   let initialWorld = collectWorld v authority blocks
-      allFacts = computeAllFacts maxFacts maxIterations initialWorld
-      allChecks = foldMap bChecks $ vBlock : authority : blocks
-      checkResults = traverse_ (checkCheck allFacts) allChecks
-      policiesResults = mapMaybe (checkPolicy allFacts) vPolicies
-      policyResult = case policiesResults of
-        p : _ -> p
-        []    -> Right () -- no policy matched. Check what to do in that case
-  pure $ case (checkResults, policyResult) of
-    (Right (), Right ()) -> Right ()
-    _                    -> Left () -- todo accumulate errors
+      allFacts' = computeAllFacts maxFacts maxIterations initialWorld
+  case allFacts' of
+      Left e -> pure $ Left e
+      Right allFacts -> do
+        let allChecks = foldMap bChecks $ vBlock : authority : blocks
+            checkResults = traverse_ (checkCheck allFacts) allChecks
+            policiesResults = mapMaybe (checkPolicy allFacts) vPolicies
+            policyResult = case policiesResults of
+              p : _ -> p
+              []    -> Right () -- no policy matched. Check what to do in that case
+        pure $ case (checkResults, policyResult) of
+          (Right (), Right ()) -> Right ()
+          (Left e, _)          -> Left e
+          (_, Left e)          -> Left e -- todo accumulate errors
 
-checkCheck :: Set Fact -> Check -> Either () ()
+checkCheck :: Set Fact -> Check -> Either ExecutionError ()
 checkCheck facts items =
   if any (isQueryItemSatisfied facts) items
   then Right ()
-  else Left ()
+  else Left (FailedCheck items)
 
-checkPolicy :: Set Fact -> Policy -> Maybe (Either () ())
+checkPolicy :: Set Fact -> Policy -> Maybe (Either ExecutionError ())
 checkPolicy _ _ = Nothing -- todo
 
 isQueryItemSatisfied :: Set Fact -> QueryItem' 'RegularString -> Bool
@@ -142,13 +157,15 @@ isQueryItemSatisfied facts QueryItem{qBody, qExpressions} =
   let bindings = getBindingsForRuleBody facts qBody qExpressions
    in Set.size bindings > 0
 
-computeAllFacts :: Int -> Int -> World -> Set Fact
-computeAllFacts maxFacts maxIterations w@World{facts} =
+computeAllFacts :: Int -> Int -> World -> Either ExecutionError (Set Fact)
+computeAllFacts maxFacts maxIterations w@World{facts} = do
   let newFacts = extend w
       allFacts = facts <> newFacts
-   in if null newFacts || Set.size allFacts >= maxFacts || maxIterations - 1 <= 0
-      then allFacts
-      else computeAllFacts maxFacts (maxIterations - 1) (w { facts = allFacts })
+  when (Set.size allFacts >= maxFacts) $ Left TooManyFacts
+  when (maxIterations - 1 <= 0) $ Left TooManyIterations
+  if null newFacts
+  then pure allFacts
+  else computeAllFacts maxFacts (maxIterations - 1) (w { facts = allFacts })
 
 extend :: World -> Set Fact
 extend World{..} =

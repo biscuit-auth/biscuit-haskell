@@ -9,7 +9,8 @@ import           Test.Tasty
 import           Test.Tasty.HUnit
 
 import           Biscuit
-import           Datalog.Parser   (block, verifier)
+import qualified Datalog.Executor as Executor
+import           Datalog.Parser   (block, check, verifier)
 
 specs :: TestTree
 specs = testGroup "Datalog checks"
@@ -31,7 +32,7 @@ unboundVarRule = testCase "Rule with unbound variable" $ do
   b1 <- mkBiscuit keypair [block|check if operation(#ambient, #read);|]
   b2 <- addBlock [block|operation($unbound, #read) <- operation($any1, $any2);|] b1
   res <- verifyBiscuit b2 [verifier|operation(#ambient,#write);allow if true;|] (publicKey keypair)
-  res @?= Left DatalogError
+  res @?= Left (DatalogError $ Executor.FailedCheck [check|check if operation(#ambient, #read)|])
 
 symbolRestrictions :: TestTree
 symbolRestrictions = testGroup "Restricted symbols in blocks"
@@ -40,11 +41,11 @@ symbolRestrictions = testGroup "Restricted symbols in blocks"
       b1 <- mkBiscuit keypair [block|check if operation(#ambient, #read);|]
       b2 <- addBlock [block|operation(#ambient, #read);|] b1
       res <- verifyBiscuit b2 [verifier|allow if true;|] (publicKey keypair)
-      res @?= Left DatalogError
+      res @?= Left (DatalogError $ Executor.FailedCheck [check|check if operation(#ambient, #read)|])
   , testCase "In rules" $ do
       keypair <- newKeypair
       b1 <- mkBiscuit keypair [block|check if operation(#ambient, #read);|]
       b2 <- addBlock [block|operation($ambient, #read) <- operation($ambient, $any);|] b1
       res <- verifyBiscuit b2 [verifier|operation(#ambient,#write);allow if true;|] (publicKey keypair)
-      res @?= Left DatalogError
+      res @?= Left (DatalogError $ Executor.FailedCheck [check|check if operation(#ambient, #read)|])
   ]

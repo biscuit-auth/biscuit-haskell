@@ -23,7 +23,7 @@ import           Data.Either.Combinators (maybeToRight)
 import           Data.List.NonEmpty      (NonEmpty ((:|)))
 
 import           Datalog.AST             (Block, Verifier)
-import           Datalog.Executor        (Limits, defaultLimits,
+import           Datalog.Executor        (ExecutionError, Limits, defaultLimits,
                                           runVerifierWithLimits)
 import qualified Proto                   as PB
 import           ProtoBufAdapter         (Symbols, blockToPb, commonSymbols,
@@ -132,7 +132,7 @@ blockFromPB s pbBlock  = first InvalidProtobuf $ pbToBlock s pbBlock
 
 data VerificationError
   = SignatureError
-  | DatalogError
+  | DatalogError ExecutionError
   deriving (Eq, Show)
 
 -- | Given a provided verifier (a set of facts, rules, checks and policies),
@@ -147,7 +147,7 @@ verifyBiscuitWithLimits l b@Biscuit{..} verifier pub = runExceptT $ do
       attBlocks = snd . snd <$> blocks
   verifResult <- liftIO $ runVerifierWithLimits l authorityBlock attBlocks verifier
   case verifResult of
-    Left ()  -> throwError DatalogError
+    Left e   -> throwError $ DatalogError e
     Right () -> pure ()
 
 -- | Same as `verifyBiscuitWithLimits`, but with default limits (1ms timeout, max 1000 facts, max 100 iterations)

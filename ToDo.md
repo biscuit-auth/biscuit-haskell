@@ -13,6 +13,7 @@
   - [x] forbid use of variables in facts (through the AST)
   - [ ] handle revocation ids
   - [x] enforce `#authority` / `#ambient` restrictions in blocks
+  - [ ] report more detailed errors in datalog execution
   - [ ] implement verifier limits
     - [x] facts count
     - [x] iterations count
