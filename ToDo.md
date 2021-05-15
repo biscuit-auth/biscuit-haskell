@@ -13,7 +13,13 @@
   - [x] forbid use of variables in facts (through the AST)
   - [ ] handle revocation ids
   - [x] enforce `#authority` / `#ambient` restrictions in blocks
-  - [ ] implement verifier limits (facts count, iterations count, timeout)
+  - [ ] implement verifier limits
+    - [x] facts count
+    - [x] iterations count
+    - [x] timeout
+    - [ ] rules / facts in blocks
+    - [ ] regexes
+  - [ ] make expression errors blow the verification step
 
 - [ ] Harden crypto
   - [ ] check all sensitive buffers are filled with zeroes after use

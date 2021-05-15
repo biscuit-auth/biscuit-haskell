@@ -33,6 +33,7 @@ library
       Proto
       ProtoBufAdapter
       Sel
+      Timer
       Token
   other-modules:
       Paths_biscuit_haskell
@@ -40,7 +41,8 @@ library
       src
   ghc-options: -Wall -Werror
   build-depends:
-      attoparsec
+      async
+    , attoparsec
     , base >=4.7 && <5
     , base16-bytestring
     , base64
@@ -68,7 +70,8 @@ executable biscuit-haskell-exe
       app
   ghc-options: -threaded -rtsopts -with-rtsopts=-N -Wall -Werror
   build-depends:
-      attoparsec
+      async
+    , attoparsec
     , base >=4.7 && <5
     , base16-bytestring
     , base64
@@ -105,7 +108,8 @@ test-suite biscuit-haskell-test
       test
   ghc-options: -main-is Spec -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      attoparsec
+      async
+    , attoparsec
     , base >=4.7 && <5
     , base16-bytestring
     , base64

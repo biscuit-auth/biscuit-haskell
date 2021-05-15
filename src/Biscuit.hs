@@ -55,6 +55,7 @@ import           Datalog.AST                (Block, BlockElement' (..), Check,
                                              Fact, Policy, Rule, Verifier,
                                              VerifierElement' (..), bContext,
                                              elementToBlock, elementToVerifier)
+import           Datalog.Executor           (defaultLimits)
 import           Sel                        (Keypair (..), PrivateKey,
                                              PublicKey, fromPrivateKey,
                                              newKeypair, parsePrivateKey,
@@ -65,9 +66,8 @@ import           Token                      (Biscuit, ParseError (..),
                                              VerificationError (..), addBlock,
                                              checkBiscuitSignature, mkBiscuit,
                                              parseBiscuit, serializeBiscuit,
-                                             verifyBiscuit)
-
-data Limits
+                                             verifyBiscuit,
+                                             verifyBiscuitWithLimits)
 
 blockFact :: Fact -> Block
 blockFact = elementToBlock . BlockFact
@@ -129,17 +129,3 @@ serializeB64 = Hex.encode . serialize
 -- recommends base 64 instead.
 serializeHex :: Biscuit -> ByteString
 serializeHex = B64.encodeBase64' . serialize
-
--- | Same as `verifyBiscuit`, but allows providing runtime restrictions
--- - timeout
--- - max number of facts created
--- - max number of iterations when computing facts
--- - expressions restrictions (eg, disallow regexes)
--- - blocks restrictions (eg disallow rules and facts in non-authority blocks)
-verifyBiscuitWithLimits :: Limits -> Biscuit -> Verifier -> PublicKey -> IO (Either VerificationError ())
-verifyBiscuitWithLimits = error "todo"
-
------ these functions are not meant to be in the top-level module, but they are not
--- implemented yet, so i'm putting them there for now
-defaultLimits :: Limits
-defaultLimits = error "todo"

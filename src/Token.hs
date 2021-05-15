@@ -11,6 +11,7 @@ module Token
   , parseBiscuit
   , serializeBiscuit
   , verifyBiscuit
+  , verifyBiscuitWithLimits
   ) where
 
 import           Control.Monad           (when)
@@ -22,7 +23,8 @@ import           Data.Either.Combinators (maybeToRight)
 import           Data.List.NonEmpty      (NonEmpty ((:|)))
 
 import           Datalog.AST             (Block, Verifier)
-import           Datalog.Executor        (runVerifier)
+import           Datalog.Executor        (Limits, defaultLimits,
+                                          runVerifierWithLimits)
 import qualified Proto                   as PB
 import           ProtoBufAdapter         (Symbols, blockToPb, commonSymbols,
                                           extractSymbols, pbToBlock)
@@ -137,13 +139,17 @@ data VerificationError
 -- and a public key, verify a biscuit
 -- - make sure the biscuit has been signed with the private key associated to the public key
 -- - make sure the biscuit is valid for the provided verifier
-verifyBiscuit :: Biscuit -> Verifier -> PublicKey -> IO (Either VerificationError ())
-verifyBiscuit b@Biscuit{..} verifier pub = runExceptT $ do
+verifyBiscuitWithLimits :: Limits -> Biscuit -> Verifier -> PublicKey -> IO (Either VerificationError ())
+verifyBiscuitWithLimits l b@Biscuit{..} verifier pub = runExceptT $ do
   sigCheck <- liftIO $ checkBiscuitSignature b pub
   when (not sigCheck) $ throwError SignatureError
   let authorityBlock = snd . snd $ authority
       attBlocks = snd . snd <$> blocks
-  verifResult <- liftIO $ runVerifier authorityBlock attBlocks verifier
+  verifResult <- liftIO $ runVerifierWithLimits l authorityBlock attBlocks verifier
   case verifResult of
     Left ()  -> throwError DatalogError
     Right () -> pure ()
+
+-- | Same as `verifyBiscuitWithLimits`, but with default limits (1ms timeout, max 1000 facts, max 100 iterations)
+verifyBiscuit :: Biscuit -> Verifier -> PublicKey -> IO (Either VerificationError ())
+verifyBiscuit = verifyBiscuitWithLimits defaultLimits

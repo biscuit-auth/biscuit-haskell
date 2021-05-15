@@ -19,6 +19,7 @@ specs = testGroup "Datalog evaluation"
   , exprEval
   , rulesWithConstraints
   , ruleHeadWithNoVars
+  , limits
   ]
 
 grandparent :: TestTree
@@ -34,7 +35,7 @@ grandparent = testCase "Basic grandparent rule" $
                    , [fact|parent("alice", "toto")|]
                    ]
         }
-   in computeAllFacts world @?= Set.fromList
+   in computeAllFacts 1000 100 world @?= Set.fromList
         [ [fact|parent("alice", "bob")|]
         , [fact|parent("bob", "jean-pierre")|]
         , [fact|parent("alice", "toto")|]
@@ -139,7 +140,7 @@ rulesWithConstraints = testCase "Rule with constraints" $
                    , [fact|resource(#ambient, "file2")|]
                    ]
         }
-   in computeAllFacts world @?= Set.fromList
+   in computeAllFacts 1000 100 world @?= Set.fromList
         [ [fact|time(#ambient, 2019-12-04T01:00:00Z)|]
         , [fact|resource(#ambient, "file1")|]
         , [fact|resource(#ambient, "file2")|]
@@ -157,6 +158,50 @@ ruleHeadWithNoVars = testCase "Rule head with no variables" $
                    [ [fact|test(#whatever, #notNothing)|]
                    ]
         }
-   in computeAllFacts world @?= Set.fromList
+   in computeAllFacts 1000 100 world @?= Set.fromList
         [ [fact|test(#whatever, #notNothing)|]
+        ]
+
+limits :: TestTree
+limits =
+  let world = World
+        { rules = Set.fromList
+                   [ [rule|ancestor($a,$b) <- parent($a,$c), ancestor($c,$b)|]
+                   , [rule|ancestor($a,$b) <- parent($a,$b)|]
+                   ]
+        , blockRules = mempty
+        , facts = Set.fromList
+                   [ [fact|parent("alice", "bob")|]
+                   , [fact|parent("bob", "jean-pierre")|]
+                   , [fact|parent("bob", "marielle")|]
+                   , [fact|parent("alice", "toto")|]
+                   ]
+        }
+   in testGroup "Facts generation limits" $
+        [ testCase "max facts" $
+            -- grandparent relations should not appear, as the execution stops
+            -- after the first iteration (the max number of facts is already reached)
+            computeAllFacts 2 100 world @?= Set.fromList
+                [ [fact|parent("alice", "bob")|]
+                , [fact|parent("bob", "jean-pierre")|]
+                , [fact|parent("bob", "marielle")|]
+                , [fact|parent("alice", "toto")|]
+                , [fact|ancestor("alice", "bob")|]
+                , [fact|ancestor("bob", "jean-pierre")|]
+                , [fact|ancestor("bob", "marielle")|]
+                , [fact|ancestor("alice", "toto")|]
+                ]
+        , testCase "max iterations" $
+            -- grandparent relations should not appear, as the execution stops
+            -- after the first iteration
+            computeAllFacts 1000 1 world @?= Set.fromList
+                [ [fact|parent("alice", "bob")|]
+                , [fact|parent("bob", "jean-pierre")|]
+                , [fact|parent("bob", "marielle")|]
+                , [fact|parent("alice", "toto")|]
+                , [fact|ancestor("alice", "bob")|]
+                , [fact|ancestor("bob", "jean-pierre")|]
+                , [fact|ancestor("bob", "marielle")|]
+                , [fact|ancestor("alice", "toto")|]
+                ]
         ]

@@ -20,10 +20,30 @@ import qualified Data.Set                as Set
 import           Data.Text               (Text, intercalate, unpack)
 import qualified Data.Text               as Text
 import           Data.Void               (absurd)
+
 import           Datalog.AST
+import           Timer                   (timer)
 
 type Name = Text -- a variable name
 type Bindings  = Map Name Value
+
+data Limits
+  = Limits
+  { maxFacts        :: Int
+  , maxIterations   :: Int
+  , maxTime         :: Int
+  , allowRegexes    :: Bool
+  , allowBlockFacts :: Bool
+  }
+
+defaultLimits :: Limits
+defaultLimits = Limits
+  { maxFacts = 1000
+  , maxIterations = 100
+  , maxTime = 1000
+  , allowRegexes = True
+  , allowBlockFacts = True
+  }
 
 data World
  = World
@@ -77,9 +97,27 @@ runVerifier :: Block
             -> [Block]
             -> Verifier
             -> IO (Either () ())
-runVerifier authority blocks v@Verifier{..} = do
+runVerifier = runVerifierWithLimits defaultLimits
+
+runVerifierWithLimits :: Limits
+                      -> Block
+                      -> [Block]
+                      -> Verifier
+                      -> IO (Either () ())
+runVerifierWithLimits l@Limits{..} authority blocks v = do
+  resultOrTimeout <- timer maxTime $ runVerifier' l authority blocks v
+  pure $ case resultOrTimeout of
+    Nothing -> Left ()
+    Just r  -> r
+
+runVerifier' :: Limits
+             -> Block
+             -> [Block]
+             -> Verifier
+             -> IO (Either () ())
+runVerifier' Limits{..} authority blocks v@Verifier{..} = do
   let initialWorld = collectWorld v authority blocks
-      allFacts = computeAllFacts initialWorld
+      allFacts = computeAllFacts maxFacts maxIterations initialWorld
       allChecks = foldMap bChecks $ vBlock : authority : blocks
       checkResults = traverse_ (checkCheck allFacts) allChecks
       policiesResults = mapMaybe (checkPolicy allFacts) vPolicies
@@ -104,12 +142,13 @@ isQueryItemSatisfied facts QueryItem{qBody, qExpressions} =
   let bindings = getBindingsForRuleBody facts qBody qExpressions
    in Set.size bindings > 0
 
-computeAllFacts :: World -> Set Fact
-computeAllFacts w@World{facts} =
+computeAllFacts :: Int -> Int -> World -> Set Fact
+computeAllFacts maxFacts maxIterations w@World{facts} =
   let newFacts = extend w
-   in if null newFacts
-      then facts
-      else computeAllFacts (w { facts = facts <> newFacts })
+      allFacts = facts <> newFacts
+   in if null newFacts || Set.size allFacts >= maxFacts || maxIterations - 1 <= 0
+      then allFacts
+      else computeAllFacts maxFacts (maxIterations - 1) (w { facts = allFacts })
 
 extend :: World -> Set Fact
 extend World{..} =
