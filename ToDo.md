@@ -35,6 +35,7 @@
   - [ ] attenuate biscuit (spec)
   - [ ] attenuate biscuit
 
+- [ ] use ContT in `Sel`
 - [ ] move the modules under a `Crypto` namespace
 - [ ] try building with cabal
 - [ ] add CI
