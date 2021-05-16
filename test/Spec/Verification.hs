@@ -9,6 +9,8 @@ import           Test.Tasty
 import           Test.Tasty.HUnit
 
 import           Biscuit
+import           Datalog.AST      (Expression' (..), ID' (..), Query,
+                                   QueryItem' (..))
 import qualified Datalog.Executor as Executor
 import           Datalog.Parser   (block, check, verifier)
 
@@ -19,12 +21,15 @@ specs = testGroup "Datalog checks"
   , symbolRestrictions
   ]
 
+allowIfTrue :: Query
+allowIfTrue = [QueryItem [] [EValue $ LBool True]]
+
 singleBlock :: TestTree
 singleBlock = testCase "Single block" $ do
   keypair <- newKeypair
   biscuit <- mkBiscuit keypair [block|right(#authority, "file1", #read);|]
-  res <- verifyBiscuit biscuit [verifier|check if right(#authority, "file1", #read);|] (publicKey keypair)
-  res @?= Right ()
+  res <- verifyBiscuit biscuit [verifier|check if right(#authority, "file1", #read);allow if true;|] (publicKey keypair)
+  res @?= Right allowIfTrue
 
 unboundVarRule :: TestTree
 unboundVarRule = testCase "Rule with unbound variable" $ do

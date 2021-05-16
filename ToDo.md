@@ -13,14 +13,13 @@
   - [x] forbid use of variables in facts (through the AST)
   - [ ] handle revocation ids
   - [x] enforce `#authority` / `#ambient` restrictions in blocks
-  - [ ] report more detailed errors in datalog execution
+  - [x] report more detailed errors in datalog execution
   - [ ] implement verifier limits
     - [x] facts count
     - [x] iterations count
     - [x] timeout
     - [ ] rules / facts in blocks
     - [ ] regexes
-  - [ ] make expression errors blow the verification step
 
 - [ ] Harden crypto
   - [ ] check all sensitive buffers are filled with zeroes after use
@@ -34,15 +33,12 @@
   - [x] convert protobuf messages into `AST` values
   - [x] convert `AST` values into protobuf messages
 
-- [ ] implement a CLI tool
-  - [ ] create biscuit (spec)
-  - [ ] create biscuit
-  - [ ] check biscuit (spec)
-  - [ ] check biscuit
-  - [ ] attenuate biscuit (spec)
-  - [ ] attenuate biscuit
-
 - [ ] use ContT in `Sel`
 - [ ] move the modules under a `Crypto` namespace
 - [ ] try building with cabal
 - [ ] add CI
+- [ ] check AST constraints after, not during, the parsing phase
+
+# Questions
+
+- what happens if no policies match? (examples always assume there is a catch-all policy). Should this be enforced?

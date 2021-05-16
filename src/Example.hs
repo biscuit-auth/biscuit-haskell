@@ -31,5 +31,5 @@ verification serialized = do
   let verifier' = [verifier|current_time(#ambient, ${now});|]
   result <- verifyBiscuit biscuit verifier' publicKey'
   case result of
-    Left e   -> print e $> False
-    Right () -> pure True
+    Left e  -> print e $> False
+    Right _ -> pure True

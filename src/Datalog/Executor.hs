@@ -36,6 +36,7 @@ data ExecutionError
   | EvaluationError
   | FailedCheck Check
   | DenyRuleMatched Query
+  | NoPoliciesMatched
   deriving (Eq, Show)
 
 data Limits
@@ -107,14 +108,14 @@ collectWorld Verifier{vBlock} authority blocks =
 runVerifier :: Block
             -> [Block]
             -> Verifier
-            -> IO (Either ExecutionError ())
+            -> IO (Either ExecutionError Query)
 runVerifier = runVerifierWithLimits defaultLimits
 
 runVerifierWithLimits :: Limits
                       -> Block
                       -> [Block]
                       -> Verifier
-                      -> IO (Either ExecutionError ())
+                      -> IO (Either ExecutionError Query)
 runVerifierWithLimits l@Limits{..} authority blocks v = do
   resultOrTimeout <- timer maxTime $ runVerifier' l authority blocks v
   pure $ case resultOrTimeout of
@@ -125,7 +126,7 @@ runVerifier' :: Limits
              -> Block
              -> [Block]
              -> Verifier
-             -> IO (Either ExecutionError ())
+             -> IO (Either ExecutionError Query)
 runVerifier' Limits{..} authority blocks v@Verifier{..} = do
   let initialWorld = collectWorld v authority blocks
       allFacts' = computeAllFacts maxFacts maxIterations initialWorld
@@ -137,11 +138,11 @@ runVerifier' Limits{..} authority blocks v@Verifier{..} = do
             policiesResults = mapMaybe (checkPolicy allFacts) vPolicies
             policyResult = case policiesResults of
               p : _ -> p
-              []    -> Right () -- no policy matched. Check what to do in that case
+              []    -> Left NoPoliciesMatched -- no policy matched. Check what to do in that case
         pure $ case (checkResults, policyResult) of
-          (Right (), Right ()) -> Right ()
-          (Left e, _)          -> Left e
-          (_, Left e)          -> Left e -- todo accumulate errors
+          (Right (), Right p) -> Right p
+          (Left e, _)         -> Left e
+          (_, Left e)         -> Left e -- todo accumulate errors
 
 checkCheck :: Set Fact -> Check -> Either ExecutionError ()
 checkCheck facts items =
@@ -149,8 +150,13 @@ checkCheck facts items =
   then Right ()
   else Left (FailedCheck items)
 
-checkPolicy :: Set Fact -> Policy -> Maybe (Either ExecutionError ())
-checkPolicy _ _ = Nothing -- todo
+checkPolicy :: Set Fact -> Policy -> Maybe (Either ExecutionError Query)
+checkPolicy facts (pType, items) =
+  if any (isQueryItemSatisfied facts) items
+  then Just $ case pType of
+    Allow -> Right items
+    Deny  -> Left $ DenyRuleMatched items
+  else Nothing
 
 isQueryItemSatisfied :: Set Fact -> QueryItem' 'RegularString -> Bool
 isQueryItemSatisfied facts QueryItem{qBody, qExpressions} =
