@@ -12,8 +12,11 @@
 - [ ] Datalog engine
   - [x] forbid use of variables in facts (through the AST)
   - [ ] handle revocation ids
+  - [ ] consider computing unique revocation ids (based on signatures)
   - [x] enforce `#authority` / `#ambient` restrictions in blocks
   - [x] report more detailed errors in datalog execution
+  - [ ] accumulate checks errors instead of returning the first one
+  - [ ] log predicate / expressions errors with a writer to ease debugging
   - [ ] implement verifier limits
     - [x] facts count
     - [x] iterations count
