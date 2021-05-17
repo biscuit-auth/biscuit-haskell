@@ -19,6 +19,7 @@ specs = testGroup "Datalog checks"
   [ singleBlock
   , unboundVarRule
   , symbolRestrictions
+  , factsRestrictions
   ]
 
 allowIfTrue :: Query
@@ -54,3 +55,21 @@ symbolRestrictions = testGroup "Restricted symbols in blocks"
       res <- verifyBiscuit b2 [verifier|operation(#ambient,#write);allow if true;|] (publicKey keypair)
       res @?= Left (DatalogError $ Executor.FailedCheck [check|check if operation(#ambient, #read)|])
   ]
+
+factsRestrictions :: TestTree
+factsRestrictions =
+  let limits = defaultLimits { allowBlockFacts = False }
+   in testGroup "No facts or rules in blocks"
+        [ testCase "No facts" $ do
+            keypair <- newKeypair
+            b1 <- mkBiscuit keypair [block|right(#read);|]
+            b2 <- addBlock [block|right(#write);|] b1
+            res <- verifyBiscuitWithLimits limits b2 [verifier|allow if right(#write);|] (publicKey keypair)
+            res @?= Left (DatalogError Executor.NoPoliciesMatched)
+        , testCase "No rules" $ do
+            keypair <- newKeypair
+            b1 <- mkBiscuit keypair [block|right(#read);|]
+            b2 <- addBlock [block|right(#write) <- right(#read);|] b1
+            res <- verifyBiscuitWithLimits limits b2 [verifier|allow if right(#write);|] (publicKey keypair)
+            res @?= Left (DatalogError Executor.NoPoliciesMatched)
+        ]

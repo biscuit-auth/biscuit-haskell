@@ -94,15 +94,17 @@ isRestricted Predicate{terms} =
       restrictedSymbol _           = False
    in any restrictedSymbol terms
 
-collectWorld :: Verifier -> Block -> [Block] -> World
-collectWorld Verifier{vBlock} authority blocks =
+collectWorld :: Limits -> Verifier -> Block -> [Block] -> World
+collectWorld Limits{allowBlockFacts} Verifier{vBlock} authority blocks =
   World
     { rules = Set.fromList $ bRules vBlock <> bRules authority
-    , blockRules = Set.fromList $ foldMap bRules blocks
+    , blockRules = if allowBlockFacts
+                   then Set.fromList $ foldMap bRules blocks
+                   else mempty
     , facts = Set.fromList $
               bFacts vBlock
            <> bFacts authority
-           <> filter (not . isRestricted) (bFacts =<< blocks)
+           <> filter ((allowBlockFacts &&) . not . isRestricted) (bFacts =<< blocks)
     }
 
 runVerifier :: Block
@@ -127,8 +129,8 @@ runVerifier' :: Limits
              -> [Block]
              -> Verifier
              -> IO (Either ExecutionError Query)
-runVerifier' Limits{..} authority blocks v@Verifier{..} = do
-  let initialWorld = collectWorld v authority blocks
+runVerifier' l@Limits{..} authority blocks v@Verifier{..} = do
+  let initialWorld = collectWorld l v authority blocks
       allFacts' = computeAllFacts maxFacts maxIterations initialWorld
   case allFacts' of
       Left e -> pure $ Left e

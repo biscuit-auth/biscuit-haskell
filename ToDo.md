@@ -21,7 +21,7 @@
     - [x] facts count
     - [x] iterations count
     - [x] timeout
-    - [ ] rules / facts in blocks
+    - [x] rules / facts in blocks
     - [ ] regexes
 
 - [ ] Harden crypto

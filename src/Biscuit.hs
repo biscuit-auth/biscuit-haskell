@@ -8,6 +8,7 @@ module Biscuit
   , Verifier
   , ParseError (..)
   , VerificationError (..)
+  , Limits (..)
   , blockFact
   , blockRule
   , blockCheck
@@ -55,7 +56,7 @@ import           Datalog.AST                (Block, BlockElement' (..), Check,
                                              Fact, Policy, Rule, Verifier,
                                              VerifierElement' (..), bContext,
                                              elementToBlock, elementToVerifier)
-import           Datalog.Executor           (defaultLimits)
+import           Datalog.Executor           (Limits (..), defaultLimits)
 import           Sel                        (Keypair (..), PrivateKey,
                                              PublicKey, fromPrivateKey,
                                              newKeypair, parsePrivateKey,
