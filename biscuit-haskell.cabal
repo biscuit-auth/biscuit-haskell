@@ -60,6 +60,7 @@ library
     , text
     , th-lift-instances
     , time
+    , validation-selective
   default-language: Haskell2010
 
 executable biscuit-haskell-exe
@@ -90,6 +91,7 @@ executable biscuit-haskell-exe
     , text
     , th-lift-instances
     , time
+    , validation-selective
   default-language: Haskell2010
 
 test-suite biscuit-haskell-test
@@ -130,4 +132,5 @@ test-suite biscuit-haskell-test
     , text
     , th-lift-instances
     , time
+    , validation-selective
   default-language: Haskell2010

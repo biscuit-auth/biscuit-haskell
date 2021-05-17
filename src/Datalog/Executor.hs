@@ -8,10 +8,12 @@ module Datalog.Executor where
 
 import           Control.Monad           (when)
 import           Control.Monad           (join, mfilter)
+import           Data.Bifunctor          (first)
 import           Data.Bitraversable      (bitraverse)
 import qualified Data.ByteString         as ByteString
 import           Data.Either.Combinators (maybeToRight)
 import           Data.Foldable           (traverse_)
+import           Data.List.NonEmpty      (NonEmpty)
 import qualified Data.List.NonEmpty      as NE
 import           Data.Map.Strict         (Map, (!?))
 import qualified Data.Map.Strict         as Map
@@ -21,6 +23,7 @@ import qualified Data.Set                as Set
 import           Data.Text               (Text, intercalate, unpack)
 import qualified Data.Text               as Text
 import           Data.Void               (absurd)
+import           Validation              (Validation (..), failure)
 
 import           Datalog.AST
 import           Timer                   (timer)
@@ -28,15 +31,18 @@ import           Timer                   (timer)
 type Name = Text -- a variable name
 type Bindings  = Map Name Value
 
+data ResultError
+  = NoPoliciesMatched [Check] -- No policy matched. additionally some checks may have failed
+  | FailedChecks      (NonEmpty Check) -- An allow rule matched, but at least one check failed
+  | DenyRuleMatched   [Check] Query -- A deny rule matched. additionally some checks may have failed
+  deriving (Eq, Show)
+
 data ExecutionError
   = Timeout
   | TooManyFacts
   | TooManyIterations
   | FactsInBlocks
-  | EvaluationError
-  | FailedCheck Check
-  | DenyRuleMatched Query
-  | NoPoliciesMatched
+  | ResultError ResultError
   deriving (Eq, Show)
 
 data Limits
@@ -139,25 +145,28 @@ runVerifier' l@Limits{..} authority blocks v@Verifier{..} = do
             checkResults = traverse_ (checkCheck allFacts) allChecks
             policiesResults = mapMaybe (checkPolicy allFacts) vPolicies
             policyResult = case policiesResults of
-              p : _ -> p
-              []    -> Left NoPoliciesMatched -- no policy matched. Check what to do in that case
+              p : _ -> first Just p
+              []    -> Left Nothing
         pure $ case (checkResults, policyResult) of
-          (Right (), Right p) -> Right p
-          (Left e, _)         -> Left e
-          (_, Left e)         -> Left e -- todo accumulate errors
+          (Success (), Right p)       -> Right p
+          (Success (), Left Nothing)  -> Left $ ResultError $ NoPoliciesMatched []
+          (Success (), Left (Just p)) -> Left $ ResultError $ DenyRuleMatched [] p
+          (Failure cs, Left Nothing)  -> Left $ ResultError $ NoPoliciesMatched (NE.toList cs)
+          (Failure cs, Left (Just p)) -> Left $ ResultError $ DenyRuleMatched (NE.toList cs) p
+          (Failure cs, Right _)       -> Left $ ResultError $ FailedChecks cs
 
-checkCheck :: Set Fact -> Check -> Either ExecutionError ()
+checkCheck :: Set Fact -> Check -> Validation (NonEmpty Check) ()
 checkCheck facts items =
   if any (isQueryItemSatisfied facts) items
-  then Right ()
-  else Left (FailedCheck items)
+  then Success ()
+  else failure items
 
-checkPolicy :: Set Fact -> Policy -> Maybe (Either ExecutionError Query)
+checkPolicy :: Set Fact -> Policy -> Maybe (Either Query Query)
 checkPolicy facts (pType, items) =
   if any (isQueryItemSatisfied facts) items
   then Just $ case pType of
     Allow -> Right items
-    Deny  -> Left $ DenyRuleMatched items
+    Deny  -> Left items
   else Nothing
 
 isQueryItemSatisfied :: Set Fact -> QueryItem' 'RegularString -> Bool
