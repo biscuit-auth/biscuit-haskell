@@ -107,6 +107,12 @@ instance  ( Lift (VariableType inSet pof)
 class ToLiteralId t where
   toLiteralId :: t -> ID' inSet pof 'RegularString
 
+instance ToLiteralId Int where
+  toLiteralId = LInteger
+
+instance ToLiteralId Integer where
+  toLiteralId = LInteger . fromIntegral
+
 instance ToLiteralId Text where
   toLiteralId = LString
 
