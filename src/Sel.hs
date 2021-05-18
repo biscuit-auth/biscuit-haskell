@@ -16,8 +16,10 @@ module Sel
   , signBlock
   , aggregate
   , verifySignature
+  , hashBytes
   ) where
 
+import           Control.Monad.Cont     (ContT (..), lift, runContT)
 import           Data.ByteString        (ByteString, packCStringLen,
                                          useAsCStringLen)
 import qualified Data.ByteString        as BS
@@ -133,6 +135,40 @@ scalarToPoint scalar f =
 
 type Scalar = Ptr CUChar
 type Point = Ptr CUChar
+
+{-
+hashBytes' :: NonEmpty ByteString
+          -> IO (NonEmpty ByteString)
+hashBytes' (m1:|msgs) = fmap traceHexs $ (`runContT` pure) $ do
+  statePtr <- lift crypto_hash_sha256_state'malloc
+  state <- ContT $ crypto_hash_sha256_state'ptr statePtr
+  (h1, s1) <- lift $ hashAnd m1 state
+  let go []     (_, out) = pure out
+      go (m:ms) (s, out) = do
+        (h, s') <- hashAnd m s
+        go ms (s', pure h <> out)
+  lift $ go msgs (s1, pure h1)
+  -}
+
+hashBytes :: ByteString
+          -> IO ByteString
+hashBytes message = (`runContT` pure) $ do
+  out <- ContT $ allocaBytes $ cs2int crypto_hash_sha256_bytes
+  (buf, len) <- ContT $ withBSLen message
+  void $ lift $ crypto_hash_sha256 out buf len
+  lift $ packCStringLen (castPtr out, cs2int crypto_hash_sha256_bytes)
+
+{-
+hashAnd :: ByteString -> Ptr Crypto_hash_sha256_state
+        -> IO (ByteString, Ptr Crypto_hash_sha256_state)
+hashAnd bs state = (`runContT` pure) $ do
+  hashBuf    <- ContT $ allocaBytes $ cs2int crypto_hash_sha256_bytes
+  (buf, len) <- ContT $ withBSLen bs
+  void $ lift $ crypto_hash_sha256_update state buf len
+  void $ lift $ crypto_hash_sha256_final state hashBuf
+  hashBs <- lift $ packCStringLen (castPtr hashBuf, cs2int crypto_hash_sha256_bytes)
+  pure (hashBs, state)
+  -}
 
 hashPoints :: [Point]
            -> (Scalar -> IO a)

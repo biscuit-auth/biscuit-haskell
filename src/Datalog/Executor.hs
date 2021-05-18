@@ -3,6 +3,7 @@
 {-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE NamedFieldPuns    #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE QuasiQuotes       #-}
 {-# LANGUAGE RecordWildCards   #-}
 module Datalog.Executor where
 
@@ -10,6 +11,7 @@ import           Control.Monad           (when)
 import           Control.Monad           (join, mfilter)
 import           Data.Bifunctor          (first)
 import           Data.Bitraversable      (bitraverse)
+import           Data.ByteString         (ByteString)
 import qualified Data.ByteString         as ByteString
 import           Data.Either.Combinators (maybeToRight)
 import           Data.Foldable           (traverse_)
@@ -26,6 +28,7 @@ import           Data.Void               (absurd)
 import           Validation              (Validation (..), failure)
 
 import           Datalog.AST
+import           Datalog.Parser          (fact)
 import           Timer                   (timer)
 
 type Name = Text -- a variable name
@@ -47,11 +50,12 @@ data ExecutionError
 
 data Limits
   = Limits
-  { maxFacts        :: Int
-  , maxIterations   :: Int
-  , maxTime         :: Int
-  , allowRegexes    :: Bool
-  , allowBlockFacts :: Bool
+  { maxFacts          :: Int
+  , maxIterations     :: Int
+  , maxTime           :: Int
+  , allowRegexes      :: Bool
+  , allowBlockFacts   :: Bool
+  , checkRevocationId :: ByteString -> IO (Either () ())
   }
 
 defaultLimits :: Limits
@@ -61,6 +65,14 @@ defaultLimits = Limits
   , maxTime = 1000
   , allowRegexes = True
   , allowBlockFacts = True
+  , checkRevocationId = const . pure $ Right ()
+  }
+
+data BlockWithRevocationIds
+  = BlockWithRevocationIds
+  { bBlock              :: Block
+  , genericRevocationId :: ByteString
+  , uniqueRevocationId  :: ByteString
   }
 
 data World
@@ -100,28 +112,38 @@ isRestricted Predicate{terms} =
       restrictedSymbol _           = False
    in any restrictedSymbol terms
 
-collectWorld :: Limits -> Verifier -> Block -> [Block] -> World
-collectWorld Limits{allowBlockFacts} Verifier{vBlock} authority blocks =
-  World
-    { rules = Set.fromList $ bRules vBlock <> bRules authority
-    , blockRules = if allowBlockFacts
-                   then Set.fromList $ foldMap bRules blocks
-                   else mempty
-    , facts = Set.fromList $
-              bFacts vBlock
-           <> bFacts authority
-           <> filter ((allowBlockFacts &&) . not . isRestricted) (bFacts =<< blocks)
-    }
+revocationIdFacts :: Integer -> BlockWithRevocationIds -> [Fact]
+revocationIdFacts index BlockWithRevocationIds{genericRevocationId, uniqueRevocationId} =
+  [ [fact|revocation_id(${index}, ${genericRevocationId})|]
+  , [fact|unique_revocation_id(${index}, ${uniqueRevocationId})|]
+  ]
 
-runVerifier :: Block
-            -> [Block]
+collectWorld :: Limits -> Verifier -> BlockWithRevocationIds -> [BlockWithRevocationIds] -> World
+collectWorld Limits{allowBlockFacts} Verifier{vBlock} authority blocks =
+  let getRules = bRules . bBlock
+      getFacts = bFacts . bBlock
+      revocationIds = join $ zipWith revocationIdFacts [0..] (authority : blocks)
+   in World
+        { rules = Set.fromList $ bRules vBlock <> getRules authority
+        , blockRules = if allowBlockFacts
+                       then Set.fromList $ foldMap getRules blocks
+                       else mempty
+        , facts = Set.fromList $
+                  bFacts vBlock
+               <> getFacts authority
+               <> filter ((allowBlockFacts &&) . not . isRestricted) (getFacts =<< blocks)
+               <> revocationIds
+        }
+
+runVerifier :: BlockWithRevocationIds
+            -> [BlockWithRevocationIds]
             -> Verifier
             -> IO (Either ExecutionError Query)
 runVerifier = runVerifierWithLimits defaultLimits
 
 runVerifierWithLimits :: Limits
-                      -> Block
-                      -> [Block]
+                      -> BlockWithRevocationIds
+                      -> [BlockWithRevocationIds]
                       -> Verifier
                       -> IO (Either ExecutionError Query)
 runVerifierWithLimits l@Limits{..} authority blocks v = do
@@ -131,8 +153,8 @@ runVerifierWithLimits l@Limits{..} authority blocks v = do
     Just r  -> r
 
 runVerifier' :: Limits
-             -> Block
-             -> [Block]
+             -> BlockWithRevocationIds
+             -> [BlockWithRevocationIds]
              -> Verifier
              -> IO (Either ExecutionError Query)
 runVerifier' l@Limits{..} authority blocks v@Verifier{..} = do
@@ -141,7 +163,7 @@ runVerifier' l@Limits{..} authority blocks v@Verifier{..} = do
   case allFacts' of
       Left e -> pure $ Left e
       Right allFacts -> do
-        let allChecks = foldMap bChecks $ vBlock : authority : blocks
+        let allChecks = foldMap bChecks $ vBlock : (bBlock <$> authority : blocks)
             checkResults = traverse_ (checkCheck allFacts) allChecks
             policiesResults = mapMaybe (checkPolicy allFacts) vPolicies
             policyResult = case policiesResults of

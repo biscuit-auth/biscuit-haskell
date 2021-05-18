@@ -11,8 +11,8 @@
 
 - [ ] Datalog engine
   - [x] forbid use of variables in facts (through the AST)
-  - [ ] handle revocation ids
-  - [ ] consider computing unique revocation ids (based on signatures)
+  - [x] handle revocation ids
+  - [x] consider computing unique revocation ids (based on signatures)
   - [x] enforce `#authority` / `#ambient` restrictions in blocks
   - [x] report more detailed errors in datalog execution
   - [ ] support regexes

@@ -12,7 +12,13 @@ module Token
   , serializeBiscuit
   , verifyBiscuit
   , verifyBiscuitWithLimits
+
+  , BlockWithRevocationIds (..)
+  , getRevocationIds
   ) where
+
+import qualified Data.ByteString.Base16  as Hex
+import           Debug.Trace
 
 import           Control.Monad           (when)
 import           Control.Monad.Except    (runExceptT, throwError)
@@ -21,17 +27,20 @@ import           Data.Bifunctor          (first)
 import           Data.ByteString         (ByteString)
 import           Data.Either.Combinators (maybeToRight)
 import           Data.List.NonEmpty      (NonEmpty ((:|)))
+import qualified Data.List.NonEmpty      as NE
 
 import           Datalog.AST             (Block, Query, Verifier)
-import           Datalog.Executor        (ExecutionError, Limits, defaultLimits,
+import           Datalog.Executor        (BlockWithRevocationIds (..),
+                                          ExecutionError, Limits, defaultLimits,
                                           runVerifierWithLimits)
 import qualified Proto                   as PB
 import           ProtoBufAdapter         (Symbols, blockToPb, commonSymbols,
                                           extractSymbols, pbToBlock)
 import           Sel                     (Keypair (publicKey), PublicKey,
-                                          Signature (..), aggregate, newKeypair,
-                                          parsePublicKey, serializePublicKey,
-                                          signBlock, verifySignature)
+                                          Signature (..), aggregate, hashBytes,
+                                          newKeypair, parsePublicKey,
+                                          serializePublicKey, signBlock,
+                                          verifySignature)
 
 -- Protobuf serialization does not have a guaranteed deterministic behaviour,
 -- so we need to keep the initial serialized payload around in order to compute
@@ -140,11 +149,10 @@ data VerificationError
 -- - make sure the biscuit has been signed with the private key associated to the public key
 -- - make sure the biscuit is valid for the provided verifier
 verifyBiscuitWithLimits :: Limits -> Biscuit -> Verifier -> PublicKey -> IO (Either VerificationError Query)
-verifyBiscuitWithLimits l b@Biscuit{..} verifier pub = runExceptT $ do
+verifyBiscuitWithLimits l b verifier pub = runExceptT $ do
   sigCheck <- liftIO $ checkBiscuitSignature b pub
   when (not sigCheck) $ throwError SignatureError
-  let authorityBlock = snd . snd $ authority
-      attBlocks = snd . snd <$> blocks
+  authorityBlock :| attBlocks <- liftIO $ getRevocationIds b
   verifResult <- liftIO $ runVerifierWithLimits l authorityBlock attBlocks verifier
   case verifResult of
     Left e  -> throwError $ DatalogError e
@@ -153,3 +161,60 @@ verifyBiscuitWithLimits l b@Biscuit{..} verifier pub = runExceptT $ do
 -- | Same as `verifyBiscuitWithLimits`, but with default limits (1ms timeout, max 1000 facts, max 100 iterations)
 verifyBiscuit :: Biscuit -> Verifier -> PublicKey -> IO (Either VerificationError Query)
 verifyBiscuit = verifyBiscuitWithLimits defaultLimits
+
+
+{-
+
+toBRID :: (PublicKey, ExistingBlock) -> (ByteString, ByteString) -> BlockWithRevocationIds
+toBRID (_, (_, bBlock)) (genericRevocationId, uniqueRevocationId) =
+  BlockWithRevocationIds{..}
+
+toto :: NonEmpty (PublicKey, ExistingBlock)
+     -> NonEmpty ByteString
+     -> IO (NonEmpty BlockWithRevocationIds)
+toto bs params = do
+  let bs' = first serializePublicKey <$> bs
+      getRid (pubBytes, (blockBs, _)) = blockBs <> pubBytes
+      getRid' (pubBytes, (blockBs, _)) param = blockBs <> pubBytes <> param
+      ridsBs = getRid <$> bs'
+      rids'bs = NE.zipWith getRid' bs' params
+  rids <- hashBytes ridsBs
+  rids' <- hashBytes rids'bs
+  pure $ NE.zipWith toBRID bs (NE.zip rids rids')
+  -}
+
+getRidComponents :: (PublicKey, ExistingBlock) -> ByteString
+                 -> ((ByteString, ByteString), Block)
+getRidComponents (pub, (blockBs, block)) param =
+  ( ( blockBs <> serializePublicKey pub
+    , blockBs <> serializePublicKey pub <> param
+    )
+  , block
+  )
+
+mkBRID :: ((ByteString, ByteString), Block) -> IO BlockWithRevocationIds
+mkBRID ((g,u), bBlock) = do
+  genericRevocationId <- hashBytes g
+  uniqueRevocationId  <- hashBytes u
+  pure BlockWithRevocationIds{..}
+
+_traceRids :: NonEmpty BlockWithRevocationIds
+           -> NonEmpty BlockWithRevocationIds
+_traceRids brids =
+  let s BlockWithRevocationIds{..} =
+         (Hex.encode genericRevocationId
+         ,Hex.encode uniqueRevocationId
+         )
+   in traceShow (s <$> brids) brids
+
+getRevocationIds :: Biscuit -> IO (NonEmpty BlockWithRevocationIds)
+getRevocationIds Biscuit{..} = do
+   params <- maybe (fail "") pure . NE.nonEmpty $ parameters signature
+   let allBlocks = authority :| blocks
+       blocksAndParams = NE.zipWith getRidComponents allBlocks params
+       conc ((g1, u1), _) ((g2, u2), b) = ((g1 <> g2, u1 <> u2), b)
+       withPreviousBlocks :: NonEmpty ((ByteString, ByteString), Block)
+       withPreviousBlocks = NE.scanl1 conc blocksAndParams
+   traverse mkBRID withPreviousBlocks
+
+
