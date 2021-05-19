@@ -45,12 +45,12 @@ module Proto
 import           Data.ByteString        (ByteString)
 import qualified Data.ByteString        as ByteString
 import           Data.ByteString.Base64
-import           Data.Either.Validation
 import           Data.Int
 import           Data.ProtocolBuffers
 import           Data.Serialize
 import           Data.Text
 import           GHC.Generics           (Generic)
+import           Validation
 
 data Biscuit = Biscuit
   { authority :: Required 1 (Value ByteString)

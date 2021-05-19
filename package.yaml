@@ -30,7 +30,6 @@ dependencies:
 - base64
 - base16-bytestring
 - containers
-- either
 - libsodium
 - mtl
 - cereal

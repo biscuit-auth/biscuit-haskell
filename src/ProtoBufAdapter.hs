@@ -12,18 +12,19 @@ module ProtoBufAdapter
   , blockToPb
   ) where
 
-import           Data.Either.Combinators (maybeToRight)
-import           Data.Int                (Int32, Int64)
-import           Data.Map.Strict         (Map)
-import qualified Data.Map.Strict         as Map
-import qualified Data.Set                as Set
-import           Data.Text               (Text)
-import           Data.Time               (UTCTime)
-import           Data.Time.Clock.POSIX   (posixSecondsToUTCTime,
-                                          utcTimeToPOSIXSeconds)
-import           Data.Void               (absurd)
+import           Data.Int              (Int32, Int64)
+import           Data.Map.Strict       (Map)
+import qualified Data.Map.Strict       as Map
+import qualified Data.Set              as Set
+import           Data.Text             (Text)
+import           Data.Time             (UTCTime)
+import           Data.Time.Clock.POSIX (posixSecondsToUTCTime,
+                                        utcTimeToPOSIXSeconds)
+import           Data.Void             (absurd)
+
+import           Biscuit.Utils         (maybeToRight)
 import           Datalog.AST
-import qualified Proto                   as PB
+import qualified Proto                 as PB
 
 type Symbols = Map Int32 Text
 type ReverseSymbols = Map Text Int32

@@ -26,6 +26,7 @@ source-repository head
 library
   exposed-modules:
       Biscuit
+      Biscuit.Utils
       Datalog.AST
       Datalog.Executor
       Datalog.Parser
@@ -49,7 +50,6 @@ library
     , bytestring
     , cereal
     , containers
-    , either
     , libsodium
     , mtl
     , parser-combinators
@@ -80,7 +80,6 @@ executable biscuit-haskell-exe
     , bytestring
     , cereal
     , containers
-    , either
     , libsodium
     , mtl
     , parser-combinators
@@ -120,7 +119,6 @@ test-suite biscuit-haskell-test
     , bytestring
     , cereal
     , containers
-    , either
     , libsodium
     , mtl
     , parser-combinators

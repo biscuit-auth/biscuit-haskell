@@ -17,30 +17,30 @@ module Token
   , getRevocationIds
   ) where
 
-import qualified Data.ByteString.Base16  as Hex
+import qualified Data.ByteString.Base16 as Hex
 import           Debug.Trace
 
-import           Control.Monad           (when)
-import           Control.Monad.Except    (runExceptT, throwError)
-import           Control.Monad.IO.Class  (liftIO)
-import           Data.Bifunctor          (first)
-import           Data.ByteString         (ByteString)
-import           Data.Either.Combinators (maybeToRight)
-import           Data.List.NonEmpty      (NonEmpty ((:|)))
-import qualified Data.List.NonEmpty      as NE
+import           Control.Monad          (when)
+import           Control.Monad.Except   (runExceptT, throwError)
+import           Control.Monad.IO.Class (liftIO)
+import           Data.Bifunctor         (first)
+import           Data.ByteString        (ByteString)
+import           Data.List.NonEmpty     (NonEmpty ((:|)))
+import qualified Data.List.NonEmpty     as NE
 
-import           Datalog.AST             (Block, Query, Verifier)
-import           Datalog.Executor        (BlockWithRevocationIds (..),
-                                          ExecutionError, Limits, defaultLimits,
-                                          runVerifierWithLimits)
-import qualified Proto                   as PB
-import           ProtoBufAdapter         (Symbols, blockToPb, commonSymbols,
-                                          extractSymbols, pbToBlock)
-import           Sel                     (Keypair (publicKey), PublicKey,
-                                          Signature (..), aggregate, hashBytes,
-                                          newKeypair, parsePublicKey,
-                                          serializePublicKey, signBlock,
-                                          verifySignature)
+import           Biscuit.Utils          (maybeToRight)
+import           Datalog.AST            (Block, Query, Verifier)
+import           Datalog.Executor       (BlockWithRevocationIds (..),
+                                         ExecutionError, Limits, defaultLimits,
+                                         runVerifierWithLimits)
+import qualified Proto                  as PB
+import           ProtoBufAdapter        (Symbols, blockToPb, commonSymbols,
+                                         extractSymbols, pbToBlock)
+import           Sel                    (Keypair (publicKey), PublicKey,
+                                         Signature (..), aggregate, hashBytes,
+                                         newKeypair, parsePublicKey,
+                                         serializePublicKey, signBlock,
+                                         verifySignature)
 
 -- Protobuf serialization does not have a guaranteed deterministic behaviour,
 -- so we need to keep the initial serialized payload around in order to compute

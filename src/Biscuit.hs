@@ -49,9 +49,9 @@ import           Data.Bifunctor             (first)
 import           Data.ByteString            (ByteString)
 import qualified Data.ByteString.Base16     as Hex
 import qualified Data.ByteString.Base64.URL as B64
-import           Data.Either.Combinators    (maybeToRight)
 import           Data.Text                  (Text)
 
+import           Biscuit.Utils              (maybeToRight)
 import           Datalog.AST                (Block, BlockElement' (..), Check,
                                              Fact, Policy, Rule, Verifier,
                                              VerifierElement' (..), bContext,
