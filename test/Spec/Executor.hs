@@ -177,7 +177,7 @@ limits =
                    , [fact|parent("alice", "toto")|]
                    ]
         }
-   in testGroup "Facts generation limits" $
+   in testGroup "Facts generation limits"
         [ testCase "max facts" $
             computeAllFacts 2 100 world @?= Left TooManyFacts
         , testCase "max iterations" $

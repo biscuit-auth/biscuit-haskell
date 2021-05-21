@@ -7,8 +7,7 @@
 {-# LANGUAGE RecordWildCards   #-}
 module Datalog.Executor where
 
-import           Control.Monad      (when)
-import           Control.Monad      (join, mfilter)
+import           Control.Monad      (join, mfilter, when)
 import           Data.Bifunctor     (first)
 import           Data.Bitraversable (bitraverse)
 import           Data.ByteString    (ByteString)

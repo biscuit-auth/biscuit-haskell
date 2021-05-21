@@ -71,21 +71,19 @@ instance Show Keypair where
   show Keypair{privateKey, publicKey} =
     show privateKey <> "/" <> show publicKey
 
+keypairFromScalar :: Scalar -> IO Keypair
+keypairFromScalar scalarBuf =
+  scalarToPoint scalarBuf $ \pointBuf -> do
+    privateKey <- PrivateKey <$> scalarToByteString scalarBuf
+    publicKey <- PublicKey <$> pointToByteString pointBuf
+    pure Keypair{..}
+
 newKeypair :: IO Keypair
-newKeypair =
-  randomScalar $ \scalarBuf ->
-    scalarToPoint scalarBuf $ \pointBuf -> do
-      privateKey <- PrivateKey <$> scalarToByteString scalarBuf
-      publicKey <- PublicKey <$> pointToByteString pointBuf
-      pure Keypair{..}
+newKeypair = randomScalar keypairFromScalar
 
 fromPrivateKey :: PrivateKey -> IO Keypair
 fromPrivateKey (PrivateKey privBs) =
-  withBSLen privBs $ \(scalarBuf, _) ->
-    scalarToPoint scalarBuf $ \pointBuf -> do
-      privateKey <- PrivateKey <$> scalarToByteString scalarBuf
-      publicKey <- PublicKey <$> pointToByteString pointBuf
-      pure Keypair{..}
+  withBSLen privBs $ keypairFromScalar . fst
 
 data Signature
   = Signature
@@ -247,7 +245,7 @@ aggregate first second =
 verifySignature :: NonEmpty (PublicKey,ByteString)
                 -> Signature
                 -> IO Bool
-verifySignature messagesAndPks Signature{parameters,z} = do
+verifySignature messagesAndPks Signature{parameters,z} =
   withBSLen z $ \(zBuf, _) ->
     scalarToPoint zBuf $ \zP ->
       computeHashMSums messagesAndPks $ \eiXiRes ->
@@ -260,7 +258,7 @@ verifySignature messagesAndPks Signature{parameters,z} = do
 
 computeHashMSums :: NonEmpty (PublicKey, ByteString)
                  -> (Point -> IO a) -> IO a
-computeHashMSums messagesAndPks f = do
+computeHashMSums messagesAndPks f =
   withPoint $ \eiXiRes -> do
     sodium_memzero eiXiRes crypto_core_ristretto255_bytes
     for_ messagesAndPks $ \(PublicKey publicKey, message) ->

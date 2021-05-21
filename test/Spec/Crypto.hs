@@ -10,7 +10,7 @@ import           Test.Tasty.HUnit
 
 import           Biscuit
 import           Datalog.Parser     (block)
-import qualified Sel                as Sel
+import qualified Sel
 import           Token              (Biscuit (..))
 
 specs :: TestTree

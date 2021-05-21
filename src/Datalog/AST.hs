@@ -273,7 +273,7 @@ renderQueryItem QueryItem{..} =
 
 renderCheck :: Check -> Text
 renderCheck is = "check if " <>
-  (intercalate "\n or " $ renderQueryItem <$> is)
+  intercalate "\n or " (renderQueryItem <$> is)
 
 listSymbolsInQueryItem :: QueryItem' 'RegularString -> Set.Set Text
 listSymbolsInQueryItem QueryItem{..} =

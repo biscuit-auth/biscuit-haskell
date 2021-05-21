@@ -161,7 +161,7 @@ pbToTerm s = \case
   PB.IDBytes    f -> pure $ LBytes   $ PB.getField f
   PB.IDBool     f -> pure $ LBool    $ PB.getField f
   PB.IDVariable f -> Variable <$> getSymbol s (PB.getField f)
-  PB.IDIDSet    f -> TermSet . Set.fromList <$> (traverse (pbToSetValue s) $ PB.getField $ PB.set $ PB.getField f)
+  PB.IDIDSet    f -> TermSet . Set.fromList <$> traverse (pbToSetValue s) (PB.getField . PB.set $ PB.getField f)
 
 termToPb :: ReverseSymbols -> ID -> PB.IDV1
 termToPb s = \case
@@ -185,7 +185,7 @@ pbToValue s = \case
   PB.IDBytes    f -> pure $ LBytes   $ PB.getField f
   PB.IDBool     f -> pure $ LBool    $ PB.getField f
   PB.IDVariable _ -> Left "Variables can't appear in facts"
-  PB.IDIDSet    f -> TermSet . Set.fromList <$> (traverse (pbToSetValue s) $ PB.getField $ PB.set $ PB.getField f)
+  PB.IDIDSet    f -> TermSet . Set.fromList <$> traverse (pbToSetValue s) (PB.getField . PB.set $ PB.getField f)
 
 valueToPb :: ReverseSymbols -> Value -> PB.IDV1
 valueToPb s = \case

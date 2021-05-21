@@ -60,7 +60,7 @@ data Biscuit
 mkBiscuit :: Keypair -> Block -> IO Biscuit
 mkBiscuit keypair authority = do
   let authorityPub = publicKey keypair
-      (s, authoritySerialized) = PB.encodeBlock <$> (blockToPb commonSymbols 0 authority)
+      (s, authoritySerialized) = PB.encodeBlock <$> blockToPb commonSymbols 0 authority
   signature <- signBlock keypair authoritySerialized
   pure $ Biscuit { authority = (authorityPub, (authoritySerialized, authority))
                  , blocks = []
@@ -72,7 +72,7 @@ mkBiscuit keypair authority = do
 -- with a randomly-generated keypair
 addBlock :: Block -> Biscuit -> IO Biscuit
 addBlock newBlock b@Biscuit{..} = do
-  let (s, newBlockSerialized) = PB.encodeBlock <$> (blockToPb symbols (length blocks) newBlock)
+  let (s, newBlockSerialized) = PB.encodeBlock <$> blockToPb symbols (length blocks) newBlock
   keypair <- newKeypair
   newSig <- signBlock keypair newBlockSerialized
   endSig <- aggregate signature newSig
@@ -102,13 +102,13 @@ parseBiscuit bs = do
       pbKeys      = PB.getField $ PB.keys      blockList
       pbAuthority = PB.getField $ PB.authority blockList
       pbSignature = PB.getField $ PB.signature blockList
-  when ((length pbBlocks) + 1 /= length pbKeys) $ Left (InvalidProtobufSer $ "Length mismatch " <> show (length pbBlocks, length pbKeys))
+  when (length pbBlocks + 1 /= length pbKeys) $ Left (InvalidProtobufSer $ "Length mismatch " <> show (length pbBlocks, length pbKeys))
   rawAuthority <- first InvalidProtobufSer $ PB.decodeBlock pbAuthority
   rawBlocks    <- traverse (first InvalidProtobufSer . PB.decodeBlock) pbBlocks
   let s = extractSymbols commonSymbols $ rawAuthority : rawBlocks
 
 
-  parsedAuthority <- (pbAuthority,) <$> (blockFromPB s) rawAuthority
+  parsedAuthority <- (pbAuthority,) <$> blockFromPB s rawAuthority
   parsedBlocks    <- zip pbBlocks <$> traverse (blockFromPB s) rawBlocks
   parsedKeys      <- maybeToRight (InvalidProtobufSer "Invalid pubkeys") $ traverse parsePublicKey pbKeys
   let blocks = zip (drop 1 parsedKeys) parsedBlocks
@@ -130,10 +130,10 @@ serializeBiscuit Biscuit{..} =
                 , z = PB.putField z
                 }
    in PB.encodeBlockList PB.Biscuit
-       { authority = PB.putField $ authorityBs
-       , blocks    = PB.putField $ blocksBs
-       , keys      = PB.putField $ keys
-       , signature = PB.putField $ sigPb
+       { authority = PB.putField authorityBs
+       , blocks    = PB.putField blocksBs
+       , keys      = PB.putField keys
+       , signature = PB.putField sigPb
        }
 
 blockFromPB :: Symbols -> PB.Block -> Either ParseError Block
