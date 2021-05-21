@@ -2,7 +2,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE NamedFieldPuns             #-}
 {-# LANGUAGE RecordWildCards            #-}
-module Sel
+module Auth.Biscuit.Sel
   ( Keypair (..)
   , PrivateKey
   , PublicKey

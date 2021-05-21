@@ -5,16 +5,16 @@ module Spec.Verification
   ( specs
   ) where
 
-import           Data.List.NonEmpty (NonEmpty ((:|)))
+import           Data.List.NonEmpty            (NonEmpty ((:|)))
 import           Test.Tasty
 import           Test.Tasty.HUnit
 
-import           Biscuit
-import           Datalog.AST        (Expression' (..), ID' (..), Query,
-                                     QueryItem' (..))
-import           Datalog.Executor   (ResultError (..))
-import qualified Datalog.Executor   as Executor
-import           Datalog.Parser     (block, check, verifier)
+import           Auth.Biscuit
+import           Auth.Biscuit.Datalog.AST      (Expression' (..), ID' (..),
+                                                Query, QueryItem' (..))
+import           Auth.Biscuit.Datalog.Executor (ResultError (..))
+import qualified Auth.Biscuit.Datalog.Executor as Executor
+import           Auth.Biscuit.Datalog.Parser   (block, check, verifier)
 
 specs :: TestTree
 specs = testGroup "Datalog checks"

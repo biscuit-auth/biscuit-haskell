@@ -11,8 +11,8 @@ import qualified Data.List.NonEmpty     as NE
 import           Test.Tasty
 import           Test.Tasty.HUnit
 
-import           Biscuit
-import           Token                  (BlockWithRevocationIds (..),
+import           Auth.Biscuit
+import           Auth.Biscuit.Token     (BlockWithRevocationIds (..),
                                          getRevocationIds)
 
 readFromFile :: FilePath -> IO Biscuit

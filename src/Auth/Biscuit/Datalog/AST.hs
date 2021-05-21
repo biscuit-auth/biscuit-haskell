@@ -13,7 +13,7 @@
 {-# LANGUAGE TypeApplications           #-}
 {-# LANGUAGE TypeFamilies               #-}
 {-# LANGUAGE UndecidableInstances       #-}
-module Datalog.AST where
+module Auth.Biscuit.Datalog.AST where
 
 import           Control.Applicative        ((<|>))
 import           Control.Monad              ((<=<))

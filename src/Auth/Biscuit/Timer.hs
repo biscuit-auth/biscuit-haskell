@@ -1,4 +1,4 @@
-module Timer
+module Auth.Biscuit.Timer
   ( timer
   ) where
 

@@ -2,12 +2,12 @@
 {-# LANGUAGE QuasiQuotes       #-}
 module Spec.Quasiquoter (specs) where
 
-import           Data.Text        (Text)
+import           Data.Text                   (Text)
 import           Test.Tasty
 import           Test.Tasty.HUnit
 
-import           Datalog.AST
-import           Datalog.Parser   (fact, rule)
+import           Auth.Biscuit.Datalog.AST
+import           Auth.Biscuit.Datalog.Parser (fact, rule)
 
 specs :: TestTree
 specs = testGroup "Datalog quasiquoter"

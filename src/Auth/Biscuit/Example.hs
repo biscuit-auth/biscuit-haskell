@@ -1,13 +1,13 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes       #-}
-module Example where
+module Auth.Biscuit.Example where
 
-import           Data.ByteString (ByteString)
-import           Data.Functor    (($>))
-import           Data.Time       (getCurrentTime)
+import           Data.ByteString             (ByteString)
+import           Data.Functor                (($>))
+import           Data.Time                   (getCurrentTime)
 
-import           Biscuit
-import           Datalog.Parser  (block, verifier)
+import           Auth.Biscuit
+import           Auth.Biscuit.Datalog.Parser (block, verifier)
 
 privateKey' :: PrivateKey
 privateKey' = maybe (error "Error parsing private key") id $ parsePrivateKeyHex "todo"

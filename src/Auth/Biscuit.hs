@@ -1,6 +1,6 @@
 {-# LANGUAGE EmptyDataDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
-module Biscuit
+module Auth.Biscuit
   ( PrivateKey
   , PublicKey
   , Biscuit
@@ -44,31 +44,32 @@ module Biscuit
   , defaultLimits
   ) where
 
-import           Control.Monad              ((<=<))
-import           Data.Bifunctor             (first)
-import           Data.ByteString            (ByteString)
-import qualified Data.ByteString.Base16     as Hex
-import qualified Data.ByteString.Base64.URL as B64
-import           Data.Text                  (Text)
+import           Control.Monad                 ((<=<))
+import           Data.Bifunctor                (first)
+import           Data.ByteString               (ByteString)
+import qualified Data.ByteString.Base16        as Hex
+import qualified Data.ByteString.Base64.URL    as B64
+import           Data.Text                     (Text)
 
-import           Biscuit.Utils              (maybeToRight)
-import           Datalog.AST                (Block, BlockElement' (..), Check,
-                                             Fact, Policy, Rule, Verifier,
-                                             VerifierElement' (..), bContext,
-                                             elementToBlock, elementToVerifier)
-import           Datalog.Executor           (Limits (..), defaultLimits)
-import           Sel                        (Keypair (..), PrivateKey,
-                                             PublicKey, fromPrivateKey,
-                                             newKeypair, parsePrivateKey,
-                                             parsePublicKey,
-                                             serializePrivateKey,
-                                             serializePublicKey)
-import           Token                      (Biscuit, ParseError (..),
-                                             VerificationError (..), addBlock,
-                                             checkBiscuitSignature, mkBiscuit,
-                                             parseBiscuit, serializeBiscuit,
-                                             verifyBiscuit,
-                                             verifyBiscuitWithLimits)
+import           Auth.Biscuit.Datalog.AST      (Block, BlockElement' (..),
+                                                Check, Fact, Policy, Rule,
+                                                Verifier, VerifierElement' (..),
+                                                bContext, elementToBlock,
+                                                elementToVerifier)
+import           Auth.Biscuit.Datalog.Executor (Limits (..), defaultLimits)
+import           Auth.Biscuit.Sel              (Keypair (..), PrivateKey,
+                                                PublicKey, fromPrivateKey,
+                                                newKeypair, parsePrivateKey,
+                                                parsePublicKey,
+                                                serializePrivateKey,
+                                                serializePublicKey)
+import           Auth.Biscuit.Token            (Biscuit, ParseError (..),
+                                                VerificationError (..),
+                                                addBlock, checkBiscuitSignature,
+                                                mkBiscuit, parseBiscuit,
+                                                serializeBiscuit, verifyBiscuit,
+                                                verifyBiscuitWithLimits)
+import           Auth.Biscuit.Utils            (maybeToRight)
 
 blockFact :: Fact -> Block
 blockFact = elementToBlock . BlockFact

@@ -4,14 +4,14 @@ module Spec.Samples
   ( specs
   ) where
 
-import qualified Data.ByteString  as ByteString
+import qualified Data.ByteString             as ByteString
 import           Test.Tasty
 import           Test.Tasty.HUnit
 
-import           Biscuit          (ParseError (..), parse)
-import           Datalog.AST      (Block)
-import           Datalog.Parser   (block)
-import           Token            (Biscuit (..))
+import           Auth.Biscuit                (ParseError (..), parse)
+import           Auth.Biscuit.Datalog.AST    (Block)
+import           Auth.Biscuit.Datalog.Parser (block)
+import           Auth.Biscuit.Token          (Biscuit (..))
 
 readFromFile :: FilePath -> IO (Either ParseError Biscuit)
 readFromFile path =

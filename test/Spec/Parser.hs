@@ -3,16 +3,17 @@
 {-# LANGUAGE RecordWildCards   #-}
 module Spec.Parser (specs) where
 
-import           Data.Attoparsec.Text (parseOnly)
-import qualified Data.Set             as Set
-import           Data.Text            (Text)
+import           Data.Attoparsec.Text        (parseOnly)
+import qualified Data.Set                    as Set
+import           Data.Text                   (Text)
 import           Test.Tasty
 import           Test.Tasty.HUnit
 
-import           Datalog.AST
-import           Datalog.Parser       (checkParser, expressionParser,
-                                       policyParser, predicateParser,
-                                       ruleParser, termParser, verifierParser)
+import           Auth.Biscuit.Datalog.AST
+import           Auth.Biscuit.Datalog.Parser (checkParser, expressionParser,
+                                              policyParser, predicateParser,
+                                              ruleParser, termParser,
+                                              verifierParser)
 
 parseTerm :: Text -> Either String ID
 parseTerm = parseOnly termParser

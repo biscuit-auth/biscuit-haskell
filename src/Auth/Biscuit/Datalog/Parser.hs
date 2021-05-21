@@ -15,7 +15,7 @@
 {-# LANGUAGE TypeApplications      #-}
 {-# LANGUAGE TypeFamilies          #-}
 {- HLINT ignore "Reduce duplication" -}
-module Datalog.Parser where
+module Auth.Biscuit.Datalog.Parser where
 
 import           Control.Applicative            (liftA2, optional, (<|>))
 import qualified Control.Monad.Combinators.Expr as Expr
@@ -37,7 +37,7 @@ import           Language.Haskell.TH
 import           Language.Haskell.TH.Quote
 import           Language.Haskell.TH.Syntax     (Lift)
 
-import           Datalog.AST
+import           Auth.Biscuit.Datalog.AST
 
 class ConditionalParse a v where
   ifPresent :: String -> Parser a -> Parser v

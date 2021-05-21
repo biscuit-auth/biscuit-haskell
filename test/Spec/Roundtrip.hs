@@ -6,13 +6,13 @@ module Spec.Roundtrip
   ) where
 
 -- import qualified Data.ByteString  as ByteString
-import           Data.List.NonEmpty (NonEmpty ((:|)))
+import           Data.List.NonEmpty          (NonEmpty ((:|)))
 import           Test.Tasty
 import           Test.Tasty.HUnit
 
-import           Biscuit
-import           Datalog.Parser     (block)
-import           Token              (Biscuit (..))
+import           Auth.Biscuit
+import           Auth.Biscuit.Datalog.Parser (block)
+import           Auth.Biscuit.Token          (Biscuit (..))
 
 specs :: TestTree
 specs = testGroup "Serde roundtrips"

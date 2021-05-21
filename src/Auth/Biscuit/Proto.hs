@@ -7,7 +7,7 @@
 {-# LANGUAGE OverloadedStrings     #-}
 {-# LANGUAGE TypeApplications      #-}
 
-module Proto
+module Auth.Biscuit.Proto
   ( Biscuit (..)
   , Signature (..)
   , Block (..)

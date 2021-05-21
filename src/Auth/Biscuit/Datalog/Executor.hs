@@ -5,30 +5,30 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes       #-}
 {-# LANGUAGE RecordWildCards   #-}
-module Datalog.Executor where
+module Auth.Biscuit.Datalog.Executor where
 
-import           Control.Monad      (join, mfilter, when)
-import           Data.Bifunctor     (first)
-import           Data.Bitraversable (bitraverse)
-import           Data.ByteString    (ByteString)
-import qualified Data.ByteString    as ByteString
-import           Data.Foldable      (traverse_)
-import           Data.List.NonEmpty (NonEmpty)
-import qualified Data.List.NonEmpty as NE
-import           Data.Map.Strict    (Map, (!?))
-import qualified Data.Map.Strict    as Map
-import           Data.Maybe         (mapMaybe)
-import           Data.Set           (Set)
-import qualified Data.Set           as Set
-import           Data.Text          (Text, intercalate, unpack)
-import qualified Data.Text          as Text
-import           Data.Void          (absurd)
-import           Validation         (Validation (..), failure)
+import           Control.Monad               (join, mfilter, when)
+import           Data.Bifunctor              (first)
+import           Data.Bitraversable          (bitraverse)
+import           Data.ByteString             (ByteString)
+import qualified Data.ByteString             as ByteString
+import           Data.Foldable               (traverse_)
+import           Data.List.NonEmpty          (NonEmpty)
+import qualified Data.List.NonEmpty          as NE
+import           Data.Map.Strict             (Map, (!?))
+import qualified Data.Map.Strict             as Map
+import           Data.Maybe                  (mapMaybe)
+import           Data.Set                    (Set)
+import qualified Data.Set                    as Set
+import           Data.Text                   (Text, intercalate, unpack)
+import qualified Data.Text                   as Text
+import           Data.Void                   (absurd)
+import           Validation                  (Validation (..), failure)
 
-import           Biscuit.Utils      (maybeToRight)
-import           Datalog.AST
-import           Datalog.Parser     (fact)
-import           Timer              (timer)
+import           Auth.Biscuit.Datalog.AST
+import           Auth.Biscuit.Datalog.Parser (fact)
+import           Auth.Biscuit.Timer          (timer)
+import           Auth.Biscuit.Utils          (maybeToRight)
 
 type Name = Text -- a variable name
 type Bindings  = Map Name Value

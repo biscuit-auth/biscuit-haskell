@@ -2,16 +2,16 @@
 {-# LANGUAGE QuasiQuotes       #-}
 module Spec.Executor (specs) where
 
-import           Data.Attoparsec.Text (parseOnly)
-import           Data.Map.Strict      as Map
-import           Data.Set             as Set
-import           Data.Text            (Text, unpack)
+import           Data.Attoparsec.Text          (parseOnly)
+import           Data.Map.Strict               as Map
+import           Data.Set                      as Set
+import           Data.Text                     (Text, unpack)
 import           Test.Tasty
 import           Test.Tasty.HUnit
 
-import           Datalog.AST
-import           Datalog.Executor
-import           Datalog.Parser       (expressionParser, fact, rule)
+import           Auth.Biscuit.Datalog.AST
+import           Auth.Biscuit.Datalog.Executor
+import           Auth.Biscuit.Datalog.Parser   (expressionParser, fact, rule)
 
 specs :: TestTree
 specs = testGroup "Datalog evaluation"

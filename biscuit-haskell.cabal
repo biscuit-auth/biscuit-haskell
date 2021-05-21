@@ -27,17 +27,17 @@ source-repository head
 
 library
   exposed-modules:
-      Biscuit
-      Biscuit.Utils
-      Datalog.AST
-      Datalog.Executor
-      Datalog.Parser
-      Example
-      Proto
-      ProtoBufAdapter
-      Sel
-      Timer
-      Token
+      Auth.Biscuit
+      Auth.Biscuit.Utils
+      Auth.Biscuit.Datalog.AST
+      Auth.Biscuit.Datalog.Executor
+      Auth.Biscuit.Datalog.Parser
+      Auth.Biscuit.Example
+      Auth.Biscuit.Proto
+      Auth.Biscuit.ProtoBufAdapter
+      Auth.Biscuit.Sel
+      Auth.Biscuit.Timer
+      Auth.Biscuit.Token
   other-modules:
       Paths_biscuit_haskell
   hs-source-dirs:

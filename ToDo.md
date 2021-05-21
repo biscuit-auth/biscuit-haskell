@@ -38,7 +38,9 @@
   - [x] convert `AST` values into protobuf messages
 
 - [ ] use ContT in `Sel`
-- [ ] move the modules under a `Crypto` namespace
+- [ ] Cleanup modules
+  - [x] move the modules under a `Auth.Biscuit` namespace
+  - [ ] cleanup exports
 - [x] try building with cabal
 - [ ] add CI
 - [ ] check AST constraints after, not during, the parsing phase
