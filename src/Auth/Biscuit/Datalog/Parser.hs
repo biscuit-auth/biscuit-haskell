@@ -15,7 +15,22 @@
 {-# LANGUAGE TypeApplications      #-}
 {-# LANGUAGE TypeFamilies          #-}
 {- HLINT ignore "Reduce duplication" -}
-module Auth.Biscuit.Datalog.Parser where
+module Auth.Biscuit.Datalog.Parser
+  ( block
+  , check
+  , fact
+  , predicate
+  , rule
+  , verifier
+  -- these are only exported for testing purposes
+  , checkParser
+  , expressionParser
+  , policyParser
+  , predicateParser
+  , ruleParser
+  , termParser
+  , verifierParser
+  ) where
 
 import           Control.Applicative            (liftA2, optional, (<|>))
 import qualified Control.Monad.Combinators.Expr as Expr

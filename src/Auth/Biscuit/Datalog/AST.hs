@@ -13,7 +13,53 @@
 {-# LANGUAGE TypeApplications           #-}
 {-# LANGUAGE TypeFamilies               #-}
 {-# LANGUAGE UndecidableInstances       #-}
-module Auth.Biscuit.Datalog.AST where
+module Auth.Biscuit.Datalog.AST
+  (
+    Binary (..)
+  , Block
+  , Block' (..)
+  , BlockElement' (..)
+  , Check
+  , Check'
+  , Expression
+  , Expression' (..)
+  , Fact
+  , ID
+  , ID' (..)
+  , IsWithinSet (..)
+  , Op (..)
+  , ParsedAs (..)
+  , Policy
+  , Policy'
+  , PolicyType (..)
+  , Predicate
+  , Predicate' (..)
+  , PredicateOrFact (..)
+  , QQID
+  , Query
+  , Query'
+  , QueryItem' (..)
+  , Rule
+  , Rule' (..)
+  , SetType
+  , Slice (..)
+  , SliceType
+  , Unary (..)
+  , Value
+  , VariableType
+  , Verifier
+  , Verifier' (..)
+  , VerifierElement' (..)
+  , elementToBlock
+  , elementToVerifier
+  , fromStack
+  , listSymbolsInBlock
+  , renderBlock
+  , renderFact
+  , renderRule
+  , toSetTerm
+  , toStack
+  ) where
 
 import           Control.Applicative        ((<|>))
 import           Control.Monad              ((<=<))

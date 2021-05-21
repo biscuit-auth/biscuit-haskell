@@ -5,7 +5,18 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes       #-}
 {-# LANGUAGE RecordWildCards   #-}
-module Auth.Biscuit.Datalog.Executor where
+module Auth.Biscuit.Datalog.Executor
+  ( BlockWithRevocationIds (..)
+  , ExecutionError (..)
+  , Limits (..)
+  , ResultError (..)
+  , World (..)
+  , computeAllFacts
+  , defaultLimits
+  , evaluateExpression
+  , runVerifier
+  , runVerifierWithLimits
+  ) where
 
 import           Control.Monad               (join, mfilter, when)
 import           Data.Bifunctor              (first)
@@ -100,9 +111,6 @@ instance Show World where
     , [ "Facts" ]
     , renderFact <$> Set.toList facts
     ]
-
-rF :: Set Fact -> IO ()
-rF = putStrLn . unpack . intercalate "\n" . fmap renderFact . Set.toList
 
 -- does the fact contain `#ambient` or `#authority`
 isRestricted :: Fact -> Bool
