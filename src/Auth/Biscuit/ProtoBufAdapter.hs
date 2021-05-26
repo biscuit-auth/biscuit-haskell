@@ -3,6 +3,13 @@
 {-# LANGUAGE NamedFieldPuns    #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards   #-}
+{-|
+  Module      : Auth.Biscuit.Utils
+  Copyright   : © Clément Delafargue, 2021
+  License     : MIT
+  Maintainer  : clement@delafargue.name
+  Conversion functions between biscuit components and protobuf-encoded components
+-}
 module Auth.Biscuit.ProtoBufAdapter
   ( Symbols
   , extractSymbols
@@ -26,9 +33,12 @@ import           Auth.Biscuit.Datalog.AST
 import qualified Auth.Biscuit.Proto       as PB
 import           Auth.Biscuit.Utils       (maybeToRight)
 
+-- | A map to get symbol names from symbol ids
 type Symbols = Map Int32 Text
+-- | A map to get symbol ids from symbol names
 type ReverseSymbols = Map Text Int32
 
+-- | The common symbols defined in the biscuit spec
 commonSymbols :: Symbols
 commonSymbols = Map.fromList $ zip [0..]
   [ "authority"
@@ -40,12 +50,17 @@ commonSymbols = Map.fromList $ zip [0..]
   , "revocation_id"
   ]
 
+-- | Given existing symbols and a series of protobuf blocks,
+-- compute the complete symbol mapping
 extractSymbols :: Symbols -> [PB.Block] -> Symbols
 extractSymbols existingSymbols blocks =
     let blocksSymbols  = PB.getField . PB.symbols =<< blocks
         startingIndex = fromIntegral $ length existingSymbols
      in existingSymbols <> Map.fromList (zip [startingIndex..] blocksSymbols)
 
+-- | Given existing symbols and a biscuit block, compute the
+-- symbol table for the given block. Already existing symbols
+-- won't be included
 buildSymbolTable :: Symbols -> Block -> Symbols
 buildSymbolTable existingSymbols block =
   let allSymbols = listSymbolsInBlock block
@@ -61,6 +76,7 @@ reverseSymbols =
 getSymbolCode :: Integral i => ReverseSymbols -> Text -> i
 getSymbolCode = (fromIntegral .) . (Map.!)
 
+-- | Parse a protobuf block into a proper biscuit block
 pbToBlock :: Symbols -> PB.Block -> Either String Block
 pbToBlock s PB.Block{..} = do
   let bContext = PB.getField context
@@ -69,6 +85,8 @@ pbToBlock s PB.Block{..} = do
   bChecks <- traverse (pbToCheck s) $ PB.getField checks_v1
   pure Block{ .. }
 
+-- | Turn a biscuit block into a protobuf block, for serialization,
+-- along with the newly defined symbols
 blockToPb :: Symbols -> Int -> Block -> (Symbols, PB.Block)
 blockToPb existingSymbols bIndex b@Block{..} =
   let

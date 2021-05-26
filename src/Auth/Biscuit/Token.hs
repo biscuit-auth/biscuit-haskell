@@ -1,6 +1,13 @@
 {-# LANGUAGE NamedFieldPuns  #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TupleSections   #-}
+{-|
+  Module      : Auth.Biscuit.Token
+  Copyright   : © Clément Delafargue, 2021
+  License     : MIT
+  Maintainer  : clement@delafargue.name
+  Module defining the main biscuit-related operations
+-}
 module Auth.Biscuit.Token
   ( Biscuit (..)
   , ParseError (..)
@@ -16,9 +23,6 @@ module Auth.Biscuit.Token
   , BlockWithRevocationIds (..)
   , getRevocationIds
   ) where
-
-import qualified Data.ByteString.Base16        as Hex
-import           Debug.Trace
 
 import           Control.Monad                 (when)
 import           Control.Monad.Except          (runExceptT, throwError)
@@ -45,16 +49,22 @@ import           Auth.Biscuit.Sel              (Keypair (publicKey), PublicKey,
                                                 verifySignature)
 import           Auth.Biscuit.Utils            (maybeToRight)
 
--- Protobuf serialization does not have a guaranteed deterministic behaviour,
+-- | Protobuf serialization does not have a guaranteed deterministic behaviour,
 -- so we need to keep the initial serialized payload around in order to compute
 -- a new signature when adding a block.
 type ExistingBlock = (ByteString, Block)
 
+-- | A parsed biscuit
 data Biscuit
   = Biscuit
   { symbols   :: Symbols
+  -- ^ The symbols already defined in the contained blocks
   , authority :: (PublicKey, ExistingBlock)
+  -- ^ The authority block, along with the associated public key. The public key
+  -- is kept around since it's embedded in the serialized biscuit, but should not
+  -- be used for verification. An externally provided public key should be used instead.
   , blocks    :: [(PublicKey, ExistingBlock)]
+  -- ^ The extra blocks, along with the public keys needed
   , signature :: Signature
   }
   deriving (Eq, Show)
@@ -91,13 +101,19 @@ checkBiscuitSignature Biscuit{..} publicKey =
   let publicKeysAndMessages = (publicKey, fst $ snd authority) :| (fmap fst <$> blocks)
    in verifySignature publicKeysAndMessages signature
 
+-- | Errors that can happen when parsing a biscuit
 data ParseError
   = InvalidHexEncoding
+  -- ^ The provided ByteString is not hex-encoded
   | InvalidB64Encoding
+  -- ^ The provided ByteString is not base64-encoded
   | InvalidProtobufSer String
+  -- ^ The provided ByteString does not contain properly serialized protobuf values
   | InvalidProtobuf String
+  -- ^ The bytestring was correctly deserialized from protobuf, but the values can't be turned into a proper biscuit
   deriving (Eq, Show)
 
+-- | Parse a biscuit from a raw bytestring.
 parseBiscuit :: ByteString -> Either ParseError Biscuit
 parseBiscuit bs = do
   blockList <- first InvalidProtobufSer $ PB.decodeBlockList bs
@@ -122,6 +138,7 @@ parseBiscuit bs = do
                             }
   pure Biscuit{..}
 
+-- | Serialize a biscuit to a raw bytestring
 serializeBiscuit :: Biscuit -> ByteString
 serializeBiscuit Biscuit{..} =
   let authorityBs = fst $ snd authority
@@ -139,12 +156,16 @@ serializeBiscuit Biscuit{..} =
        , signature = PB.putField sigPb
        }
 
+-- | Parse a single block from a protobuf value
 blockFromPB :: Symbols -> PB.Block -> Either ParseError Block
 blockFromPB s pbBlock  = first InvalidProtobuf $ pbToBlock s pbBlock
 
+-- | An error that can happen when verifying a biscuit
 data VerificationError
   = SignatureError
+  -- ^ The signature is invalid
   | DatalogError ExecutionError
+  -- ^ The checks and policies could not be verified
   deriving (Eq, Show)
 
 -- | Given a provided verifier (a set of facts, rules, checks and policies),
@@ -165,27 +186,7 @@ verifyBiscuitWithLimits l b verifier pub = runExceptT $ do
 verifyBiscuit :: Biscuit -> Verifier -> PublicKey -> IO (Either VerificationError Query)
 verifyBiscuit = verifyBiscuitWithLimits defaultLimits
 
-
-{-
-
-toBRID :: (PublicKey, ExistingBlock) -> (ByteString, ByteString) -> BlockWithRevocationIds
-toBRID (_, (_, bBlock)) (genericRevocationId, uniqueRevocationId) =
-  BlockWithRevocationIds{..}
-
-toto :: NonEmpty (PublicKey, ExistingBlock)
-     -> NonEmpty ByteString
-     -> IO (NonEmpty BlockWithRevocationIds)
-toto bs params = do
-  let bs' = first serializePublicKey <$> bs
-      getRid (pubBytes, (blockBs, _)) = blockBs <> pubBytes
-      getRid' (pubBytes, (blockBs, _)) param = blockBs <> pubBytes <> param
-      ridsBs = getRid <$> bs'
-      rids'bs = NE.zipWith getRid' bs' params
-  rids <- hashBytes ridsBs
-  rids' <- hashBytes rids'bs
-  pure $ NE.zipWith toBRID bs (NE.zip rids rids')
-  -}
-
+-- | Get the components needed to compute revocation ids
 getRidComponents :: (PublicKey, ExistingBlock) -> ByteString
                  -> ((ByteString, ByteString), Block)
 getRidComponents (pub, (blockBs, block)) param =
@@ -195,21 +196,15 @@ getRidComponents (pub, (blockBs, block)) param =
   , block
   )
 
+-- | Given revocation ids components and a block, compute the revocation ids
+-- and attach them to the block
 mkBRID :: ((ByteString, ByteString), Block) -> IO BlockWithRevocationIds
 mkBRID ((g,u), bBlock) = do
   genericRevocationId <- hashBytes g
   uniqueRevocationId  <- hashBytes u
   pure BlockWithRevocationIds{..}
 
-_traceRids :: NonEmpty BlockWithRevocationIds
-           -> NonEmpty BlockWithRevocationIds
-_traceRids brids =
-  let s BlockWithRevocationIds{..} =
-         (Hex.encode genericRevocationId
-         ,Hex.encode uniqueRevocationId
-         )
-   in traceShow (s <$> brids) brids
-
+-- | Compute the revocation ids for a given biscuit
 getRevocationIds :: Biscuit -> IO (NonEmpty BlockWithRevocationIds)
 getRevocationIds Biscuit{..} = do
    params <- maybe (fail "") pure . NE.nonEmpty $ parameters signature
@@ -219,5 +214,3 @@ getRevocationIds Biscuit{..} = do
        withPreviousBlocks :: NonEmpty ((ByteString, ByteString), Block)
        withPreviousBlocks = NE.scanl1 conc blocksAndParams
    traverse mkBRID withPreviousBlocks
-
-

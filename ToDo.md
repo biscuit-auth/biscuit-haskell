@@ -41,7 +41,7 @@
 - [ ] Cleanup modules
   - [x] move the modules under a `Auth.Biscuit` namespace
   - [x] cleanup exports
-  - [ ] add missing haddock comments
+  - [/] add missing haddock comments
 - [x] try building with cabal
 - [ ] add CI
 - [ ] check AST constraints after, not during, the parsing phase
