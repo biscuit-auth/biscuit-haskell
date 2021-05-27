@@ -36,12 +36,14 @@
   - [x] parse whole block (with an associated quasiquoter)
   - [x] convert protobuf messages into `AST` values
   - [x] convert `AST` values into protobuf messages
+  - [x] only accept `v1` biscuits
+  - [ ] accumulate protobuf errors with `Validation`
 
 - [ ] use ContT in `Sel`
 - [ ] Cleanup modules
   - [x] move the modules under a `Auth.Biscuit` namespace
   - [x] cleanup exports
-  - [ ] add missing haddock comments
+  - [/] add missing haddock comments
 - [x] try building with cabal
 - [ ] add CI
 - [ ] check AST constraints after, not during, the parsing phase

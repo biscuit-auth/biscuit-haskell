@@ -3,9 +3,13 @@
 {-# LANGUAGE DeriveGeneric         #-}
 {-# LANGUAGE DerivingStrategies    #-}
 {-# LANGUAGE DuplicateRecordFields #-}
-{-# LANGUAGE NamedFieldPuns        #-}
-{-# LANGUAGE OverloadedStrings     #-}
-{-# LANGUAGE TypeApplications      #-}
+{-|
+  Module      : Auth.Biscuit.Proto
+  Copyright   : © Clément Delafargue, 2021
+  License     : MIT
+  Maintainer  : clement@delafargue.name
+  Haskell data structures mapping the biscuit protobuf definitions
+-}
 
 module Auth.Biscuit.Proto
   ( Biscuit (..)
@@ -29,28 +33,14 @@ module Auth.Biscuit.Proto
   , decodeBlock
   , encodeBlockList
   , encodeBlock
-
-  --
-  , decodeCBiscuit
-  , decodeBiscuit
-  , decodeAuthority
-  , decoded
-  , toto
-  , v1Test
-  , v1Test'
-  , v1Test''
-  , allSamples
   ) where
 
-import           Data.ByteString        (ByteString)
-import qualified Data.ByteString        as ByteString
-import           Data.ByteString.Base64
+import           Data.ByteString      (ByteString)
 import           Data.Int
 import           Data.ProtocolBuffers
 import           Data.Serialize
 import           Data.Text
-import           GHC.Generics           (Generic)
-import           Validation
+import           GHC.Generics         (Generic)
 
 data Biscuit = Biscuit
   { authority :: Required 1 (Value ByteString)
@@ -284,76 +274,3 @@ encodeBlockList = runPut . encodeMessage
 
 encodeBlock :: Block -> ByteString
 encodeBlock = runPut . encodeMessage
-
-
-decodeBiscuit :: ByteString
-              -> Either String Biscuit
-decodeBiscuit = runGet decodeMessage . decodeBase64Lenient
-
-decodeAuthority :: ByteString
-                -> Either String Block
-decodeAuthority = runGet decodeMessage
-
-
-decodeCBiscuit :: ByteString
-              -> Either String CBiscuit
-decodeCBiscuit = runGet decodeMessage
-
-decoded :: Biscuit
-decoded = either undefined id $ decodeBiscuit "CqYBCAASBnVzZXJJZBIOcmVhZE9ubHlBY2Nlc3MSCnJlc291cmNlSWQSBHJlYWQSBnVzZXJpZBoQCg4IBxIECAAQABIECAIgeypeClwKDggIEgQIARgJEgQIARgHEg4IAxIECAAQARIECAAQChIOCAISBAgAEAESBAgBGAkSDggHEgQIABAAEgQIARgHEhoIBBIECAAQABIECAEYCxIECAEYCRIECAAQChog/Be2qmYgERRHvdH/IN/Z5AAWSCFDjkSNXLZEvdNBY3QiRAogdNr/SGkItGP0piqRIQSXI2k1vZFrYOBQJf1mD71oZlgSICDINewl2TXZmtLDrGQVQhzz8YMbsmTai2rjk5ky7uIL"
-
-toto :: ByteString
-toto =
-  let Biscuit{authority} = decoded
-   in getField authority
-
-v1Test :: FilePath -> IO (Block, [Block])
-v1Test path = do
-  let orFail = either (fail . show) pure
-  ser <- ByteString.readFile path
-  CBiscuit{cAuthority,cBlocks} <- orFail $ runGet decodeMessage ser
-  pure (getField cAuthority, getField cBlocks)
-
-v1Test'' :: FilePath -> IO ()
-v1Test'' path = do
-  let isOk _ = print (path, "ok" :: Text)
-      isError _ = print (path, "error" :: Text)
-  ser <- ByteString.readFile path
-  either isError isOk $ runGet (decodeMessage @CBiscuit) ser
-
-v1Test' :: FilePath -> IO ()
-v1Test' path = do
-  let orFail = either (fail . show) pure
-  ser <- ByteString.readFile path
-  Biscuit{authority,blocks} <- orFail $ runGet decodeMessage ser
-  putStrLn "outer biscuit ok"
-  print @Block =<< orFail (runGet decodeMessage (getField authority))
-  putStrLn "authority ok"
-  let decBlock = eitherToValidation . runGet (decodeMessage @Block)
-      -- decBlocks = validationToEither $ traverse decBlock (getField blocks)
-  print blocks
-  print (decBlock <$> getField blocks)
-  putStrLn "blocks ok"
-  -- pure (getField authority, getField blocks)
-  --
-  --
-allSamples :: [FilePath]
-allSamples = ("../biscuit/samples/v1/" <>) <$>
- [ "test1_basic.bc"
- , "test2_different_root_key.bc"
- , "test3_invalid_signature_format.bc"
- , "test4_random_block.bc"
- , "test5_invalid_signature.bc"
- , "test6_reordered_blocks.bc"
- , "test7_invalid_block_fact_authority.bc"
- , "test8_invalid_block_fact_ambient.bc"
- , "test9_expired_token.bc"
- , "test10_authority_rules.bc"
- , "test11_verifier_authority_caveats.bc"
- , "test12_authority_caveats.bc"
- , "test13_block_rules.bc"
- , "test14_regex_constraint.bc"
- , "test15_multi_queries_caveats.bc"
- , "test16_caveat_head_name.bc"
- , "test17_expressions.bc"
- ]

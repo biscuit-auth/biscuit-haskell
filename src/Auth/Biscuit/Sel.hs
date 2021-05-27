@@ -2,6 +2,13 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE NamedFieldPuns             #-}
 {-# LANGUAGE RecordWildCards            #-}
+{-|
+  Module      : Auth.Biscuit.Sel
+  Copyright   : © Clément Delafargue, 2021
+  License     : MIT
+  Maintainer  : clement@delafargue.name
+  Cryptographic primitives necessary to sign and verify biscuit tokens
+-}
 module Auth.Biscuit.Sel
   ( Keypair (..)
   , PrivateKey
@@ -33,38 +40,49 @@ import           Foreign.Marshal.Alloc
 import           Foreign.Ptr
 import           Libsodium
 
+-- | A private key used to generate a biscuit
 newtype PrivateKey = PrivateKey ByteString
   deriving newtype (Eq, Ord)
 
 instance Show PrivateKey where
   show (PrivateKey bs) = show $ Hex.encode bs
 
+-- | Parse a private key from raw bytes.
+-- This returns `Nothing` if the raw bytes don't have the expected length
 parsePrivateKey :: ByteString -> Maybe PrivateKey
 parsePrivateKey bs = if BS.length bs == cs2int crypto_core_ristretto255_scalarbytes
                      then Just (PrivateKey bs)
                      else Nothing
 
+-- | Serialize a private key to raw bytes
 serializePrivateKey :: PrivateKey -> ByteString
 serializePrivateKey (PrivateKey bs) = bs
 
+-- | A public key used to generate a biscuit
 newtype PublicKey = PublicKey ByteString
   deriving newtype (Eq, Ord)
 
+-- | Parse a public key from raw bytes.
+-- This returns `Nothing` if the raw bytes don't have the expected length
 parsePublicKey :: ByteString -> Maybe PublicKey
 parsePublicKey bs = if BS.length bs == cs2int crypto_core_ristretto255_bytes
                      then Just (PublicKey bs)
                      else Nothing
 
+-- | Serialize a public key to raw bytes
 serializePublicKey :: PublicKey -> ByteString
 serializePublicKey (PublicKey bs) = bs
 
 instance Show PublicKey where
   show (PublicKey bs) = show $ Hex.encode bs
 
+-- | A keypair containing both a private key and a public key
 data Keypair
   = Keypair
   { privateKey :: PrivateKey
+  -- ^ the private key
   , publicKey  :: PublicKey
+  -- ^ the public key
   } deriving (Eq, Ord)
 
 instance Show Keypair where
@@ -78,24 +96,22 @@ keypairFromScalar scalarBuf =
     publicKey <- PublicKey <$> pointToByteString pointBuf
     pure Keypair{..}
 
+-- | Generate a random keypair
 newKeypair :: IO Keypair
 newKeypair = randomScalar keypairFromScalar
 
+-- | Construct a keypair from a private key
 fromPrivateKey :: PrivateKey -> IO Keypair
 fromPrivateKey (PrivateKey privBs) =
   withBSLen privBs $ keypairFromScalar . fst
 
+-- | The signature of a series of blocks (raw bytestrings)
 data Signature
   = Signature
   { parameters :: [ByteString]
+  -- ^ the list of parameters used to sign each block
   , z          :: ByteString
-  } deriving (Eq, Show)
-
-data Token
-  = Token
-  { messages  :: [ByteString]
-  , keys      :: [PublicKey]
-  , signature :: Signature
+  -- ^ the aggregated signature
   } deriving (Eq, Show)
 
 scalarToByteString :: Ptr CUChar -> IO ByteString
@@ -134,20 +150,7 @@ scalarToPoint scalar f =
 type Scalar = Ptr CUChar
 type Point = Ptr CUChar
 
-{-
-hashBytes' :: NonEmpty ByteString
-          -> IO (NonEmpty ByteString)
-hashBytes' (m1:|msgs) = fmap traceHexs $ (`runContT` pure) $ do
-  statePtr <- lift crypto_hash_sha256_state'malloc
-  state <- ContT $ crypto_hash_sha256_state'ptr statePtr
-  (h1, s1) <- lift $ hashAnd m1 state
-  let go []     (_, out) = pure out
-      go (m:ms) (s, out) = do
-        (h, s') <- hashAnd m s
-        go ms (s', pure h <> out)
-  lift $ go msgs (s1, pure h1)
-  -}
-
+-- | Hash a bytestring with SHA256
 hashBytes :: ByteString
           -> IO ByteString
 hashBytes message = (`runContT` pure) $ do
@@ -155,18 +158,6 @@ hashBytes message = (`runContT` pure) $ do
   (buf, len) <- ContT $ withBSLen message
   void $ lift $ crypto_hash_sha256 out buf len
   lift $ packCStringLen (castPtr out, cs2int crypto_hash_sha256_bytes)
-
-{-
-hashAnd :: ByteString -> Ptr Crypto_hash_sha256_state
-        -> IO (ByteString, Ptr Crypto_hash_sha256_state)
-hashAnd bs state = (`runContT` pure) $ do
-  hashBuf    <- ContT $ allocaBytes $ cs2int crypto_hash_sha256_bytes
-  (buf, len) <- ContT $ withBSLen bs
-  void $ lift $ crypto_hash_sha256_update state buf len
-  void $ lift $ crypto_hash_sha256_final state hashBuf
-  hashBs <- lift $ packCStringLen (castPtr hashBuf, cs2int crypto_hash_sha256_bytes)
-  pure (hashBs, state)
-  -}
 
 hashPoints :: [Point]
            -> (Scalar -> IO a)
@@ -209,6 +200,7 @@ hashMessage publicKey message f =
              void $ crypto_core_ristretto255_scalar_reduce scalar hash
              f scalar
 
+-- | Sign a single block with the given keypair
 signBlock :: Keypair
           -> ByteString
           -> IO Signature
@@ -232,6 +224,7 @@ signBlock Keypair{publicKey,privateKey} message = do
                                  , z = zBs
                                  }
 
+-- | Aggregate two signatures into a single one
 aggregate :: Signature -> Signature -> IO Signature
 aggregate first second =
   withScalar $ \zBuf -> withBSLen (z first) $ \(fz, _) -> withBSLen (z second) $ \(sz, _) -> do
@@ -242,6 +235,8 @@ aggregate first second =
       , z
       }
 
+-- | Verify a signature, given a list of messages and associated
+-- public keys
 verifySignature :: NonEmpty (PublicKey,ByteString)
                 -> Signature
                 -> IO Bool

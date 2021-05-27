@@ -13,6 +13,13 @@
 {-# LANGUAGE TypeApplications           #-}
 {-# LANGUAGE TypeFamilies               #-}
 {-# LANGUAGE UndecidableInstances       #-}
+{-|
+  Module      : Auth.Biscuit.Datalog.AST
+  Copyright   : © Clément Delafargue, 2021
+  License     : MIT
+  Maintainer  : clement@delafargue.name
+  The Datalog elements
+-}
 module Auth.Biscuit.Datalog.AST
   (
     Binary (..)
@@ -100,16 +107,28 @@ type family SetType (inSet :: IsWithinSet) (ctx :: ParsedAs) where
   SetType 'NotWithinSet ctx = Set (ID' 'WithinSet 'InFact ctx)
   SetType 'WithinSet    ctx = Void
 
+-- | A single datalog item.
+-- | This can be a value, a set of items, or a slice (a value that will be injected later),
+-- | depending on the context
 data ID' (inSet :: IsWithinSet) (pof :: PredicateOrFact) (ctx :: ParsedAs) =
     Symbol Text
+  -- ^ A symbol (eg. `#authority`)
   | Variable (VariableType inSet pof)
+  -- ^ A variable (eg. `$0`)
   | LInteger Int
+  -- ^ An integer literal (eg. `42`)
   | LString Text
+  -- ^ A string literal (eg. `"file1"`)
   | LDate UTCTime
+  -- ^ A date literal (eg. `2021-05-26T18:00:00Z`)
   | LBytes ByteString
+  -- ^ A hex literal (eg. `hex:ff9900`)
   | LBool Bool
+  -- ^ A bool literal (eg. `true`)
   | Antiquote (SliceType ctx)
+  -- ^ A slice (eg. `${name}`)
   | TermSet (SetType inSet ctx)
+  -- ^ A set (eg. `[true, false]`)
 
 deriving instance ( Eq (VariableType inSet pof)
                   , Eq (SliceType ctx)
@@ -126,11 +145,13 @@ deriving instance ( Show (VariableType inSet pof)
                   , Show (SetType inSet ctx)
                   ) => Show (ID' inSet pof ctx)
 
--- In a regular AST, antiquotes have already been eliminated
+-- | In a regular AST, slices have already been eliminated
 type ID = ID' 'NotWithinSet 'InPredicate 'RegularString
--- In an AST parsed from a QuasiQuoter, there might be references to haskell variables
+-- | In an AST parsed from a QuasiQuoter, there might be references to haskell variables
 type QQID = ID' 'NotWithinSet 'InPredicate 'QuasiQuote
-type Value = ID' 'NotWithinSet 'InFact 'RegularString -- a term that is *not* a variable
+-- | A term that is not a variable
+type Value = ID' 'NotWithinSet 'InFact 'RegularString
+-- | An element of a set
 type SetValue = ID' 'WithinSet 'InFact 'RegularString
 
 instance  ( Lift (VariableType inSet pof)
@@ -150,7 +171,10 @@ instance  ( Lift (VariableType inSet pof)
 
   liftTyped = unsafeTExpCoerce . lift
 
+-- | This class describes how to turn a haskell value into a datalog value.
+-- | This is used when slicing a haskell variable in a datalog expression
 class ToLiteralId t where
+  -- | How to turn a value into a datalog item
   toLiteralId :: t -> ID' inSet pof 'RegularString
 
 instance ToLiteralId Int where
@@ -467,7 +491,11 @@ renderExpression =
         EBinary And e e' -> rOp "&&" e e'
         EBinary Or e e'  -> rOp "||" e e'
 
+-- | A biscuit block, where slices have already been replaced by regular values
 type Block = Block' 'RegularString
+
+-- | A biscuit block, that may or may not contain slices referencing
+-- haskell variables
 data Block' (ctx :: ParsedAs) = Block
   { bRules   :: [Rule' ctx]
   , bFacts   :: [Predicate' 'InFact ctx]
@@ -521,10 +549,17 @@ listSymbolsInBlock Block {..} = fold
   , foldMap listSymbolsInCheck bChecks
   ]
 
+-- | A `Verifier'` where all slices have been replaced by actual values
 type Verifier = Verifier' 'RegularString
+
+-- | The context in which a biscuit policies and checks are verified.
+-- A verifier may add policies (`deny if` / `allow if` conditions), as well as rules, facts, and checks.
+-- A verifier may or may not contain slices referencing haskell variables.
 data Verifier' (ctx :: ParsedAs) = Verifier
   { vPolicies :: [Policy' ctx]
+  -- ^ the allow / deny policies.
   , vBlock    :: Block' ctx
+  -- ^ the facts, rules and checks
   }
 
 instance Semigroup (Verifier' ctx) where

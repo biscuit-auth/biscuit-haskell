@@ -1,5 +1,12 @@
 {-# LANGUAGE EmptyDataDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-|
+  Module      : Auth.Biscuit
+  Copyright   : © Clément Delafargue, 2021
+  License     : MIT
+  Maintainer  : clement@delafargue.name
+  Haskell implementation for the Biscuit token.
+-}
 module Auth.Biscuit
   ( PrivateKey
   , PublicKey
@@ -9,14 +16,7 @@ module Auth.Biscuit
   , ParseError (..)
   , VerificationError (..)
   , Limits (..)
-  , blockFact
-  , blockRule
-  , blockCheck
   , blockContext
-  , verifierFact
-  , verifierRule
-  , verifierCheck
-  , verifierPolicy
   , newKeypair
   , publicKey
   , privateKey
@@ -51,11 +51,7 @@ import qualified Data.ByteString.Base16        as Hex
 import qualified Data.ByteString.Base64.URL    as B64
 import           Data.Text                     (Text)
 
-import           Auth.Biscuit.Datalog.AST      (Block, BlockElement' (..),
-                                                Check, Fact, Policy, Rule,
-                                                Verifier, VerifierElement' (..),
-                                                bContext, elementToBlock,
-                                                elementToVerifier)
+import           Auth.Biscuit.Datalog.AST      (Block, Verifier, bContext)
 import           Auth.Biscuit.Datalog.Executor (Limits (..), defaultLimits)
 import           Auth.Biscuit.Sel              (Keypair (..), PrivateKey,
                                                 PublicKey, fromPrivateKey,
@@ -71,35 +67,35 @@ import           Auth.Biscuit.Token            (Biscuit, ParseError (..),
                                                 verifyBiscuitWithLimits)
 import           Auth.Biscuit.Utils            (maybeToRight)
 
-blockFact :: Fact -> Block
-blockFact = elementToBlock . BlockFact
-blockRule :: Rule -> Block
-blockRule = elementToBlock . BlockRule
-blockCheck :: Check -> Block
-blockCheck = elementToBlock . BlockCheck
+-- | Build a block containing an explicit context value.
+-- The context of a block can't be parsed from datalog currently,
+-- so you'll need an explicit call to `blockContext` to add it
+-- @
+--      [block|check if time(#ambient, $t), $t < 2021-01-01;|]
+--   <> blockContext "ttl-check"
+-- @
 blockContext :: Text -> Block
 blockContext c = mempty { bContext = Just c }
 
-verifierFact :: Fact -> Verifier
-verifierFact = elementToVerifier . BlockElement . BlockFact
-verifierRule :: Rule -> Verifier
-verifierRule = elementToVerifier . BlockElement . BlockRule
-verifierCheck :: Check -> Verifier
-verifierCheck = elementToVerifier . BlockElement . BlockCheck
-verifierPolicy :: Policy -> Verifier
-verifierPolicy = elementToVerifier . VerifierPolicy
-
+-- | Decode a base16-encoded bytestring, reporting errors via `MonadFail`
 fromHex :: MonadFail m => ByteString -> m ByteString
 fromHex input = do
   (decoded, "") <- pure $ Hex.decode input
   pure decoded
 
+-- | Get an hex bytestring from a private key
 serializePrivateKeyHex :: PrivateKey -> ByteString
 serializePrivateKeyHex = Hex.encode . serializePrivateKey
+
+-- | Get an hex bytestring from a public key
 serializePublicKeyHex :: PublicKey -> ByteString
 serializePublicKeyHex = Hex.encode . serializePublicKey
+
+-- | Read a private key from an hex bytestring
 parsePrivateKeyHex :: ByteString -> Maybe PrivateKey
 parsePrivateKeyHex = parsePrivateKey <=< fromHex
+
+-- | Read a public key from an hex bytestring
 parsePublicKeyHex :: ByteString -> Maybe PublicKey
 parsePublicKeyHex = parsePublicKey <=< fromHex
 
