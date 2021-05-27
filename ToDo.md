@@ -36,6 +36,8 @@
   - [x] parse whole block (with an associated quasiquoter)
   - [x] convert protobuf messages into `AST` values
   - [x] convert `AST` values into protobuf messages
+  - [x] only accept `v1` biscuits
+  - [ ] accumulate protobuf errors with `Validation`
 
 - [ ] use ContT in `Sel`
 - [ ] Cleanup modules

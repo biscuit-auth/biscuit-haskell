@@ -19,6 +19,7 @@ module Auth.Biscuit.ProtoBufAdapter
   , blockToPb
   ) where
 
+import           Control.Monad            (when)
 import           Data.Int                 (Int32, Int64)
 import           Data.Map.Strict          (Map)
 import qualified Data.Map.Strict          as Map
@@ -80,9 +81,11 @@ getSymbolCode = (fromIntegral .) . (Map.!)
 pbToBlock :: Symbols -> PB.Block -> Either String Block
 pbToBlock s PB.Block{..} = do
   let bContext = PB.getField context
+      bVersion = PB.getField version
   bFacts <- traverse (pbToFact s) $ PB.getField facts_v1
   bRules <- traverse (pbToRule s) $ PB.getField rules_v1
   bChecks <- traverse (pbToCheck s) $ PB.getField checks_v1
+  when (bVersion /= Just 1) $ Left $ "Unsupported biscuit version: " <> maybe "0" show bVersion <> ". Only version 1 is supported"
   pure Block{ .. }
 
 -- | Turn a biscuit block into a protobuf block, for serialization,
