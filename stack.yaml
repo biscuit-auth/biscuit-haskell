@@ -17,7 +17,7 @@
 #
 # resolver: ./custom-snapshot.yaml
 # resolver: https://example.com/snapshots/2018-01-01.yaml
-resolver: lts-16.23
+resolver: lts-17.10
 
 # User packages to be built.
 # Various formats can be used as shown in the example below.
@@ -40,6 +40,8 @@ packages:
 #   commit: e7b331f14bcffb8367cd58fbfc8b40ec7642100a
 #
 # extra-deps: []
+extra-deps:
+- libsodium-1.0.18.1@sha256:718a99126c2ffc292da602a3da570e6772c94d5240ff120f6a17fe623db3ca8e,1020
 
 # Override default flag values for local packages and extra-deps
 # flags: {}
@@ -64,7 +66,8 @@ packages:
 #
 # Allow a newer minor version of GHC than the snapshot specifies
 # compiler-check: newer-minor
-#extra-include-dirs: [/home/clementd/git/perso/biscuit-haskell/biscuit/usr/include/biscuit_auth]
-#extra-lib-dirs: [/home/clementd/git/perso/biscuit-haskell/result/lib]
-extra-include-dirs: [/home/clementd/git/perso/biscuit-haskell]
-extra-lib-dirs: [/home/clementd/git/perso/biscuit-haskell]
+
+nix:
+  enable: true
+  pure: false
+  packages: [pkgconfig,libsodium,haskellPackages.c2hs]
