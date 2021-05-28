@@ -40,12 +40,12 @@
   - [ ] accumulate protobuf errors with `Validation`
 
 - [ ] use ContT in `Sel`
-- [ ] Cleanup modules
+- [x] Cleanup modules
   - [x] move the modules under a `Auth.Biscuit` namespace
   - [x] cleanup exports
-  - [/] add missing haddock comments
+  - [x] add missing haddock comments
 - [x] try building with cabal
-- [ ] add CI
+- [x] add CI
 - [ ] check AST constraints after, not during, the parsing phase
 
 # Questions
