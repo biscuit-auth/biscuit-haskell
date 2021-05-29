@@ -39,7 +39,7 @@
   - [x] only accept `v1` biscuits
   - [ ] accumulate protobuf errors with `Validation`
 
-- [ ] use ContT in `Sel`
+- [x] use ContT in `Sel`
 - [x] Cleanup modules
   - [x] move the modules under a `Auth.Biscuit` namespace
   - [x] cleanup exports

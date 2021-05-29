@@ -2,6 +2,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE NamedFieldPuns             #-}
 {-# LANGUAGE RecordWildCards            #-}
+{- HLINT ignore "Reduce duplication" -}
 {-|
   Module      : Auth.Biscuit.Sel
   Copyright   : © Clément Delafargue, 2021
@@ -26,7 +27,8 @@ module Auth.Biscuit.Sel
   , hashBytes
   ) where
 
-import           Control.Monad.Cont     (ContT (..), lift, runContT)
+import           Control.Monad.Cont     (ContT (..), runContT)
+import           Control.Monad.IO.Class (MonadIO, liftIO)
 import           Data.ByteString        (ByteString, packCStringLen,
                                          useAsCStringLen)
 import qualified Data.ByteString        as BS
@@ -89,21 +91,24 @@ instance Show Keypair where
   show Keypair{privateKey, publicKey} =
     show privateKey <> "/" <> show publicKey
 
-keypairFromScalar :: Scalar -> IO Keypair
-keypairFromScalar scalarBuf =
-  scalarToPoint scalarBuf $ \pointBuf -> do
-    privateKey <- PrivateKey <$> scalarToByteString scalarBuf
-    publicKey <- PublicKey <$> pointToByteString pointBuf
-    pure Keypair{..}
+keypairFromScalar :: Scalar -> CIO a Keypair
+keypairFromScalar scalarBuf = do
+  pointBuf <- scalarToPoint scalarBuf
+  privateKey <- PrivateKey <$> scalarToByteString scalarBuf
+  publicKey <-  PublicKey <$> pointToByteString pointBuf
+  pure Keypair{..}
 
 -- | Generate a random keypair
 newKeypair :: IO Keypair
-newKeypair = randomScalar keypairFromScalar
+newKeypair = runCIO $ do
+  scalar <- randomScalar
+  keypairFromScalar scalar
 
 -- | Construct a keypair from a private key
 fromPrivateKey :: PrivateKey -> IO Keypair
-fromPrivateKey (PrivateKey privBs) =
-  withBSLen privBs $ keypairFromScalar . fst
+fromPrivateKey (PrivateKey privBs) = runCIO $ do
+  (privBuf, _) <- withBSLen privBs
+  keypairFromScalar privBuf
 
 -- | The signature of a series of blocks (raw bytestrings)
 data Signature
@@ -114,170 +119,216 @@ data Signature
   -- ^ the aggregated signature
   } deriving (Eq, Show)
 
-scalarToByteString :: Ptr CUChar -> IO ByteString
-scalarToByteString ptr =
-  let scalarIntSize = cs2int crypto_core_ristretto255_scalarbytes
-   in packCStringLen (castPtr ptr, scalarIntSize)
-
-pointToByteString :: Ptr CUChar -> IO ByteString
-pointToByteString ptr =
-  let pointIntSize = cs2int crypto_core_ristretto255_bytes
-   in packCStringLen (castPtr ptr, pointIntSize)
-
-randomScalar :: (Ptr CUChar -> IO a) -> IO a
-randomScalar f = withScalar $ \scalarBuf -> do
-        crypto_core_ristretto255_scalar_random scalarBuf
-        f scalarBuf
-
-withScalar :: (Scalar -> IO a) -> IO a
-withScalar f = do
-  let intScalarSize = cs2int crypto_core_ristretto255_scalarbytes
-  allocaBytes intScalarSize f
-
-withPoint :: (Point -> IO a) -> IO a
-withPoint f = do
-  let intPointSize = cs2int crypto_core_ristretto255_bytes
-  allocaBytes intPointSize f
-
-scalarToPoint :: Ptr CUChar
-              -> (Ptr CUChar -> IO a)
-              -> IO a
-scalarToPoint scalar f =
-  withPoint $ \pointBuf -> do
-    void $ crypto_scalarmult_ristretto255_base pointBuf scalar
-    f pointBuf
-
 type Scalar = Ptr CUChar
 type Point = Ptr CUChar
+
+-- | Pointer allocations are written in a continuation passing style,
+-- this type alias allows to use monadic notation instead of nesting
+-- callbacks
+type CIO a = ContT a IO
+
+-- | Run a continuation to get back an IO value.
+runCIO :: ContT a IO a -> IO a
+runCIO = (`runContT` pure)
+
+voidIO :: IO a -> CIO b ()
+voidIO = void . liftIO
+
+scalarToByteString :: MonadIO m => Ptr CUChar -> m ByteString
+scalarToByteString ptr =
+  let scalarIntSize = cs2int crypto_core_ristretto255_scalarbytes
+   in liftIO $ packCStringLen (castPtr ptr, scalarIntSize)
+
+pointToByteString :: MonadIO m => Ptr CUChar -> m ByteString
+pointToByteString ptr =
+  let pointIntSize = cs2int crypto_core_ristretto255_bytes
+   in liftIO $ packCStringLen (castPtr ptr, pointIntSize)
+
+randomScalar :: CIO a Scalar
+randomScalar = do
+  scalarBuf <- withScalar
+  liftIO $ crypto_core_ristretto255_scalar_random scalarBuf
+  pure scalarBuf
+
+withScalar :: CIO a Scalar
+withScalar =
+  let intScalarSize = cs2int crypto_core_ristretto255_scalarbytes
+   in ContT $ allocaBytes intScalarSize
+
+withPoint :: CIO a Point
+withPoint =
+  let intPointSize = cs2int crypto_core_ristretto255_bytes
+   in ContT $ allocaBytes intPointSize
+
+scalarToPoint :: Scalar
+              -> CIO a Point
+scalarToPoint scalar = do
+  pointBuf <- withPoint
+  voidIO $ crypto_scalarmult_ristretto255_base pointBuf scalar
+  pure pointBuf
+
+withBSLen :: ByteString
+          -> ContT a IO (Ptr CUChar, CULLong)
+withBSLen bs = do
+  (buf, int) <- ContT $ useAsCStringLen bs
+  pure (castPtr buf, toEnum int)
+
+scalarAdd :: Scalar -> Scalar -> CIO a Scalar
+scalarAdd x y = do
+  z <- withScalar
+  liftIO $ crypto_core_ristretto255_scalar_add z x y
+  pure z
+
+scalarAddBs :: ByteString -> ByteString -> CIO a ByteString
+scalarAddBs xBs yBs = do
+  (x, _) <- withBSLen xBs
+  (y, _) <- withBSLen yBs
+  z <- scalarAdd x y
+  scalarToByteString z
+
+scalarMul :: Scalar -> Scalar -> CIO a Scalar
+scalarMul x y = do
+  z <- withScalar
+  z <$ liftIO (crypto_core_ristretto255_scalar_mul z x y)
+
+scalarSub :: Scalar -> Scalar -> CIO a Scalar
+scalarSub x y = do
+  z <- withScalar
+  z <$ liftIO (crypto_core_ristretto255_scalar_sub z x y)
+
+scalarReduce :: Ptr CUChar -> CIO a Scalar
+scalarReduce bytes = do
+  z <- withScalar
+  z <$ liftIO (crypto_core_ristretto255_scalar_reduce z bytes)
+
+scalarMulPoint :: Scalar -> Point -> CIO a Point
+scalarMulPoint p q = do
+  n <- withScalar
+  n <$ liftIO (crypto_scalarmult_ristretto255 n p q)
+
+pointAdd :: Point -> Point -> CIO a Point
+pointAdd p q = do
+  r <- withPoint
+  r <$ liftIO (crypto_core_ristretto255_add r p q)
+
+pointSub :: Point -> Point -> CIO a Point
+pointSub p q = do
+  r <- withPoint
+  r <$ liftIO (crypto_core_ristretto255_sub r p q)
+
+zeroPoint :: CIO a Point
+zeroPoint = do
+  p <- withPoint
+  p <$ zeroizePoint p
+
+zeroizePoint :: MonadIO m => Point -> m ()
+zeroizePoint p = liftIO $ sodium_memzero p crypto_core_ristretto255_bytes
+
+isZeroPoint :: MonadIO m => Point -> m Bool
+isZeroPoint p = liftIO $
+  (== 1) <$> sodium_is_zero p crypto_core_ristretto255_scalarbytes
 
 -- | Hash a bytestring with SHA256
 hashBytes :: ByteString
           -> IO ByteString
-hashBytes message = (`runContT` pure) $ do
+hashBytes message = runCIO $ do
   out <- ContT $ allocaBytes $ cs2int crypto_hash_sha256_bytes
-  (buf, len) <- ContT $ withBSLen message
-  void $ lift $ crypto_hash_sha256 out buf len
-  lift $ packCStringLen (castPtr out, cs2int crypto_hash_sha256_bytes)
+  (buf, len) <- withBSLen message
+  voidIO $ crypto_hash_sha256 out buf len
+  liftIO $ packCStringLen (castPtr out, cs2int crypto_hash_sha256_bytes)
 
-hashPoints :: [Point]
-           -> (Scalar -> IO a)
-           -> IO a
-hashPoints points f = do
-  state <- crypto_hash_sha512_state'malloc
-  crypto_hash_sha512_state'ptr state $ \statePtr -> do
-    void $ crypto_hash_sha512_init statePtr
-    for_ points $ \point ->
-      crypto_hash_sha512_update statePtr point (fromInteger $ toInteger crypto_core_ristretto255_bytes)
-    allocaBytes (cs2int crypto_hash_sha512_bytes) $ \hash -> do
-      void $ crypto_hash_sha512_final statePtr hash
-      allocaBytes (cs2int crypto_core_ristretto255_scalarbytes) $ \scalar -> do
-         crypto_core_ristretto255_scalar_reduce scalar hash
-         f scalar
-
-withBSLen :: ByteString
-          -> ((Ptr CUChar, CULLong) -> IO a)
-          -> IO a
-withBSLen bs f = useAsCStringLen bs $ \(buf, int) ->
-      f (castPtr buf, toEnum int)
+hashPoint :: Point
+           -> ContT a IO Scalar
+hashPoint point = do
+  hash   <- ContT $ allocaBytes (cs2int crypto_hash_sha512_bytes)
+  voidIO $ crypto_hash_sha512 hash point (fromInteger $ toInteger crypto_core_ristretto255_bytes)
+  scalarReduce hash
 
 copyPointFrom :: Point -> Point -> IO ()
 copyPointFrom to from = copyPtr to from (cs2int crypto_core_ristretto255_bytes)
 
 hashMessage :: ByteString
             -> ByteString
-            -> (Scalar -> IO a) -> IO a
-hashMessage publicKey message f =
-  withBSLen publicKey $ \(kpBuf, kpLen) ->
-    withBSLen message $ \(msgBuf, msgLen) -> do
-      state <- crypto_hash_sha512_state'malloc
-      crypto_hash_sha512_state'ptr state $ \statePtr -> do
-        void $ crypto_hash_sha512_init statePtr
-        void $ crypto_hash_sha512_update statePtr kpBuf kpLen
-        void $ crypto_hash_sha512_update statePtr msgBuf msgLen
-        allocaBytes (cs2int crypto_hash_sha512_bytes) $ \hash -> do
-          void $ crypto_hash_sha512_final statePtr hash
-          allocaBytes (cs2int crypto_core_ristretto255_scalarbytes) $ \scalar -> do
-             void $ crypto_core_ristretto255_scalar_reduce scalar hash
-             f scalar
+            -> CIO a Scalar
+hashMessage publicKey message = do
+  (kpBuf, kpLen) <- withBSLen publicKey
+  (msgBuf, msgLen) <- withBSLen message
+  state <- liftIO crypto_hash_sha512_state'malloc
+  statePtr <- ContT $ crypto_hash_sha512_state'ptr state
+  voidIO $ crypto_hash_sha512_init statePtr
+  voidIO $ crypto_hash_sha512_update statePtr kpBuf kpLen
+  voidIO $ crypto_hash_sha512_update statePtr msgBuf msgLen
+  hash <- ContT $ allocaBytes (cs2int crypto_hash_sha512_bytes)
+  voidIO $ crypto_hash_sha512_final statePtr hash
+  scalar <- withScalar
+  voidIO $ crypto_core_ristretto255_scalar_reduce scalar hash
+  pure scalar
 
 -- | Sign a single block with the given keypair
-signBlock :: Keypair
-          -> ByteString
-          -> IO Signature
+signBlock :: Keypair -> ByteString -> IO Signature
 signBlock Keypair{publicKey,privateKey} message = do
   let PublicKey pubBs = publicKey
       PrivateKey prvBs = privateKey
-  randomScalar $ \r ->
-    scalarToPoint r $ \aa ->
-      hashPoints [aa] $ \d ->
-        hashMessage pubBs message $ \e ->
-          withScalar $ \rd -> do
-            crypto_core_ristretto255_scalar_mul rd r d
-            withScalar $ \epk ->
-              withBSLen prvBs $ \(pk, _) -> do
-                crypto_core_ristretto255_scalar_mul epk e pk
-                withScalar $ \z -> do
-                  crypto_core_ristretto255_scalar_sub z rd epk
-                  aaBs <- pointToByteString aa
-                  zBs <- scalarToByteString z
-                  pure Signature { parameters = [aaBs]
-                                 , z = zBs
-                                 }
+  (`runContT` pure) $ do
+     (pk, _) <- withBSLen prvBs
+
+     r   <- randomScalar
+     aa  <- scalarToPoint r
+     d   <- hashPoint aa
+     e   <- hashMessage pubBs message
+     rd  <- scalarMul r d
+     epk <- scalarMul e pk
+     z   <- scalarSub rd epk
+     aaBs <- pointToByteString aa
+     zBs  <- scalarToByteString z
+     pure Signature { parameters = [aaBs]
+                    , z = zBs
+                    }
 
 -- | Aggregate two signatures into a single one
 aggregate :: Signature -> Signature -> IO Signature
-aggregate first second =
-  withScalar $ \zBuf -> withBSLen (z first) $ \(fz, _) -> withBSLen (z second) $ \(sz, _) -> do
-    crypto_core_ristretto255_scalar_add zBuf fz sz
-    z <- pointToByteString zBuf
-    pure Signature
-      { parameters = parameters first <> parameters second
-      , z
-      }
+aggregate first second = runCIO $ do
+  z <- scalarAddBs (z first) (z second)
+  pure Signature
+    { parameters = parameters first <> parameters second
+    , z
+    }
 
 -- | Verify a signature, given a list of messages and associated
 -- public keys
-verifySignature :: NonEmpty (PublicKey,ByteString)
+verifySignature :: NonEmpty (PublicKey, ByteString)
                 -> Signature
                 -> IO Bool
-verifySignature messagesAndPks Signature{parameters,z} =
-  withBSLen z $ \(zBuf, _) ->
-    scalarToPoint zBuf $ \zP ->
-      computeHashMSums messagesAndPks $ \eiXiRes ->
-        computeHashPSums parameters $ \diAiRes ->
-          withPoint $ \res -> withPoint $ \resTmp -> do
-            _ <- crypto_core_ristretto255_add resTmp zP eiXiRes
-            _ <- crypto_core_ristretto255_sub res resTmp diAiRes
-            diff <- sodium_is_zero res crypto_core_ristretto255_scalarbytes
-            pure $ diff == 1
+verifySignature messagesAndPks Signature{parameters,z} = runCIO $ do
+  zP      <- scalarToPoint . fst  =<< withBSLen z
+  eiXiRes <- computeHashMSums messagesAndPks
+  diAiRes <- computeHashPSums parameters
+  resTmp  <- pointAdd zP eiXiRes
+  res     <- pointSub resTmp diAiRes
+  isZeroPoint res
 
 computeHashMSums :: NonEmpty (PublicKey, ByteString)
-                 -> (Point -> IO a) -> IO a
-computeHashMSums messagesAndPks f =
-  withPoint $ \eiXiRes -> do
-    sodium_memzero eiXiRes crypto_core_ristretto255_bytes
-    for_ messagesAndPks $ \(PublicKey publicKey, message) ->
-      withPoint $ \eiXi -> withPoint $ \eiXiResTmp ->
-        withBSLen publicKey $ \(pkBuf, _) ->
-          hashMessage publicKey message $ \ei -> do
-            _ <- crypto_scalarmult_ristretto255 eiXi ei pkBuf
-            _ <- crypto_core_ristretto255_add eiXiResTmp eiXiRes eiXi
-            copyPointFrom eiXiRes eiXiResTmp
-    f eiXiRes
+                 -> ContT a IO Point
+computeHashMSums messagesAndPks = do
+  eiXiRes <- zeroPoint
+  for_ messagesAndPks $ \(PublicKey publicKey, message) -> do
+    ei         <- hashMessage publicKey message
+    eiXi       <- scalarMulPoint ei . fst =<< withBSLen publicKey
+    eiXiResTmp <- pointAdd eiXiRes eiXi
+    liftIO $ copyPointFrom eiXiRes eiXiResTmp
+  pure eiXiRes
 
 computeHashPSums :: [ByteString] -- parameters
-                 -> (Point -> IO a) -> IO a
-computeHashPSums parameters f =
-  withPoint $ \diAiRes -> do
-    sodium_memzero diAiRes crypto_core_ristretto255_bytes
-    for_ parameters $ \aa ->
-      withPoint $ \diAi -> withPoint $ \diAiResTmp ->
-        withBSLen aa $ \(aaBuf, _) ->
-          hashPoints [aaBuf] $ \di -> do
-            _ <- crypto_scalarmult_ristretto255 diAi di aaBuf
-            _ <- crypto_core_ristretto255_add diAiResTmp diAiRes diAi
-            copyPointFrom diAiRes diAiResTmp
-    f diAiRes
+                 -> ContT a IO Point
+computeHashPSums parameters = do
+  diAiRes <- zeroPoint
+  for_ parameters $ \aa -> do
+    (aaBuf, _) <- withBSLen aa
+    di         <- hashPoint aaBuf
+    diAi       <- scalarMulPoint di aaBuf
+    diAiResTmp <- pointAdd diAiRes diAi
+    liftIO $ copyPointFrom diAiRes diAiResTmp
+  pure diAiRes
 
 cs2int :: CSize -> Int
 cs2int = fromInteger . toInteger
