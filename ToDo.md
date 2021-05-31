@@ -25,10 +25,6 @@
     - [x] rules / facts in blocks
     - [ ] regexes
 
-- [ ] Harden crypto
-  - [ ] check all sensitive buffers are filled with zeroes after use
-  - [ ] investigate zeroing the pk bytestring buffer on free
-
 - [x] Implement parsers & serialization
   - [x] parse `check if` conditions
   - [x] parse `allow` / `deny` conditions
@@ -47,7 +43,10 @@
 - [x] try building with cabal
 - [x] add CI
 - [ ] check AST constraints after, not during, the parsing phase
+- [ ] replace ad-hoc typeclasses / duplicated functions with HOFs
 
 # Questions
 
-- what happens if no policies match? (examples always assume there is a catch-all policy). Should this be enforced?
+- [x] what happens if no policies match? (examples always assume there is a catch-all policy). Should this be enforced?
+    
+    A dedicated error is reported when no policies match.
