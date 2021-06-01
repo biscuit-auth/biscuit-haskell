@@ -208,43 +208,33 @@ toSetTerm = \case
   Variable v -> absurd v
   Antiquote v -> absurd v
 
-renderId :: ID -> Text
-renderId = \case
+renderId' :: (VariableType inSet pof -> Text)
+          -> (SetType inSet ctx -> Text)
+          -> (SliceType ctx -> Text)
+          -> ID' inSet pof ctx -> Text
+renderId' var set slice = \case
   Symbol name   -> "#" <> name
-  Variable name -> "$" <> name
+  Variable name -> var name
   LInteger int  -> pack $ show int
   LString str   -> pack $ show str
   LDate time    -> pack $ show time
   LBytes bs     -> "hex:" <> decodeUtf8 (Hex.encode bs)
   LBool True    -> "true"
   LBool False   -> "false"
-  TermSet terms -> "[" <> intercalate "," (renderInnerId <$> Set.toList terms) <> "]"
-  Antiquote v   -> absurd v
+  TermSet terms -> set terms -- "[" <> intercalate "," (renderInnerId <$> Set.toList terms) <> "]"
+  Antiquote v   -> slice v
+
+renderSet :: (SliceType ctx -> Text)
+          -> Set (ID' 'WithinSet 'InFact ctx)
+          -> Text
+renderSet slice terms =
+  "[" <> intercalate "," (renderId' absurd absurd slice <$> Set.toList terms) <> "]"
+
+renderId :: ID -> Text
+renderId = renderId' ("$" <>) (renderSet absurd) absurd
 
 renderFactId :: ID' 'NotWithinSet 'InFact 'RegularString -> Text
-renderFactId = \case
-  Symbol name   -> "#" <> name
-  LInteger int  -> pack $ show int
-  LString str   -> pack $ show str
-  LDate time    -> pack $ show time
-  LBytes bs     -> "hex:" <> decodeUtf8 (Hex.encode bs)
-  LBool True    -> "true"
-  LBool False   -> "false"
-  TermSet terms -> "[" <> intercalate "," (renderInnerId <$> Set.toList terms) <> "]"
-  Variable v    -> absurd v
-  Antiquote v   -> absurd v
-
-renderInnerId :: ID' 'WithinSet 'InFact 'RegularString -> Text
-renderInnerId = \case
-  Symbol v    -> renderId (Symbol v)
-  LInteger v  -> renderId (LInteger v)
-  LString v   -> renderId (LString v)
-  LDate v     -> renderId (LDate v)
-  LBytes v    -> renderId (LBytes v)
-  LBool v     -> renderId (LBool v)
-  Antiquote v -> renderId (Antiquote v)
-  Variable v  -> absurd v
-  TermSet v   -> absurd v
+renderFactId = renderId' absurd (renderSet absurd) absurd
 
 listSymbolsInTerm :: ID -> Set.Set Text
 listSymbolsInTerm = \case
@@ -270,7 +260,6 @@ listSymbolsInSetValue = \case
   Antiquote v   -> absurd v
   _             -> mempty
 
-
 data Predicate' (pof :: PredicateOrFact) (ctx :: ParsedAs) = Predicate
   { name  :: Text
   , terms :: [ID' 'NotWithinSet pof ctx]
@@ -282,7 +271,6 @@ deriving instance ( Ord (ID' 'NotWithinSet pof ctx)
                   ) => Ord (Predicate' pof ctx)
 deriving instance ( Show (ID' 'NotWithinSet pof ctx)
                   ) => Show (Predicate' pof ctx)
-
 
 deriving instance Lift (ID' 'NotWithinSet pof ctx) => Lift (Predicate' pof ctx)
 
