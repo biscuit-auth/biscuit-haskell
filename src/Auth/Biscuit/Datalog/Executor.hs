@@ -35,12 +35,14 @@ import           Data.List.NonEmpty          (NonEmpty)
 import qualified Data.List.NonEmpty          as NE
 import           Data.Map.Strict             (Map, (!?))
 import qualified Data.Map.Strict             as Map
-import           Data.Maybe                  (mapMaybe)
+import           Data.Maybe                  (isJust, mapMaybe)
 import           Data.Set                    (Set)
 import qualified Data.Set                    as Set
 import           Data.Text                   (Text, intercalate, unpack)
 import qualified Data.Text                   as Text
 import           Data.Void                   (absurd)
+import qualified Text.Regex.TDFA             as Regex
+import qualified Text.Regex.TDFA.Text        as Regex
 import           Validation                  (Validation (..), failure)
 
 import           Auth.Biscuit.Datalog.AST
@@ -218,15 +220,15 @@ runVerifier' :: Limits
              -> [BlockWithRevocationIds]
              -> Verifier
              -> IO (Either ExecutionError Query)
-runVerifier' l@Limits{..} authority blocks v@Verifier{..} = do
+runVerifier' l authority blocks v@Verifier{..} = do
   let initialWorld = collectWorld l v authority blocks
-      allFacts' = computeAllFacts maxFacts maxIterations initialWorld
+      allFacts' = computeAllFacts l initialWorld
   case allFacts' of
       Left e -> pure $ Left e
       Right allFacts -> do
         let allChecks = foldMap bChecks $ vBlock : (bBlock <$> authority : blocks)
-            checkResults = traverse_ (checkCheck allFacts) allChecks
-            policiesResults = mapMaybe (checkPolicy allFacts) vPolicies
+            checkResults = traverse_ (checkCheck l allFacts) allChecks
+            policiesResults = mapMaybe (checkPolicy l allFacts) vPolicies
             policyResult = case policiesResults of
               p : _ -> first Just p
               []    -> Left Nothing
@@ -238,67 +240,75 @@ runVerifier' l@Limits{..} authority blocks v@Verifier{..} = do
           (Failure cs, Left (Just p)) -> Left $ ResultError $ DenyRuleMatched (NE.toList cs) p
           (Failure cs, Right _)       -> Left $ ResultError $ FailedChecks cs
 
-checkCheck :: Set Fact -> Check -> Validation (NonEmpty Check) ()
-checkCheck facts items =
-  if any (isQueryItemSatisfied facts) items
+checkCheck :: Limits -> Set Fact -> Check -> Validation (NonEmpty Check) ()
+checkCheck l facts items =
+  if any (isQueryItemSatisfied l facts) items
   then Success ()
   else failure items
 
-checkPolicy :: Set Fact -> Policy -> Maybe (Either Query Query)
-checkPolicy facts (pType, items) =
-  if any (isQueryItemSatisfied facts) items
+checkPolicy :: Limits -> Set Fact -> Policy -> Maybe (Either Query Query)
+checkPolicy l facts (pType, items) =
+  if any (isQueryItemSatisfied l facts) items
   then Just $ case pType of
     Allow -> Right items
     Deny  -> Left items
   else Nothing
 
-isQueryItemSatisfied :: Set Fact -> QueryItem' 'RegularString -> Bool
-isQueryItemSatisfied facts QueryItem{qBody, qExpressions} =
-  let bindings = getBindingsForRuleBody facts qBody qExpressions
+isQueryItemSatisfied :: Limits -> Set Fact -> QueryItem' 'RegularString -> Bool
+isQueryItemSatisfied l facts QueryItem{qBody, qExpressions} =
+  let bindings = getBindingsForRuleBody l facts qBody qExpressions
    in Set.size bindings > 0
 
 -- | Compute all possible facts, recursively calling itself
 -- until it can't generate new facts or a limit is reached
-computeAllFacts :: Int
-                -- ^ The maximum amount of facts that can be generated
-                -> Int
+computeAllFacts :: Limits
                 -- ^ The maximum amount of iterations that can be reached
                 -> World
                 -- ^ The initial rules and facts
                 -> Either ExecutionError (Set Fact)
-computeAllFacts maxFacts maxIterations w@World{facts} = do
-  let newFacts = extend w
+computeAllFacts l@Limits{..} = computeAllFacts' l maxIterations
+
+
+-- | Compute all possible facts, recursively calling itself
+-- until it can't generate new facts or a limit is reached
+computeAllFacts' :: Limits
+                 -> Int
+                 -> World
+                 -> Either ExecutionError (Set Fact)
+computeAllFacts' l@Limits{..} remainingIterations w@World{facts} = do
+  let newFacts = extend l w
       allFacts = facts <> newFacts
   when (Set.size allFacts >= maxFacts) $ Left TooManyFacts
-  when (maxIterations - 1 <= 0) $ Left TooManyIterations
+  when (remainingIterations - 1 <= 0) $ Left TooManyIterations
   if null newFacts
   then pure allFacts
-  else computeAllFacts maxFacts (maxIterations - 1) (w { facts = allFacts })
+  else computeAllFacts' l (remainingIterations - 1) (w { facts = allFacts })
 
-extend :: World -> Set Fact
-extend World{..} =
-  let buildFacts = foldMap (getFactsForRule facts)
+extend :: Limits -> World -> Set Fact
+extend l World{..} =
+  let buildFacts = foldMap (getFactsForRule l facts)
       allNewFacts = buildFacts rules
       allNewBlockFacts = Set.filter (not . isRestricted) $ buildFacts blockRules
    in Set.difference (allNewFacts <> allNewBlockFacts) facts
 
-getFactsForRule :: Set Fact -> Rule -> Set Fact
-getFactsForRule facts Rule{rhead, body, expressions} =
-  let legalBindings = getBindingsForRuleBody facts body expressions
+getFactsForRule :: Limits -> Set Fact -> Rule -> Set Fact
+getFactsForRule l facts Rule{rhead, body, expressions} =
+  let legalBindings = getBindingsForRuleBody l facts body expressions
       newFacts = mapMaybe (applyBindings rhead) $ Set.toList legalBindings
    in Set.fromList newFacts
 
-getBindingsForRuleBody :: Set Fact -> [Predicate] -> [Expression] -> Set Bindings
-getBindingsForRuleBody facts body expressions =
+getBindingsForRuleBody :: Limits -> Set Fact -> [Predicate] -> [Expression] -> Set Bindings
+getBindingsForRuleBody l facts body expressions =
   let candidateBindings = getCandidateBindings facts body
       allVariables = extractVariables body
       legalBindingsForFacts = reduceCandidateBindings allVariables candidateBindings
-   in Set.filter (\b -> all (satisfies b) expressions) legalBindingsForFacts
+   in Set.filter (\b -> all (satisfies l b) expressions) legalBindingsForFacts
 
-satisfies :: Bindings
+satisfies :: Limits
+          -> Bindings
           -> Expression
           -> Bool
-satisfies b e = evaluateExpression b e == Right (LBool True)
+satisfies l b e = evaluateExpression l b e == Right (LBool True)
 
 extractVariables :: [Predicate] -> Set Name
 extractVariables predicates =
@@ -404,66 +414,75 @@ evalUnary Length (LBytes bs) = pure . LInteger $ ByteString.length bs
 evalUnary Length (TermSet s) = pure . LInteger $ Set.size s
 evalUnary Length _ = Left "Only strings, bytes and sets support `.length()`"
 
-evalBinary :: Binary -> Value -> Value -> Either String Value
+evalBinary :: Limits -> Binary -> Value -> Value -> Either String Value
 -- eq / ord operations
-evalBinary Equal (Symbol s) (Symbol s')     = pure $ LBool (s == s')
-evalBinary Equal (LInteger i) (LInteger i') = pure $ LBool (i == i')
-evalBinary Equal (LString t) (LString t')   = pure $ LBool (t == t')
-evalBinary Equal (LDate t) (LDate t')       = pure $ LBool (t == t')
-evalBinary Equal (LBytes t) (LBytes t')     = pure $ LBool (t == t')
-evalBinary Equal (LBool t) (LBool t')       = pure $ LBool (t == t')
-evalBinary Equal (TermSet t) (TermSet t')   = pure $ LBool (t == t')
-evalBinary Equal _ _                        = Left "Equality mismatch"
-evalBinary LessThan (LInteger i) (LInteger i') = pure $ LBool (i < i')
-evalBinary LessThan (LDate t) (LDate t')       = pure $ LBool (t < t')
-evalBinary LessThan _ _                        = Left "< mismatch"
-evalBinary GreaterThan (LInteger i) (LInteger i') = pure $ LBool (i > i')
-evalBinary GreaterThan (LDate t) (LDate t')       = pure $ LBool (t > t')
-evalBinary GreaterThan _ _                        = Left "> mismatch"
-evalBinary LessOrEqual (LInteger i) (LInteger i') = pure $ LBool (i <= i')
-evalBinary LessOrEqual (LDate t) (LDate t')       = pure $ LBool (t <= t')
-evalBinary LessOrEqual _ _                        = Left "<= mismatch"
-evalBinary GreaterOrEqual (LInteger i) (LInteger i') = pure $ LBool (i >= i')
-evalBinary GreaterOrEqual (LDate t) (LDate t')       = pure $ LBool (t >= t')
-evalBinary GreaterOrEqual _ _                        = Left ">= mismatch"
+evalBinary _ Equal (Symbol s) (Symbol s')     = pure $ LBool (s == s')
+evalBinary _ Equal (LInteger i) (LInteger i') = pure $ LBool (i == i')
+evalBinary _ Equal (LString t) (LString t')   = pure $ LBool (t == t')
+evalBinary _ Equal (LDate t) (LDate t')       = pure $ LBool (t == t')
+evalBinary _ Equal (LBytes t) (LBytes t')     = pure $ LBool (t == t')
+evalBinary _ Equal (LBool t) (LBool t')       = pure $ LBool (t == t')
+evalBinary _ Equal (TermSet t) (TermSet t')   = pure $ LBool (t == t')
+evalBinary _ Equal _ _                        = Left "Equality mismatch"
+evalBinary _ LessThan (LInteger i) (LInteger i') = pure $ LBool (i < i')
+evalBinary _ LessThan (LDate t) (LDate t')       = pure $ LBool (t < t')
+evalBinary _ LessThan _ _                        = Left "< mismatch"
+evalBinary _ GreaterThan (LInteger i) (LInteger i') = pure $ LBool (i > i')
+evalBinary _ GreaterThan (LDate t) (LDate t')       = pure $ LBool (t > t')
+evalBinary _ GreaterThan _ _                        = Left "> mismatch"
+evalBinary _ LessOrEqual (LInteger i) (LInteger i') = pure $ LBool (i <= i')
+evalBinary _ LessOrEqual (LDate t) (LDate t')       = pure $ LBool (t <= t')
+evalBinary _ LessOrEqual _ _                        = Left "<= mismatch"
+evalBinary _ GreaterOrEqual (LInteger i) (LInteger i') = pure $ LBool (i >= i')
+evalBinary _ GreaterOrEqual (LDate t) (LDate t')       = pure $ LBool (t >= t')
+evalBinary _ GreaterOrEqual _ _                        = Left ">= mismatch"
 -- string-related operations
-evalBinary Prefix (LString t) (LString t') = pure $ LBool (t' `Text.isPrefixOf` t)
-evalBinary Prefix _ _                      = Left "Only strings support `.starts_with()`"
-evalBinary Suffix (LString t) (LString t') = pure $ LBool (t' `Text.isSuffixOf` t)
-evalBinary Suffix _ _                      = Left "Only strings support `.ends_with()`"
-evalBinary Regex  _ _                      = Left "Rexeges are not supported"
+evalBinary _ Prefix (LString t) (LString t') = pure $ LBool (t' `Text.isPrefixOf` t)
+evalBinary _ Prefix _ _                      = Left "Only strings support `.starts_with()`"
+evalBinary _ Suffix (LString t) (LString t') = pure $ LBool (t' `Text.isSuffixOf` t)
+evalBinary _ Suffix _ _                      = Left "Only strings support `.ends_with()`"
+evalBinary Limits{allowRegexes} Regex  (LString t) (LString r) | allowRegexes = regexMatch t r
+                                                               | otherwise    = Left "Regex evaluation is disabled"
+evalBinary _ Regex _ _                       = Left "Only strings support `.matches()`"
 -- num operations
-evalBinary Add (LInteger i) (LInteger i') = pure $ LInteger (i + i')
-evalBinary Add _ _ = Left "Only integers support addition"
-evalBinary Sub (LInteger i) (LInteger i') = pure $ LInteger (i - i')
-evalBinary Sub _ _ = Left "Only integers support subtraction"
-evalBinary Mul (LInteger i) (LInteger i') = pure $ LInteger (i * i')
-evalBinary Mul _ _ = Left "Only integers support multiplication"
-evalBinary Div (LInteger _) (LInteger 0) = Left "Divide by 0"
-evalBinary Div (LInteger i) (LInteger i') = pure $ LInteger (i `div` i')
-evalBinary Div _ _ = Left "Only integers support division"
+evalBinary _ Add (LInteger i) (LInteger i') = pure $ LInteger (i + i')
+evalBinary _ Add _ _ = Left "Only integers support addition"
+evalBinary _ Sub (LInteger i) (LInteger i') = pure $ LInteger (i - i')
+evalBinary _ Sub _ _ = Left "Only integers support subtraction"
+evalBinary _ Mul (LInteger i) (LInteger i') = pure $ LInteger (i * i')
+evalBinary _ Mul _ _ = Left "Only integers support multiplication"
+evalBinary _ Div (LInteger _) (LInteger 0) = Left "Divide by 0"
+evalBinary _ Div (LInteger i) (LInteger i') = pure $ LInteger (i `div` i')
+evalBinary _ Div _ _ = Left "Only integers support division"
 -- boolean operations
-evalBinary And (LBool b) (LBool b') = pure $ LBool (b && b')
-evalBinary And _ _ = Left "Only booleans support &&"
-evalBinary Or (LBool b) (LBool b') = pure $ LBool (b || b')
-evalBinary Or _ _ = Left "Only booleans support ||"
+evalBinary _ And (LBool b) (LBool b') = pure $ LBool (b && b')
+evalBinary _ And _ _ = Left "Only booleans support &&"
+evalBinary _ Or (LBool b) (LBool b') = pure $ LBool (b || b')
+evalBinary _ Or _ _ = Left "Only booleans support ||"
 -- set operations
-evalBinary Contains (TermSet t) (TermSet t') = pure $ LBool (Set.isSubsetOf t' t)
-evalBinary Contains (TermSet t) t' = case toSetTerm t' of
+evalBinary _ Contains (TermSet t) (TermSet t') = pure $ LBool (Set.isSubsetOf t' t)
+evalBinary _ Contains (TermSet t) t' = case toSetTerm t' of
     Just t'' -> pure $ LBool (Set.member t'' t)
     Nothing  -> Left "Sets cannot contain nested sets nor variables"
-evalBinary Contains _ _ = Left "Only sets support `.contains()`"
-evalBinary Intersection (TermSet t) (TermSet t') = pure $ TermSet (Set.intersection t t')
-evalBinary Intersection _ _ = Left "Only sets support `.intersection()`"
-evalBinary Union (TermSet t) (TermSet t') = pure $ TermSet (Set.union t t')
-evalBinary Union _ _ = Left "Only sets support `.union()`"
+evalBinary _ Contains _ _ = Left "Only sets support `.contains()`"
+evalBinary _ Intersection (TermSet t) (TermSet t') = pure $ TermSet (Set.intersection t t')
+evalBinary _ Intersection _ _ = Left "Only sets support `.intersection()`"
+evalBinary _ Union (TermSet t) (TermSet t') = pure $ TermSet (Set.union t t')
+evalBinary _ Union _ _ = Left "Only sets support `.union()`"
+
+regexMatch :: Text -> Text -> Either String Value
+regexMatch text regexT = do
+  regex  <- Regex.compile Regex.defaultCompOpt Regex.defaultExecOpt regexT
+  result <- Regex.execute regex text
+  pure . LBool $ isJust result
 
 -- | Given bindings for variables, reduce an expression to a single
 -- datalog value
-evaluateExpression :: Bindings
+evaluateExpression :: Limits
+                   -> Bindings
                    -> Expression
                    -> Either String Value
-evaluateExpression b = \case
+evaluateExpression l b = \case
     EValue term -> applyVariable b term
-    EUnary op e' -> evalUnary op =<< evaluateExpression b e'
-    EBinary op e' e'' -> uncurry (evalBinary op) =<< join bitraverse (evaluateExpression b) (e', e'')
+    EUnary op e' -> evalUnary op =<< evaluateExpression l b e'
+    EBinary op e' e'' -> uncurry (evalBinary l op) =<< join bitraverse (evaluateExpression l b) (e', e'')

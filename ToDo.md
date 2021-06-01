@@ -15,15 +15,15 @@
   - [x] consider computing unique revocation ids (based on signatures)
   - [x] enforce `#authority` / `#ambient` restrictions in blocks
   - [x] report more detailed errors in datalog execution
-  - [ ] support regexes
+  - [x] support regexes
   - [x] accumulate checks errors instead of returning the first one
   - [ ] log predicate / expressions errors with a writer to ease debugging
-  - [ ] implement verifier limits
+  - [x] implement verifier limits
     - [x] facts count
     - [x] iterations count
     - [x] timeout
     - [x] rules / facts in blocks
-    - [ ] regexes
+    - [x] regexes
 
 - [x] Implement parsers & serialization
   - [x] parse `check if` conditions

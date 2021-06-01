@@ -17,6 +17,7 @@ specs :: TestTree
 specs = testGroup "Datalog evaluation"
   [ grandparent
   , exprEval
+  , exprEvalError
   , rulesWithConstraints
   , ruleHeadWithNoVars
   , limits
@@ -35,7 +36,7 @@ grandparent = testCase "Basic grandparent rule" $
                    , [fact|parent("alice", "toto")|]
                    ]
         }
-   in computeAllFacts 1000 100 world @?= Right (Set.fromList
+   in computeAllFacts defaultLimits world @?= Right (Set.fromList
         [ [fact|parent("alice", "bob")|]
         , [fact|parent("bob", "jean-pierre")|]
         , [fact|parent("alice", "toto")|]
@@ -51,7 +52,7 @@ exprEval = do
         [ ("var1", LInteger 0)
         ]
       eval (e, r) = testCase (unpack e) $
-        evaluateExpression bindings (expr e) @?= Right r
+        evaluateExpression defaultLimits bindings (expr e) @?= Right r
 
    --   ("1 / 0") @?= Left "Divide by 0"
   testGroup "Expressions evaluation" $ eval <$>
@@ -72,6 +73,8 @@ exprEval = do
     , ("2 == 1", LBool False)
     , ("\"toto\" == \"toto\"", LBool True)
     , ("\"toto\" == \"truc\"", LBool False)
+    , ("\"toto\".matches(\"to(to)?\")", LBool True)
+    , ("\"toto\".matches(\"^to$\")", LBool False)
     , ("2021-05-07T18:00:00Z == 2021-05-07T18:00:00Z", LBool True)
     , ("2021-05-07T18:00:00Z == 2021-05-07T19:00:00Z", LBool False)
     , ("hex:ababab == hex:ababab", LBool True)
@@ -126,6 +129,20 @@ exprEval = do
     , ("[#test].union([\"test\"])", TermSet (Set.fromList [Symbol "test", LString "test"]))
     ]
 
+exprEvalError :: TestTree
+exprEvalError = do
+  let bindings = Map.fromList
+        [ ("var1", LInteger 0)
+        ]
+      l = defaultLimits { allowRegexes = False }
+      evalFail (e, r) = testCase (unpack e) $
+        evaluateExpression l bindings (expr e) @?= Left r
+
+  testGroup "Expressions evaluation (expected errors)" $ evalFail <$>
+    [ ("1 / 0", "Divide by 0")
+    , ("\"toto\".matches(\"to\")", "Regex evaluation is disabled")
+    ]
+
 rulesWithConstraints :: TestTree
 rulesWithConstraints = testCase "Rule with constraints" $
   let world = World
@@ -140,7 +157,7 @@ rulesWithConstraints = testCase "Rule with constraints" $
                    , [fact|resource(#ambient, "file2")|]
                    ]
         }
-   in computeAllFacts 1000 100 world @?= Right (Set.fromList
+   in computeAllFacts defaultLimits world @?= Right (Set.fromList
         [ [fact|time(#ambient, 2019-12-04T01:00:00Z)|]
         , [fact|resource(#ambient, "file1")|]
         , [fact|resource(#ambient, "file2")|]
@@ -158,7 +175,7 @@ ruleHeadWithNoVars = testCase "Rule head with no variables" $
                    [ [fact|test(#whatever, #notNothing)|]
                    ]
         }
-   in computeAllFacts 1000 100 world @?= Right (Set.fromList
+   in computeAllFacts defaultLimits world @?= Right (Set.fromList
         [ [fact|test(#whatever, #notNothing)|]
         ])
 
@@ -177,9 +194,11 @@ limits =
                    , [fact|parent("alice", "toto")|]
                    ]
         }
+      factLimits = defaultLimits { maxFacts = 10 }
+      iterLimits = defaultLimits { maxIterations = 2 }
    in testGroup "Facts generation limits"
         [ testCase "max facts" $
-            computeAllFacts 2 100 world @?= Left TooManyFacts
+            computeAllFacts factLimits world @?= Left TooManyFacts
         , testCase "max iterations" $
-            computeAllFacts 1000 1 world @?= Left TooManyIterations
+            computeAllFacts iterLimits world @?= Left TooManyIterations
         ]
