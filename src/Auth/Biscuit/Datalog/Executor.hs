@@ -18,6 +18,8 @@ module Auth.Biscuit.Datalog.Executor
   , Limits (..)
   , ResultError (..)
   , World (..)
+  , Bindings
+  , Name
   , computeAllFacts
   , defaultLimits
   , evaluateExpression
@@ -50,7 +52,10 @@ import           Auth.Biscuit.Datalog.Parser (fact)
 import           Auth.Biscuit.Timer          (timer)
 import           Auth.Biscuit.Utils          (maybeToRight)
 
-type Name = Text -- a variable name
+-- | A variable name
+type Name = Text
+
+-- | A list of bound variables, with the associated value
 type Bindings  = Map Name Value
 
 -- | The result of matching the checks and policies against all the available

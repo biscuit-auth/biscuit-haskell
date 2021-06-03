@@ -3,15 +3,14 @@
 {- HLINT ignore "Reduce duplication" -}
 module Spec.Crypto (specs) where
 
-import           Data.ByteString             (ByteString)
-import           Data.List.NonEmpty          (NonEmpty ((:|)))
+import           Data.ByteString    (ByteString)
+import           Data.List.NonEmpty (NonEmpty ((:|)))
 import           Test.Tasty
 import           Test.Tasty.HUnit
 
 import           Auth.Biscuit
-import           Auth.Biscuit.Datalog.Parser (block)
-import qualified Auth.Biscuit.Sel            as Sel
-import           Auth.Biscuit.Token          (Biscuit (..))
+import qualified Auth.Biscuit.Sel   as Sel
+import           Auth.Biscuit.Token (Biscuit (..))
 
 specs :: TestTree
 specs = testGroup "biscuit crypto"

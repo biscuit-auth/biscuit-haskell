@@ -2,12 +2,11 @@
 {-# LANGUAGE QuasiQuotes       #-}
 module Auth.Biscuit.Example where
 
-import           Data.ByteString             (ByteString)
-import           Data.Functor                (($>))
-import           Data.Time                   (getCurrentTime)
+import           Data.ByteString (ByteString)
+import           Data.Functor    (($>))
+import           Data.Time       (getCurrentTime)
 
 import           Auth.Biscuit
-import           Auth.Biscuit.Datalog.Parser (block, verifier)
 
 privateKey' :: PrivateKey
 privateKey' = maybe (error "Error parsing private key") id $ parsePrivateKeyHex "todo"
@@ -17,7 +16,10 @@ publicKey' = maybe (error "Error parsing public key") id $ parsePublicKeyHex "to
 
 creation :: IO ByteString
 creation = do
-  let authority = [block|resource(#authority,"file1");|]
+  let authority = [block|
+       // toto
+       resource(#authority,"file1");
+       |]
   keypair <- fromPrivateKey privateKey'
   biscuit <- mkBiscuit keypair authority
   let block1 = [block|check if current_time(#ambient, $time), $time < 2021-05-08T00:00:00Z;|]

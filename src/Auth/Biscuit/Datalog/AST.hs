@@ -112,23 +112,23 @@ type family SetType (inSet :: IsWithinSet) (ctx :: ParsedAs) where
 -- | depending on the context
 data ID' (inSet :: IsWithinSet) (pof :: PredicateOrFact) (ctx :: ParsedAs) =
     Symbol Text
-  -- ^ A symbol (eg. `#authority`)
+  -- ^ A symbol (eg. @#authority@)
   | Variable (VariableType inSet pof)
-  -- ^ A variable (eg. `$0`)
+  -- ^ A variable (eg. @$0@)
   | LInteger Int
-  -- ^ An integer literal (eg. `42`)
+  -- ^ An integer literal (eg. @42@)
   | LString Text
-  -- ^ A string literal (eg. `"file1"`)
+  -- ^ A string literal (eg. @"file1"@)
   | LDate UTCTime
-  -- ^ A date literal (eg. `2021-05-26T18:00:00Z`)
+  -- ^ A date literal (eg. @2021-05-26T18:00:00Z@)
   | LBytes ByteString
-  -- ^ A hex literal (eg. `hex:ff9900`)
+  -- ^ A hex literal (eg. @hex:ff9900@)
   | LBool Bool
-  -- ^ A bool literal (eg. `true`)
+  -- ^ A bool literal (eg. @true@)
   | Antiquote (SliceType ctx)
-  -- ^ A slice (eg. `${name}`)
+  -- ^ A slice (eg. @${name}@)
   | TermSet (SetType inSet ctx)
-  -- ^ A set (eg. `[true, false]`)
+  -- ^ A set (eg. @[true, false]@)
 
 deriving instance ( Eq (VariableType inSet pof)
                   , Eq (SliceType ctx)
@@ -479,7 +479,13 @@ renderExpression =
         EBinary And e e' -> rOp "&&" e e'
         EBinary Or e e'  -> rOp "||" e e'
 
--- | A biscuit block, where slices have already been replaced by regular values
+-- | A biscuit block, containing facts, rules and checks.
+--
+-- 'Block' has a 'Monoid' instance, this is the expected way
+-- to build composite blocks (eg if you need to generate a list of facts):
+--
+-- > -- build a block containing a list of facts `value("a"); value("b"); value("c");`.
+-- > foldMap (\v -> [block| value(${v}) |]) ["a", "b", "c"]
 type Block = Block' 'RegularString
 
 -- | A biscuit block, that may or may not contain slices referencing
@@ -537,7 +543,7 @@ listSymbolsInBlock Block {..} = fold
   , foldMap listSymbolsInCheck bChecks
   ]
 
--- | A `Verifier'` where all slices have been replaced by actual values
+-- | A biscuit verifier, containing, facts, rules, checks and policies
 type Verifier = Verifier' 'RegularString
 
 -- | The context in which a biscuit policies and checks are verified.

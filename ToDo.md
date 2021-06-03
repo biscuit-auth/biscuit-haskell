@@ -42,8 +42,8 @@
   - [x] add missing haddock comments
 - [x] try building with cabal
 - [x] add CI
+- [/] replace ad-hoc typeclasses / duplicated functions with HOFs
 - [ ] check AST constraints after, not during, the parsing phase
-- [ ] replace ad-hoc typeclasses / duplicated functions with HOFs
 
 # Questions
 

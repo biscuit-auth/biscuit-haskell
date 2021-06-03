@@ -30,6 +30,8 @@ module Auth.Biscuit.Datalog.Parser
   , ruleParser
   , termParser
   , verifierParser
+  , HasParsers
+  , HasTermParsers
   ) where
 
 import           Control.Applicative            (liftA2, optional, (<|>))
@@ -339,6 +341,10 @@ compileParser p str = case parseOnly p (pack str) of
   Right result -> [| result |]
   Left e       -> fail e
 
+-- | Quasiquoter for a rule expression. You can reference haskell variables
+-- like this: @${variableName}@.
+--
+-- You most likely want to directly use 'block' or 'verifier' instead.
 rule :: QuasiQuoter
 rule = QuasiQuoter
   { quoteExp = compileParser (ruleParser @'QuasiQuote)
@@ -347,6 +353,10 @@ rule = QuasiQuoter
   , quoteDec = error "not supported"
   }
 
+-- | Quasiquoter for a predicate expression. You can reference haskell variables
+-- like this: @${variableName}@.
+--
+-- You most likely want to directly use 'block' or 'verifier' instead.
 predicate :: QuasiQuoter
 predicate = QuasiQuoter
   { quoteExp = compileParser (predicateParser @'InPredicate @'QuasiQuote)
@@ -355,6 +365,10 @@ predicate = QuasiQuoter
   , quoteDec = error "not supported"
   }
 
+-- | Quasiquoter for a fact expression. You can reference haskell variables
+-- like this: @${variableName}@.
+--
+-- You most likely want to directly use 'block' or 'verifier' instead.
 fact :: QuasiQuoter
 fact = QuasiQuoter
   { quoteExp = compileParser (predicateParser @'InFact @'QuasiQuote)
@@ -363,6 +377,10 @@ fact = QuasiQuoter
   , quoteDec = error "not supported"
   }
 
+-- | Quasiquoter for a check expression. You can reference haskell variables
+-- like this: @${variableName}@.
+--
+-- You most likely want to directly use 'block' or 'verifier' instead.
 check :: QuasiQuoter
 check = QuasiQuoter
   { quoteExp = compileParser (checkParser @'QuasiQuote)
@@ -371,6 +389,16 @@ check = QuasiQuoter
   , quoteDec = error "not supported"
   }
 
+-- | Quasiquoter for a block expression. You can reference haskell variables
+-- like this: @${variableName}@.
+--
+-- A typical use of 'block' looks like this:
+--
+-- > [block|
+-- >   resource(#authority, ${fileName});
+-- >   rule($variable) <- fact($value), other_fact($value);
+-- >   check if operation(#ambient, #read);
+-- > |]
 block :: QuasiQuoter
 block = QuasiQuoter
   { quoteExp = compileParser (blockParser @'QuasiQuote)
@@ -379,6 +407,16 @@ block = QuasiQuoter
   , quoteDec = error "not supported"
   }
 
+-- | Quasiquoter for a verifier expression. You can reference haskell variables
+-- like this: @${variableName}@.
+--
+-- A typical use of 'block' looks like this:
+--
+-- > [verifier|
+-- >   current_time(#ambient, ${now});
+-- >   allow if resource(#authority, "file1");
+-- >   deny if true;
+-- > |]
 verifier :: QuasiQuoter
 verifier = QuasiQuoter
   { quoteExp = compileParser (verifierParser @'QuasiQuote)

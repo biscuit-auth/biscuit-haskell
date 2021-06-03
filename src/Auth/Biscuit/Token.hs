@@ -12,6 +12,7 @@ module Auth.Biscuit.Token
   ( Biscuit (..)
   , ParseError (..)
   , VerificationError (..)
+  , ExistingBlock
   , mkBiscuit
   , addBlock
   , checkBiscuitSignature
@@ -169,7 +170,8 @@ data VerificationError
   deriving (Eq, Show)
 
 -- | Given a provided verifier (a set of facts, rules, checks and policies),
--- and a public key, verify a biscuit
+-- and a public key, verify a biscuit:
+--
 -- - make sure the biscuit has been signed with the private key associated to the public key
 -- - make sure the biscuit is valid for the provided verifier
 verifyBiscuitWithLimits :: Limits -> Biscuit -> Verifier -> PublicKey -> IO (Either VerificationError Query)
