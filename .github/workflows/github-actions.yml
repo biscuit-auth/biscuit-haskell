@@ -44,6 +44,7 @@ jobs:
 
     - name: Build
       run: |
+        cp .cabal.project.local cabal.project.local
         cabal configure --enable-tests --test-show-details=direct --disable-optimization
         cabal build -j all
     - name: Test
