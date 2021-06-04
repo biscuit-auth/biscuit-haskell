@@ -36,6 +36,8 @@ library
       Auth.Biscuit.Token
   other-modules:
       Paths_biscuit_haskell
+  autogen-modules:
+      Paths_biscuit_haskell
   hs-source-dirs:
       src
   ghc-options: -Wall
