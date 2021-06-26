@@ -44,11 +44,9 @@ jobs:
 
     - name: Build
       run: |
-        cd biscuit
         cp .cabal.project.local cabal.project.local
-        cabal configure --enable-tests --test-show-details=direct --disable-optimization
-        cabal build -j all
+        make --directory biscuit configure build
+        make --directory biscuit-servant configure build
     - name: Test
       run: |
-        cd biscuit
-        cabal test all
+        make --directory biscuit test

@@ -1,0 +1,42 @@
+cabal-version: 2.0
+
+name:           biscuit-servant
+version:        0.1.0.0
+category:       Security
+synopsis:       Servant support for the Biscuit security token
+description:    Please see the README on GitHub at <https://github.com/divarvel/biscuit-haskell#readme>
+homepage:       https://github.com/divarvel/biscuit-haskell#readme
+bug-reports:    https://github.com/divarvel/biscuit-haskell/issues
+author:         Clément Delafargue
+maintainer:     clement@delafargue.name
+copyright:      2021 Clément Delafargue
+license:        BSD3
+license-file:   LICENSE
+build-type:     Simple
+extra-source-files:
+    README.md
+    ChangeLog.md
+
+source-repository head
+  type: git
+  location: https://github.com/divarvel/biscuit-haskell
+
+library
+  exposed-modules:
+      Auth.Biscuit.Servant
+  other-modules:
+      Paths_biscuit_servant
+  autogen-modules:
+      Paths_biscuit_servant
+  hs-source-dirs:
+      src
+  ghc-options: -Wall
+  build-depends:
+    base                 >= 4.7 && <5,
+    biscuit-haskell      ^>= 0.1,
+    bytestring           ^>= 0.10,
+    mtl                  ^>= 2.2,
+    text                 ^>= 1.2,
+    servant-server       ^>= 0.18,
+    wai                  ^>= 3.2
+  default-language: Haskell2010
