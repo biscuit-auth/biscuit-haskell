@@ -1,4 +1,5 @@
-packages: ./
+packages:
+  biscuit/
 
 index-state: 2021-05-28T11:42:01Z
 tests: True

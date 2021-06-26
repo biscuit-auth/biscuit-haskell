@@ -44,8 +44,11 @@ jobs:
 
     - name: Build
       run: |
+        cd biscuit
         cp .cabal.project.local cabal.project.local
         cabal configure --enable-tests --test-show-details=direct --disable-optimization
         cabal build -j all
     - name: Test
-      run: cabal test all
+      run: |
+        cd biscuit
+        cabal test all
