@@ -1,2 +1,5 @@
 package biscuit-haskell
     ghc-options: -Werror
+
+package biscuit-servant
+    ghc-options: -Werror
