@@ -5,7 +5,7 @@ module Spec.Roundtrip
   ( specs
   ) where
 
--- import qualified Data.ByteString  as ByteString
+import           Data.ByteString    (ByteString)
 import           Data.List.NonEmpty (NonEmpty ((:|)))
 import           Test.Tasty
 import           Test.Tasty.HUnit
@@ -15,34 +15,51 @@ import           Auth.Biscuit.Token (Biscuit (..))
 
 specs :: TestTree
 specs = testGroup "Serde roundtrips"
-  [ singleBlock
-  , multipleBlocks
+  [ testGroup "Raw serde"
+      [ singleBlock    (serialize, parse)
+      , multipleBlocks (serialize, parse)
+      ]
+  , testGroup "B64 serde"
+      [ singleBlock    (serializeB64, parseB64)
+      , multipleBlocks (serializeB64, parseB64)
+      ]
+  , testGroup "Hex serde"
+      [ singleBlock    (serializeHex, parseHex)
+      , multipleBlocks (serializeHex, parseHex)
+      ]
+  , testGroup "Keys serde"
+      [ private
+      , public
+      ]
   ]
 
-roundtrip :: NonEmpty Block
+type Roundtrip = (Biscuit -> ByteString, ByteString -> Either ParseError Biscuit)
+
+roundtrip :: Roundtrip
+          -> NonEmpty Block
           -> Assertion
-roundtrip i@(authority' :| blocks') = do
+roundtrip (s,p) i@(authority' :| blocks') = do
   let addBlocks bs biscuit = case bs of
         (b:rest) -> addBlocks rest =<< addBlock b biscuit
         []       -> pure biscuit
   keypair <- newKeypair
   init' <- mkBiscuit keypair authority'
   final <- addBlocks blocks' init'
-  let serialized = serialize final
-      parsed = parse serialized
+  let serialized = s final
+      parsed = p serialized
       getBlocks Biscuit{..} = snd (snd authority) :| (snd . snd <$> blocks)
   getBlocks <$> parsed @?= Right i
 
-singleBlock :: TestTree
-singleBlock = testCase "Single block" $ roundtrip $ pure
+singleBlock :: Roundtrip -> TestTree
+singleBlock r = testCase "Single block" $ roundtrip r $ pure
   [block|
     right(#authority, "file1", #read);
     right(#authority, "file2", #read);
     right(#authority, "file1", #write);
   |]
 
-multipleBlocks :: TestTree
-multipleBlocks = testCase "Multiple block" $ roundtrip $
+multipleBlocks :: Roundtrip -> TestTree
+multipleBlocks r = testCase "Multiple block" $ roundtrip r $
     [block|
       right(#authority, "file1", #read);
       right(#authority, "file2", #read);
@@ -53,7 +70,6 @@ multipleBlocks = testCase "Multiple block" $ roundtrip $
       valid_date($1) <- time(#ambient, $0), resource(#ambient, $1), $0 <= 1999-12-31T12:59:59+00:00, !["file1"].contains($1);
       check if valid_date($0), resource(#ambient, $0);
     |]
-  ] {-
   , [block|
       check if true;
       check if !false;
@@ -96,4 +112,24 @@ multipleBlocks = testCase "Multiple block" $ roundtrip $
       check if resource(#ambient, "file1");
       check if time(#ambient, $date), $date <= 2018-12-20T00:00:00+00:00;
     |]
-  ]-}
+  ]
+
+private :: TestTree
+private = testGroup "Private key serde"
+  [ testCase "Raw bytes" $ do
+      pk <- privateKey <$> newKeypair
+      parsePrivateKey (serializePrivateKey pk) @?= Just pk
+  , testCase "Hex encoding" $ do
+      pk <- privateKey <$> newKeypair
+      parsePrivateKeyHex (serializePrivateKeyHex pk) @?= Just pk
+  ]
+
+public :: TestTree
+public = testGroup "Public key serde"
+  [ testCase "Raw bytes" $ do
+      pk <- publicKey <$> newKeypair
+      parsePublicKey (serializePublicKey pk) @?= Just pk
+  , testCase "Hex encoding" $ do
+      pk <- publicKey <$> newKeypair
+      parsePublicKeyHex (serializePublicKeyHex pk) @?= Just pk
+  ]

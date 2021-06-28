@@ -182,9 +182,9 @@ serialize = serializeBiscuit
 
 -- | Serialize a biscuit to URL-compatible base 64, as recommended by the spec
 serializeB64 :: Biscuit -> ByteString
-serializeB64 = Hex.encode . serialize
+serializeB64 = B64.encodeBase64' . serialize
 
 -- | Serialize a biscuit to a hex (base 16) string. Be advised that the specs
 -- recommends base 64 instead.
 serializeHex :: Biscuit -> ByteString
-serializeHex = B64.encodeBase64' . serialize
+serializeHex = Hex.encode . serialize
