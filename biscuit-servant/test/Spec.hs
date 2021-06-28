@@ -46,7 +46,7 @@ appPrivateKey :: PrivateKey
 appPrivateKey = fromJust . parsePrivateKeyHex $ "c2b7507af4f849fd028d0f7e90b04a4e74d9727b358fca18b65beffd86c47209"
 
 toText :: Biscuit -> Text
-toText = decodeUtf8 . serializeHex
+toText = decodeUtf8 . serializeB64
 
 mkAdminBiscuit :: Keypair -> IO Biscuit
 mkAdminBiscuit kp = mkBiscuit kp [block|right(#authority, #admin);|]
