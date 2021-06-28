@@ -1,7 +1,7 @@
 cabal-version: 2.0
 
 name:           biscuit-servant
-version:        0.1.0.0
+version:        0.1.1.0
 category:       Security
 synopsis:       Servant support for the Biscuit security token
 description:    Please see the README on GitHub at <https://github.com/divarvel/biscuit-haskell#readme>
