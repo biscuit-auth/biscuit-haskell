@@ -7,23 +7,30 @@ module Auth.Biscuit.Servant
   (
   -- Servant Auth Handler
     RequireBiscuit
+  , CheckedBiscuit (..)
   , authHandler
   , genBiscuitCtx
   , checkBiscuit
+  , checkBiscuitM
   -- Decorate regular handlers with composable verifiers
   , WithVerifier (..)
   , handleBiscuit
   , withVerifier
   , withVerifier_
+  , withVerifierM
+  , withVerifierM_
   , noVerifier
   , noVerifier_
   , withFallbackVerifier
   , withPriorityVerifier
+  , withFallbackVerifierM
+  , withPriorityVerifierM
   ) where
 
 import           Auth.Biscuit                     (Biscuit, PublicKey, Verifier,
                                                    checkBiscuitSignature,
                                                    parseB64, verifyBiscuit)
+import           Control.Applicative              (liftA2)
 import           Control.Monad.Except             (MonadError, throwError)
 import           Control.Monad.IO.Class           (MonadIO, liftIO)
 import           Control.Monad.Reader             (ReaderT, lift, runReaderT)
@@ -61,7 +68,7 @@ data WithVerifier m a
   = WithVerifier
   { handler_  :: ReaderT Biscuit m a
   -- ^ the wrapped handler, in a 'ReaderT' to give easy access to the biscuit
-  , verifier_ :: Verifier
+  , verifier_ :: m Verifier
   -- ^ the 'Verifier' associated to the handler
   }
 
@@ -71,11 +78,20 @@ data WithVerifier m a
 -- of the list (ie as _fallback_ policies).
 -- If you want the policies to be tried before the ones of the wrapped handler, you
 -- can use 'withPriorityVerifier'.
-withFallbackVerifier :: Verifier
+withFallbackVerifier :: Functor m
+                     => Verifier
                      -> WithVerifier m a
                      -> WithVerifier m a
 withFallbackVerifier newV h@WithVerifier{verifier_} =
-  h { verifier_ = verifier_ <> newV }
+  h { verifier_ = (<> newV) <$> verifier_ }
+
+-- todo
+withFallbackVerifierM :: Applicative m
+                      => m Verifier
+                      -> WithVerifier m a
+                      -> WithVerifier m a
+withFallbackVerifierM newV h@WithVerifier{verifier_} =
+  h { verifier_ = liftA2 (<>) verifier_ newV }
 
 -- | Combines the provided 'Verifier' to the 'Verifier' attached to the wrapped
 -- handler. _facts_, _rules_ and _checked_ are unordered, but _policies_ have a
@@ -83,18 +99,35 @@ withFallbackVerifier newV h@WithVerifier{verifier_} =
 -- of the list (ie as _priority_ policies).
 -- If you want the policies to be tried after the ones of the wrapped handler, you
 -- can use 'withFallbackVerifier'.
-withPriorityVerifier :: Verifier
+withPriorityVerifier :: Functor m
+                     => Verifier
                      -> WithVerifier m a
                      -> WithVerifier m a
 withPriorityVerifier newV h@WithVerifier{verifier_} =
-  h { verifier_ = newV <> verifier_ }
+     h { verifier_ = (newV <>) <$> verifier_ }
+
+-- todo
+withPriorityVerifierM :: Applicative m
+                      => m Verifier
+                      -> WithVerifier m a
+                      -> WithVerifier m a
+withPriorityVerifierM newV h@WithVerifier{verifier_} =
+     h { verifier_ = liftA2 (<>) newV verifier_ }
 
 -- | Wraps an existing handler block, attaching a 'Verifier'. The handler has
 -- to be a 'ReaderT Biscuit' to be able to access the token. If you don't need
 -- to access the token from the handler block, you can use 'withVerifier_'
 -- instead.
-withVerifier :: Monad m => Verifier -> ReaderT Biscuit m a -> WithVerifier m a
-withVerifier verifier_ handler_ =
+withVerifier :: Applicative m => Verifier -> ReaderT Biscuit m a -> WithVerifier m a
+withVerifier v handler_ =
+  WithVerifier
+    { handler_
+    , verifier_ = pure v
+    }
+
+-- todo
+withVerifierM :: m Verifier -> ReaderT Biscuit m a -> WithVerifier m a
+withVerifierM verifier_ handler_ =
   WithVerifier
     { handler_
     , verifier_
@@ -106,6 +139,10 @@ withVerifier verifier_ handler_ =
 withVerifier_ :: Monad m => Verifier -> m a -> WithVerifier m a
 withVerifier_ v = withVerifier v . lift
 
+-- todo
+withVerifierM_ :: Monad m => m Verifier -> m a -> WithVerifier m a
+withVerifierM_ v = withVerifierM v . lift
+
 -- | Wraps an existing handler block, attaching an empty 'Verifier'. The handler has
 -- to be a 'ReaderT Biscuit' to be able to access the token. If you don't need
 -- to access the token from the handler block, you can use 'noVerifier_'
@@ -113,7 +150,7 @@ withVerifier_ v = withVerifier v . lift
 --
 -- This function can be used together with 'withFallbackVerifier' or 'withPriorityVerifier'
 -- to apply policies on several handlers at the same time (with 'hoistServer' for instance).
-noVerifier :: Monad m => ReaderT Biscuit m a -> WithVerifier m a
+noVerifier :: Applicative m => ReaderT Biscuit m a -> WithVerifier m a
 noVerifier = withVerifier mempty
 
 -- | Wraps an existing handler block, attaching an empty 'Verifier'. The handler can be
@@ -158,16 +195,44 @@ genBiscuitCtx :: PublicKey -> Context '[AuthHandler Request CheckedBiscuit]
 genBiscuitCtx pk = authHandler pk :. EmptyContext
 
 -- | Given a 'CheckedBiscuit' (provided by the servant authorization mechanism),
--- verify its validity (with the provided 'Verifier'). If you don't want to pass
--- the biscuit manually to all the endpoints or want to blanket apply verifiers on
--- whole API trees, you can consider using 'withVerifier' (on endpoints), 'withFallbackVerifier' and
--- 'withPriorityVerifier' (on API sub-trees) and 'handleBiscuit' (on the whole API).
+-- verify its validity (with the provided 'Verifier').
+--
+-- If you need to perform effects in the verification phase (eg to get the current time,
+-- or if you need to issue a DB query to get context), you can use 'checkBiscuitM' instead.
+--
+-- If you don't want to pass the biscuit manually to all the endpoints or want to
+-- blanket apply verifiers on whole API trees, you can consider using 'withVerifier'
+-- (on endpoints), 'withFallbackVerifier' and 'withPriorityVerifier' (on API sub-trees)
+-- and 'handleBiscuit' (on the whole API).
 checkBiscuit :: (MonadIO m, MonadError ServerError m)
              => CheckedBiscuit
              -> Verifier
              -> m a
              -> m a
 checkBiscuit (CheckedBiscuit pk b) v h = do
+  res <- liftIO $ verifyBiscuit b v pk
+  case res of
+    Left e  -> do liftIO $ print e
+                  throwError $ err401 { errBody = "Biscuit failed checks" }
+    Right _ -> h
+
+-- | Given a 'CheckedBiscuit' (provided by the servant authorization mechanism),
+-- verify its validity (with the provided 'Verifier', which can be effectful).
+--
+-- If you don't need to run any effects in the verifying phase, you can use 'checkBiscuit'
+-- instead.
+--
+-- If you don't want to pass the biscuit manually to all the endpoints or want to blanket apply
+-- verifiers on whole API trees, you can consider using 'withVerifier' (on endpoints),
+-- 'withFallbackVerifier' and 'withPriorityVerifier' (on API sub-trees) and 'handleBiscuit'
+-- (on the whole API).
+checkBiscuitM :: (MonadIO m, MonadError ServerError m)
+              => CheckedBiscuit
+              -> m Verifier
+              -> m a
+              -> m a
+checkBiscuitM (CheckedBiscuit pk b) mv h = do
+  v   <- mv
   res <- liftIO $ verifyBiscuit b v pk
   case res of
     Left e  -> do liftIO $ print e
@@ -185,5 +250,5 @@ handleBiscuit :: (MonadIO m, MonadError ServerError m)
               -> m a
 handleBiscuit cb@(CheckedBiscuit _ b) WithVerifier{verifier_, handler_} =
   let h = runReaderT handler_ b
-  in checkBiscuit cb verifier_ h
+  in checkBiscuitM cb verifier_ h
 
