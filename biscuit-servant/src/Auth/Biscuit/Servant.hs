@@ -5,14 +5,20 @@
 {-# LANGUAGE TypeFamilies      #-}
 module Auth.Biscuit.Servant
   (
-  -- Servant Auth Handler
+  -- * Protecting a servant API with biscuits
+  -- $presentation
+
+  -- ** Annotating servant API types
+  -- $apitypes
     RequireBiscuit
   , CheckedBiscuit (..)
   , authHandler
   , genBiscuitCtx
+  -- ** Supplying a verifier for a single endpoint
   , checkBiscuit
   , checkBiscuitM
-  -- Decorate regular handlers with composable verifiers
+  -- ** Decorate regular handlers with composable verifiers
+  -- $composableVerifiers
   , WithVerifier (..)
   , handleBiscuit
   , withVerifier
@@ -43,6 +49,56 @@ import           Servant                          (AuthProtect)
 import           Servant.Server
 import           Servant.Server.Experimental.Auth
 
+-- $presentation
+--
+-- Biscuit are bearer tokens that can be used to protect API endpoints.
+-- This package provides utilities to protect servant endpoints with such
+-- tokens.
+--
+-- The token will be extracted from the @Authorization@ header, and must
+-- be base64-encoded, prefixed with the @Bearer @ string.
+
+-- $apitypes
+--
+-- To protect and endpoint (or a whole API tree), you can use 'RequireBiscuit'
+-- like so:
+--
+--
+-- > type API = RequireBiscuit :> Capture "value" Int :> Get '[JSON] String
+-- >
+-- > app :: Application
+-- > app = serveWithContext (Proxy :: Proxy API)
+-- >         (genBiscuitCtx publicKey) -- servant needs access to the biscuit /public/
+-- >                                   -- key to be able to check biscuit signatures.
+-- >                                   -- The public key can be read from the environment
+-- >                                   -- and parsed using 'parsePublicKeyHex' for instance.
+-- >         server -- this will be detailed later
+--
+--
+-- This will instruct servant to extract the biscuit from the requests and
+-- check its signature. *It will not*, however, run any datalog check (as
+-- the checks typically depend on the request contents).
+--
+-- The corresponding @Server API@ value will be a @CheckedBiscuit -> Int -> Handler String@.
+-- The next step is to provide a 'Verifier' so that the biscuit datalog can be
+-- verified. For that, you can use 'checkBiscuit' (or 'checkBiscuitM').
+--
+-- > server :: Server API
+-- > server biscuit value =
+-- >   checkBiscuit
+-- >     -- here the verifier can depend on the request contents
+-- >     [verifier|allow if right(#authority, #endpoint, ${value});|] $
+-- >     pure "ok"
+--
+-- $composableVerifiers
+--
+-- 'checkBiscuit' allows you to describe validation rules endpoint by endpoint. Since 'Verifier'
+-- has a 'Monoid' instance, you can avoid duplication by extracting common rules, but that still
+-- requires some boilerplate (and it won't prevent you from forgetting to add them on some endpoints).
+--
+-- 'biscuit-servant' provides a way to apply verifiers on whole API trees, in a composable way, thanks
+-- to 'hoistServer'.
+
 -- | Type used to protect and API tree, requiring a biscuit token
 -- to be attached to requests. The associated auth handler will
 -- only check the biscuit signature. Checking the datalog part
@@ -63,7 +119,7 @@ data CheckedBiscuit = CheckedBiscuit PublicKey Biscuit
 -- that will be used to authorize the request. If the authorization
 -- succeeds, the handler is ran.
 -- The handler itself is given access to the verified biscuit through
--- a 'ReaderT Biscuit'.
+-- a 'ReaderT' 'Biscuit'.
 data WithVerifier m a
   = WithVerifier
   { handler_  :: ReaderT Biscuit m a
@@ -73,11 +129,15 @@ data WithVerifier m a
   }
 
 -- | Combines the provided 'Verifier' to the 'Verifier' attached to the wrapped
--- handler. _facts_, _rules_ and _checked_ are unordered, but _policies_ have a
--- specific order. 'withFallbackVerifier' puts the provided policies at the _bottom_
--- of the list (ie as _fallback_ policies).
+-- handler. /facts/, /rules/ and /checks/ are unordered, but /policies/ have a
+-- specific order. 'withFallbackVerifier' puts the provided policies at the /bottom/
+-- of the list (ie as /fallback/ policies).
+--
 -- If you want the policies to be tried before the ones of the wrapped handler, you
 -- can use 'withPriorityVerifier'.
+--
+-- If you need to perform effects to compute the verifier (eg. to get the current date,
+-- or to query a database), you can use 'withFallbackVerifierM' instead.
 withFallbackVerifier :: Functor m
                      => Verifier
                      -> WithVerifier m a
@@ -85,7 +145,16 @@ withFallbackVerifier :: Functor m
 withFallbackVerifier newV h@WithVerifier{verifier_} =
   h { verifier_ = (<> newV) <$> verifier_ }
 
--- todo
+-- | Combines the provided 'Verifier' to the 'Verifier' attached to the wrapped
+-- handler. /facts/, /rules/ and /checks/ are unordered, but /policies/ have a
+-- specific order. 'withFallbackVerifier' puts the provided policies at the /bottom/
+-- of the list (ie as /fallback/ policies).
+--
+-- If you want the policies to be tried before the ones of the wrapped handler, you
+-- can use 'withPriorityVerifier'.
+--
+-- Here, the 'Verifier' can be computed effectfully. If you don't need to perform effects,
+-- you can use 'withFallbackVerifier' instead.
 withFallbackVerifierM :: Applicative m
                       => m Verifier
                       -> WithVerifier m a
@@ -94,11 +163,15 @@ withFallbackVerifierM newV h@WithVerifier{verifier_} =
   h { verifier_ = liftA2 (<>) verifier_ newV }
 
 -- | Combines the provided 'Verifier' to the 'Verifier' attached to the wrapped
--- handler. _facts_, _rules_ and _checked_ are unordered, but _policies_ have a
--- specific order. 'withFallbackVerifier' puts the provided policies at the _top_
--- of the list (ie as _priority_ policies).
+-- handler. /facts/, /rules/ and /checks/ are unordered, but /policies/ have a
+-- specific order. 'withFallbackVerifier' puts the provided policies at the /top/
+-- of the list (ie as /priority/ policies).
+--
 -- If you want the policies to be tried after the ones of the wrapped handler, you
 -- can use 'withFallbackVerifier'.
+--
+-- If you need to perform effects to compute the verifier (eg. to get the current date,
+-- or to query a database), you can use 'withPriorityVerifierM' instead.
 withPriorityVerifier :: Functor m
                      => Verifier
                      -> WithVerifier m a
@@ -106,7 +179,16 @@ withPriorityVerifier :: Functor m
 withPriorityVerifier newV h@WithVerifier{verifier_} =
      h { verifier_ = (newV <>) <$> verifier_ }
 
--- todo
+-- | Combines the provided 'Verifier' to the 'Verifier' attached to the wrapped
+-- handler. /facts/, /rules/ and /checks/ are unordered, but /policies/ have a
+-- specific order. 'withFallbackVerifier' puts the provided policies at the /top/
+-- of the list (ie as /priority/ policies).
+--
+-- If you want the policies to be tried after the ones of the wrapped handler, you
+-- can use 'withFallbackVerifier'.
+--
+-- Here, the 'Verifier' can be computed effectfully. If you don't need to perform effects,
+-- you can use 'withFallbackVerifier' instead.
 withPriorityVerifierM :: Applicative m
                       => m Verifier
                       -> WithVerifier m a
@@ -115,9 +197,13 @@ withPriorityVerifierM newV h@WithVerifier{verifier_} =
      h { verifier_ = liftA2 (<>) newV verifier_ }
 
 -- | Wraps an existing handler block, attaching a 'Verifier'. The handler has
--- to be a 'ReaderT Biscuit' to be able to access the token. If you don't need
--- to access the token from the handler block, you can use 'withVerifier_'
--- instead.
+-- to be a 'ReaderT' 'Biscuit' to be able to access the token.
+--
+-- If you don't need to access the token from the handler block, you can use
+-- 'withVerifier_' instead.
+--
+-- If you need to perform effects to compute the verifier (eg. to get the current date,
+-- or to query a database), you can use 'withVerifierM' instead.
 withVerifier :: Applicative m => Verifier -> ReaderT Biscuit m a -> WithVerifier m a
 withVerifier v handler_ =
   WithVerifier
@@ -125,7 +211,14 @@ withVerifier v handler_ =
     , verifier_ = pure v
     }
 
--- todo
+-- | Wraps an existing handler block, attaching a 'Verifier'. The handler has
+-- to be a 'ReaderT' 'Biscuit' to be able to access the token.
+--
+-- If you don't need to access the token from the handler block, you can use
+-- 'withVerifier_' instead.
+--
+-- Here, the 'Verifier' can be computed effectfully. If you don't need to perform effects,
+-- you can use 'withVerifier' instead.
 withVerifierM :: m Verifier -> ReaderT Biscuit m a -> WithVerifier m a
 withVerifierM verifier_ handler_ =
   WithVerifier
@@ -134,17 +227,29 @@ withVerifierM verifier_ handler_ =
     }
 
 -- | Wraps an existing handler block, attaching a 'Verifier'. The handler can be
--- any monad, but won't be able to access the 'Biscuit'. If you want to read the
--- biscuit token from the handler block, you can use 'withVerifier' instead.
+-- any monad, but won't be able to access the 'Biscuit'.
+--
+-- If you want to read the biscuit token from the handler block, you can use 'withVerifier'
+-- instead.
+--
+-- If you need to perform effects to compute the verifier (eg. to get the current date,
+-- or to query a database), you can use 'withVerifierM_' instead.
 withVerifier_ :: Monad m => Verifier -> m a -> WithVerifier m a
 withVerifier_ v = withVerifier v . lift
 
--- todo
+-- | Wraps an existing handler block, attaching a 'Verifier'. The handler can be
+-- any monad, but won't be able to access the 'Biscuit'.
+--
+-- If you want to read the biscuit token from the handler block, you can use 'withVerifier'
+-- instead.
+--
+-- Here, the 'Verifier' can be computed effectfully. If you don't need to perform effects,
+-- you can use 'withVerifier_' instead.
 withVerifierM_ :: Monad m => m Verifier -> m a -> WithVerifier m a
 withVerifierM_ v = withVerifierM v . lift
 
 -- | Wraps an existing handler block, attaching an empty 'Verifier'. The handler has
--- to be a 'ReaderT Biscuit' to be able to access the token. If you don't need
+-- to be a 'ReaderT' 'Biscuit' to be able to access the token. If you don't need
 -- to access the token from the handler block, you can use 'noVerifier_'
 -- instead.
 --
@@ -165,8 +270,8 @@ noVerifier_ = noVerifier . lift
 -- | Extracts a biscuit from an http request, assuming:
 --
 -- - the biscuit is b64-encoded
--- - prefixed with the `Bearer ` string
--- - in the `Authorization` header
+-- - prefixed with the @Bearer @ string
+-- - in the @Authorization@ header
 extractBiscuit :: Request -> Either String Biscuit
 extractBiscuit req = do
   let note e = maybe (Left e) Right
@@ -251,4 +356,3 @@ handleBiscuit :: (MonadIO m, MonadError ServerError m)
 handleBiscuit cb@(CheckedBiscuit _ b) WithVerifier{verifier_, handler_} =
   let h = runReaderT handler_ b
   in checkBiscuitM cb verifier_ h
-
