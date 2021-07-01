@@ -15,6 +15,7 @@ module Auth.Biscuit.Servant
   , authHandler
   , genBiscuitCtx
   -- ** Supplying a verifier for a single endpoint
+  -- $singleEndpointVerifier
   , checkBiscuit
   , checkBiscuitM
   -- ** Decorate regular handlers with composable verifiers
@@ -64,7 +65,11 @@ import           Servant.Server.Experimental.Auth
 -- like so:
 --
 --
--- > type API = RequireBiscuit :> Capture "value" Int :> Get '[JSON] String
+-- > type API = RequireBiscuit :> ProtectedAPI
+-- > type ProtectedAPI =
+-- >        "endpoint1" :> Get '[JSON] Int
+-- >   :<|> "endpoint2" :> Capture "int" Int :> Get '[JSON] Int
+-- >   :<|> "endpoint3" :> Get '[JSON] Int
 -- >
 -- > app :: Application
 -- > app = serveWithContext (Proxy :: Proxy API)
@@ -72,23 +77,47 @@ import           Servant.Server.Experimental.Auth
 -- >                                   -- key to be able to check biscuit signatures.
 -- >                                   -- The public key can be read from the environment
 -- >                                   -- and parsed using 'parsePublicKeyHex' for instance.
--- >         server -- this will be detailed later
---
+-- >         server
+-- >
+-- > server :: Server API -- CheckedBiscuit -> Server ProtectedAPI
+-- > server biscuit = … -- this will be detailed later
 --
 -- This will instruct servant to extract the biscuit from the requests and
 -- check its signature. *It will not*, however, run any datalog check (as
 -- the checks typically depend on the request contents).
 --
--- The corresponding @Server API@ value will be a @CheckedBiscuit -> Int -> Handler String@.
+-- $singleEndpointVerifier
+--
+-- The corresponding @Server API@ value will be a @CheckedBiscuit -> Server ProtectedAPI@.
 -- The next step is to provide a 'Verifier' so that the biscuit datalog can be
 -- verified. For that, you can use 'checkBiscuit' (or 'checkBiscuitM').
 --
 -- > server :: Server API
--- > server biscuit value =
--- >   checkBiscuit
--- >     -- here the verifier can depend on the request contents
--- >     [verifier|allow if right(#authority, #endpoint, ${value});|] $
--- >     pure "ok"
+-- > server biscuit = h1 biscuit
+-- >             :<|> h2 biscuit
+-- >             :<|> h3 biscuit
+-- >
+-- > h1 :: CheckedBiscuit -> Handler Int
+-- > h1 biscuit =
+-- >   checkBiscuit biscuit
+-- >     [verifier|allow if right(#authority,#one);|]
+-- >     -- ^ only allow biscuits granting access to the endpoint tagged `#one`
+-- >     (pure 1)
+-- >
+-- > h2 :: CheckedBiscuit -> Int -> Handler Int
+-- > h2 biscuit value =
+-- >   checkBiscuit biscuit
+-- >     [verifier|allow if right(#authority,#two, ${value});|]
+-- >     -- ^ only allow biscuits granting access to the endpoint tagged `#two`
+-- >     -- AND for the provided int value.
+-- >     (pure 2)
+-- >
+-- > h3 :: CheckedBiscuit -> Handler Int
+-- > h3 biscuit =
+-- >   checkBiscuit biscuit
+-- >     [verifier|deny if true;|]
+-- >     -- ^ reject every biscuit
+-- >     (pure 3)
 --
 -- $composableVerifiers
 --
@@ -97,8 +126,49 @@ import           Servant.Server.Experimental.Auth
 -- requires some boilerplate (and it won't prevent you from forgetting to add them on some endpoints).
 --
 -- 'biscuit-servant' provides a way to apply verifiers on whole API trees, in a composable way, thanks
--- to 'hoistServer'.
-
+-- to 'hoistServer':
+--
+-- > -- 'withVerifier' wraps a 'Handler' and lets you attach a verifier
+-- > handler1 :: WithVerifier Handler Int
+-- > handler1 = withVerifier
+-- >   [verifier|allow if right(#authority, #one);|]
+-- >   (pure 1)
+-- >
+-- > handler2 :: Int -> WithVerifier Handler Int
+-- > handler2 value = withVerifier
+-- >   [verifier|allow if right(#authority, #two, ${value});|]
+-- >   (pure 2)
+-- >
+-- > handler3 :: WithVerifier Handler Int
+-- > handler3 = withVerifier
+-- >   [verifier|allow if right(#authority, #three);|]
+-- >   (pure 3)
+-- >
+-- > server :: Server API
+-- > server =
+-- >  let nowFact = do
+-- >        now <- liftIO getCurrentTime
+-- >        pure [verifier|now(#ambient, ${now});|]
+-- >      handleAuth :: WithVerifier Handler x -> Handler x
+-- >      handleAuth =
+-- >          handleBiscuit b
+-- >          -- ^ this runs datalog checks on the biscuit, based on verifiers attached to
+-- >          -- the handlers
+-- >        . withPriorityVerifierM nowFact
+-- >          -- ^ this provides the current time to the verification context so that biscuits with
+-- >          -- a TTL can verify if they are still valid.
+-- >          -- Verifiers can be provided in a monadic context (it just has to be the same as
+-- >          -- the handlers themselves, so here it's 'Handler').
+-- >        . withPriorityVerifier [verifier|allow if right(#authority, #admin);|]
+-- >          -- ^ this policy will be tried /before/ any endpoint policy, so `endpoint3` will be
+-- >          -- reachable with an admin biscuit
+-- >        . withFallbackVerifier [verifier|allow if right(#authority, #anon);|]
+-- >          -- ^ this policy will be tried /after/ the endpoints policies, so `endpoint3` will
+-- >          -- *not* be reachable with an anon macaroon.
+-- >      handlers = handler1 :<|> handler2 :<|> handler3
+-- >   in hoistServer @ProtectedAPI Proxy handleAuth handlers
+-- >        -- ^ this will apply `handleAuth` on all 'ProtectedAPI' endpoints.
+--
 -- | Type used to protect and API tree, requiring a biscuit token
 -- to be attached to requests. The associated auth handler will
 -- only check the biscuit signature. Checking the datalog part
