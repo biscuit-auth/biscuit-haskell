@@ -8,7 +8,9 @@ module AppWithVerifier where
 
 import           Auth.Biscuit
 import           Auth.Biscuit.Servant
-import           Data.Text            (Text)
+import           Control.Monad.IO.Class (liftIO)
+import           Data.Text              (Text)
+import           Data.Time              (getCurrentTime)
 import           Servant
 import           Servant.Client
 
@@ -42,9 +44,13 @@ app appPublicKey =
 
 server :: Server API
 server b =
-  let handleAuth :: WithVerifier Handler x -> Handler x
+  let nowFact = do
+        now <- liftIO getCurrentTime
+        pure [verifier|now(#ambient, ${now});|]
+      handleAuth :: WithVerifier Handler x -> Handler x
       handleAuth =
           handleBiscuit b
+        . withPriorityVerifierM nowFact
         . withPriorityVerifier [verifier|allow if right(#authority, #admin);|]
         . withFallbackVerifier [verifier|allow if right(#authority, #anon);|]
       handlers = handler1 :<|> handler2 :<|> handler3

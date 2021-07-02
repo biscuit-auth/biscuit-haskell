@@ -10,6 +10,7 @@ import           Auth.Biscuit
 import           Data.Maybe         (fromJust)
 import           Data.Text          (Text)
 import           Data.Text.Encoding (decodeUtf8)
+import           Data.Time          (UTCTime, addUTCTime, getCurrentTime)
 import           Test.Hspec
 
 import           AppWithVerifier    (app, call1, call2, call3)
@@ -18,12 +19,16 @@ import           ClientHelpers      (runC, withApp)
 main :: IO ()
 main = do
   keypair <- fromPrivateKey appPrivateKey
+  later   <- addUTCTime (60*5) <$> getCurrentTime
+  earlier <- addUTCTime (-60) <$> getCurrentTime
   let appPk = publicKey keypair
   adminB <- toText <$> mkAdminBiscuit keypair
   anonB  <- toText <$> mkAnonBiscuit keypair
   e1     <- toText <$> mkE1Biscuit keypair
   e21    <- toText <$> mkE2Biscuit 1 keypair
   e22    <- toText <$> mkE2Biscuit 2 keypair
+  ttld   <- toText <$> (addTtl later =<< mkAdminBiscuit keypair)
+  expd   <- toText <$> (addTtl earlier =<< mkAdminBiscuit keypair)
   print adminB
   hspec $
     around (withApp $ app appPk) $
@@ -41,6 +46,9 @@ main = do
           runC port (call2 e21 1) `shouldReturn` Right 2
           runC port (call2 e22 1) `shouldReturn` Left (Just "Biscuit failed checks")
           runC port (call3 anonB) `shouldReturn` Left (Just "Biscuit failed checks")
+        it "Effectful verification should work as expected" $ \port -> do
+          runC port (call1 ttld) `shouldReturn` Right 1
+          runC port (call1 expd) `shouldReturn` Left (Just "Biscuit failed checks")
 
 appPrivateKey :: PrivateKey
 appPrivateKey = fromJust . parsePrivateKeyHex $ "c2b7507af4f849fd028d0f7e90b04a4e74d9727b358fca18b65beffd86c47209"
@@ -59,3 +67,7 @@ mkE1Biscuit kp = mkBiscuit kp [block|right(#authority, #one);|]
 
 mkE2Biscuit :: Int -> Keypair -> IO Biscuit
 mkE2Biscuit v kp = mkBiscuit kp [block|right(#authority, #two, ${v});|]
+
+addTtl :: UTCTime -> Biscuit -> IO Biscuit
+addTtl expiration =
+  addBlock [block|check if now(#ambient,$now), $now < ${expiration};|]
