@@ -5,6 +5,7 @@ module Spec.Crypto (specs) where
 
 import           Data.ByteString    (ByteString)
 import           Data.List.NonEmpty (NonEmpty ((:|)))
+import           Data.Maybe         (isJust)
 import           Test.Tasty
 import           Test.Tasty.HUnit
 
@@ -88,7 +89,7 @@ singleBlockRoundtrip' = testCase "Single block roundtrip" $ do
   rootKp <- newKeypair
   let pub = publicKey rootKp
   b <- mkBiscuit rootKp [block|right(#authority,#read);|]
-  result <- checkBiscuitSignature b pub
+  result <- isJust <$> checkBiscuitSignature b pub
   result @?= True
 
 multiBlockRoundtrip' :: TestTree
@@ -97,7 +98,7 @@ multiBlockRoundtrip' = testCase "Multi block roundtrip" $ do
   let pub = publicKey kp
   b <- mkBiscuit kp [block|right(#authority,#read);|]
   b' <- addBlock [block|check if true;|] b
-  result <- checkBiscuitSignature b' pub
+  result <- isJust <$> checkBiscuitSignature b' pub
   result @?= True
 
 tamper :: (PublicKey, (ByteString, Block))
@@ -113,7 +114,7 @@ tamperedAuthority' = testCase "Tampered authority" $ do
   let modified = b'
         { authority = tamper $ authority b
         }
-  result <- checkBiscuitSignature modified pub
+  result <- isJust <$> checkBiscuitSignature modified pub
   result @?= False
 
 tamperedBlock' :: TestTree
@@ -125,5 +126,5 @@ tamperedBlock' = testCase "Tampered block" $ do
   let modified = b'
         { blocks = tamper <$> blocks b
         }
-  result <- checkBiscuitSignature modified pub
+  result <- isJust <$> checkBiscuitSignature modified pub
   result @?= False

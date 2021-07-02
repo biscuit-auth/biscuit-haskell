@@ -10,6 +10,9 @@
 -}
 module Auth.Biscuit.Token
   ( Biscuit (..)
+  , ValidBiscuit
+  , validBiscuit
+  , checkedPublicKey
   , ParseError (..)
   , VerificationError (..)
   , ExistingBlock
@@ -20,6 +23,8 @@ module Auth.Biscuit.Token
   , serializeBiscuit
   , verifyBiscuit
   , verifyBiscuitWithLimits
+  , verifyValidBiscuit
+  , verifyValidBiscuitWithLimits
 
   , BlockWithRevocationIds (..)
   , getRevocationIds
@@ -70,6 +75,19 @@ data Biscuit
   }
   deriving (Eq, Show)
 
+-- | A 'Biscuit' which signature has been verified with a given 'PublicKey'. This allows
+-- to perform the signature check separately from the datalog verification in a type-safe
+-- manner (ie without risking to verify a biscuit without verifying its signature first).
+data ValidBiscuit
+   = ValidBiscuit
+   { validBiscuit     :: Biscuit
+   -- ^ extract the 'Biscuit' from 'ValidBiscuit'. The wrapped 'Biscuit'
+   -- is guaranteed to have a valid signature, checked with the attached
+   -- public key
+   , checkedPublicKey :: PublicKey
+   -- ^ get the 'PublicKey' that has been used to verify the 'Biscuit' signature
+   }
+
 -- | Create a new biscuit with the provided authority block
 mkBiscuit :: Keypair -> Block -> IO Biscuit
 mkBiscuit keypair authority = do
@@ -97,10 +115,16 @@ addBlock newBlock b@Biscuit{..} = do
 
 -- | Only check a biscuit signature. This can be used to perform an early check, before
 -- bothering with constructing a verifier.
-checkBiscuitSignature :: Biscuit -> PublicKey -> IO Bool
-checkBiscuitSignature Biscuit{..} publicKey =
+checkBiscuitSignature :: Biscuit -> PublicKey -> IO (Maybe ValidBiscuit)
+checkBiscuitSignature b@Biscuit{..} publicKey = do
   let publicKeysAndMessages = (publicKey, fst $ snd authority) :| (fmap fst <$> blocks)
-   in verifySignature publicKeysAndMessages signature
+  result <- verifySignature publicKeysAndMessages signature
+  pure $
+    if result
+    then Just ValidBiscuit { validBiscuit = b
+                           , checkedPublicKey = publicKey
+                           }
+    else Nothing
 
 -- | Errors that can happen when parsing a biscuit
 data ParseError
@@ -175,18 +199,33 @@ data VerificationError
 -- - make sure the biscuit has been signed with the private key associated to the public key
 -- - make sure the biscuit is valid for the provided verifier
 verifyBiscuitWithLimits :: Limits -> Biscuit -> Verifier -> PublicKey -> IO (Either VerificationError Query)
-verifyBiscuitWithLimits l b verifier pub = runExceptT $ do
-  sigCheck <- liftIO $ checkBiscuitSignature b pub
-  when (not sigCheck) $ throwError SignatureError
+verifyBiscuitWithLimits l b verifier pub = do
+  mvb <- checkBiscuitSignature b pub
+  case mvb of
+    Just vb -> verifyValidBiscuitWithLimits l vb verifier
+    Nothing -> pure $ Left SignatureError
+
+-- | Same as `verifyBiscuitWithLimits`, but with default limits (1ms timeout, max 1000 facts, max 100 iterations)
+verifyBiscuit :: Biscuit -> Verifier -> PublicKey -> IO (Either VerificationError Query)
+verifyBiscuit = verifyBiscuitWithLimits defaultLimits
+
+-- | Given a provided verifier (a set of facts, rules, checks and policies),
+-- verify a biscuit which signature has already been checked:
+--
+-- - make sure the biscuit is valid for the provided verifier
+verifyValidBiscuitWithLimits :: Limits -> ValidBiscuit -> Verifier -> IO (Either VerificationError Query)
+verifyValidBiscuitWithLimits l vb verifier = runExceptT $ do
+  let b = validBiscuit vb
   authorityBlock :| attBlocks <- liftIO $ getRevocationIds b
   verifResult <- liftIO $ runVerifierWithLimits l authorityBlock attBlocks verifier
   case verifResult of
     Left e  -> throwError $ DatalogError e
     Right p -> pure p
 
--- | Same as `verifyBiscuitWithLimits`, but with default limits (1ms timeout, max 1000 facts, max 100 iterations)
-verifyBiscuit :: Biscuit -> Verifier -> PublicKey -> IO (Either VerificationError Query)
-verifyBiscuit = verifyBiscuitWithLimits defaultLimits
+-- | Same as `verifyValidBiscuitWithLimits`, but with default limits (1ms timeout, max 1000 facts, max 100 iterations)
+verifyValidBiscuit :: ValidBiscuit -> Verifier -> IO (Either VerificationError Query)
+verifyValidBiscuit = verifyValidBiscuitWithLimits defaultLimits
+
 
 -- | Get the components needed to compute revocation ids
 getRidComponents :: (PublicKey, ExistingBlock) -> ByteString

@@ -11,7 +11,6 @@ module Auth.Biscuit.Servant
   -- ** Annotating servant API types
   -- $apitypes
     RequireBiscuit
-  , CheckedBiscuit (..)
   , authHandler
   , genBiscuitCtx
   -- ** Supplying a verifier for a single endpoint
@@ -34,9 +33,11 @@ module Auth.Biscuit.Servant
   , withPriorityVerifierM
   ) where
 
-import           Auth.Biscuit                     (Biscuit, PublicKey, Verifier,
+import           Auth.Biscuit                     (Biscuit, PublicKey,
+                                                   ValidBiscuit, Verifier,
                                                    checkBiscuitSignature,
-                                                   parseB64, verifyBiscuit)
+                                                   parseB64, validBiscuit,
+                                                   verifyValidBiscuit)
 import           Control.Applicative              (liftA2)
 import           Control.Monad.Except             (MonadError, throwError)
 import           Control.Monad.IO.Class           (MonadIO, liftIO)
@@ -79,7 +80,7 @@ import           Servant.Server.Experimental.Auth
 -- >                                   -- and parsed using 'parsePublicKeyHex' for instance.
 -- >         server
 -- >
--- > server :: Server API -- CheckedBiscuit -> Server ProtectedAPI
+-- > server :: Server API -- ValidBiscuit -> Server ProtectedAPI
 -- > server biscuit = … -- this will be detailed later
 --
 -- This will instruct servant to extract the biscuit from the requests and
@@ -88,7 +89,7 @@ import           Servant.Server.Experimental.Auth
 --
 -- $singleEndpointVerifier
 --
--- The corresponding @Server API@ value will be a @CheckedBiscuit -> Server ProtectedAPI@.
+-- The corresponding @Server API@ value will be a @ValidBiscuit -> Server ProtectedAPI@.
 -- The next step is to provide a 'Verifier' so that the biscuit datalog can be
 -- verified. For that, you can use 'checkBiscuit' (or 'checkBiscuitM').
 --
@@ -97,14 +98,14 @@ import           Servant.Server.Experimental.Auth
 -- >             :<|> h2 biscuit
 -- >             :<|> h3 biscuit
 -- >
--- > h1 :: CheckedBiscuit -> Handler Int
+-- > h1 :: ValidBiscuit -> Handler Int
 -- > h1 biscuit =
 -- >   checkBiscuit biscuit
 -- >     [verifier|allow if right(#authority,#one);|]
 -- >     -- ^ only allow biscuits granting access to the endpoint tagged `#one`
 -- >     (pure 1)
 -- >
--- > h2 :: CheckedBiscuit -> Int -> Handler Int
+-- > h2 :: ValidBiscuit -> Int -> Handler Int
 -- > h2 biscuit value =
 -- >   checkBiscuit biscuit
 -- >     [verifier|allow if right(#authority,#two, ${value});|]
@@ -112,7 +113,7 @@ import           Servant.Server.Experimental.Auth
 -- >     -- AND for the provided int value.
 -- >     (pure 2)
 -- >
--- > h3 :: CheckedBiscuit -> Handler Int
+-- > h3 :: ValidBiscuit -> Handler Int
 -- > h3 biscuit =
 -- >   checkBiscuit biscuit
 -- >     [verifier|deny if true;|]
@@ -176,14 +177,7 @@ import           Servant.Server.Experimental.Auth
 -- be performed separately with either 'checkBiscuit' (for simple
 -- use-cases) or 'handleBiscuit' (for more complex use-cases).
 type RequireBiscuit = AuthProtect "biscuit"
-type instance AuthServerData RequireBiscuit = CheckedBiscuit
-
--- | A biscuit which signature has already been verified.
--- Since the biscuit lib checks the signature while verifying the datalog
--- part, the public key is needed. 'CheckedBiscuit' carries the public key
--- used for verifying the signature so that the datalog verification part
--- can use it.
-data CheckedBiscuit = CheckedBiscuit PublicKey Biscuit
+type instance AuthServerData RequireBiscuit = ValidBiscuit
 
 -- | Wrapper for a servant handler, equipped with a biscuit 'Verifier'
 -- that will be used to authorize the request. If the authorization
@@ -350,9 +344,9 @@ extractBiscuit req = do
   first (const "Not a B64-encoded biscuit") $ parseB64 b64Token
 
 -- | Servant authorization handler. This extracts the biscuit from the request,
--- checks its signature (but not the datalog part) and returns a 'CheckedBiscuit'
+-- checks its signature (but not the datalog part) and returns a 'ValidBiscuit'
 -- upon success.
-authHandler :: PublicKey -> AuthHandler Request CheckedBiscuit
+authHandler :: PublicKey -> AuthHandler Request ValidBiscuit
 authHandler publicKey = mkAuthHandler handler
   where
     authError s = err401 { errBody = LBS.fromStrict (C8.pack s) }
@@ -361,15 +355,15 @@ authHandler publicKey = mkAuthHandler handler
       biscuit <- orError $ extractBiscuit req
       result  <- liftIO $ checkBiscuitSignature biscuit publicKey
       case result of
-        False -> throwError $ authError "Invalid signature"
-        True  -> pure $ CheckedBiscuit publicKey biscuit
+        Nothing -> throwError $ authError "Invalid signature"
+        Just vb -> pure vb
 
 -- | Helper function generating a servant context containing the authorization
 -- handler.
-genBiscuitCtx :: PublicKey -> Context '[AuthHandler Request CheckedBiscuit]
+genBiscuitCtx :: PublicKey -> Context '[AuthHandler Request ValidBiscuit]
 genBiscuitCtx pk = authHandler pk :. EmptyContext
 
--- | Given a 'CheckedBiscuit' (provided by the servant authorization mechanism),
+-- | Given a 'ValidBiscuit' (provided by the servant authorization mechanism),
 -- verify its validity (with the provided 'Verifier').
 --
 -- If you need to perform effects in the verification phase (eg to get the current time,
@@ -380,18 +374,18 @@ genBiscuitCtx pk = authHandler pk :. EmptyContext
 -- (on endpoints), 'withFallbackVerifier' and 'withPriorityVerifier' (on API sub-trees)
 -- and 'handleBiscuit' (on the whole API).
 checkBiscuit :: (MonadIO m, MonadError ServerError m)
-             => CheckedBiscuit
+             => ValidBiscuit
              -> Verifier
              -> m a
              -> m a
-checkBiscuit (CheckedBiscuit pk b) v h = do
-  res <- liftIO $ verifyBiscuit b v pk
+checkBiscuit vb v h = do
+  res <- liftIO $ verifyValidBiscuit vb v
   case res of
     Left e  -> do liftIO $ print e
                   throwError $ err401 { errBody = "Biscuit failed checks" }
     Right _ -> h
 
--- | Given a 'CheckedBiscuit' (provided by the servant authorization mechanism),
+-- | Given a 'ValidBiscuit' (provided by the servant authorization mechanism),
 -- verify its validity (with the provided 'Verifier', which can be effectful).
 --
 -- If you don't need to run any effects in the verifying phase, you can use 'checkBiscuit'
@@ -402,13 +396,13 @@ checkBiscuit (CheckedBiscuit pk b) v h = do
 -- 'withFallbackVerifier' and 'withPriorityVerifier' (on API sub-trees) and 'handleBiscuit'
 -- (on the whole API).
 checkBiscuitM :: (MonadIO m, MonadError ServerError m)
-              => CheckedBiscuit
+              => ValidBiscuit
               -> m Verifier
               -> m a
               -> m a
-checkBiscuitM (CheckedBiscuit pk b) mv h = do
+checkBiscuitM vb mv h = do
   v   <- mv
-  res <- liftIO $ verifyBiscuit b v pk
+  res <- liftIO $ verifyValidBiscuit vb v
   case res of
     Left e  -> do liftIO $ print e
                   throwError $ err401 { errBody = "Biscuit failed checks" }
@@ -420,9 +414,9 @@ checkBiscuitM (CheckedBiscuit pk b) mv h = do
 -- For simpler use cases, consider using 'checkBiscuit' instead, which works on regular
 -- servant handlers.
 handleBiscuit :: (MonadIO m, MonadError ServerError m)
-              => CheckedBiscuit
+              => ValidBiscuit
               -> WithVerifier m a
               -> m a
-handleBiscuit cb@(CheckedBiscuit _ b) WithVerifier{verifier_, handler_} =
-  let h = runReaderT handler_ b
-  in checkBiscuitM cb verifier_ h
+handleBiscuit vb WithVerifier{verifier_, handler_} =
+  let h = runReaderT handler_ (validBiscuit vb)
+  in checkBiscuitM vb verifier_ h
