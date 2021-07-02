@@ -1,6 +1,6 @@
 # Biscuit [![CI-badge][CI-badge]][CI-url] [![Hackage][hackage]][hackage-url]
 
-<img src="https://github.com/divarvel/biscuit-haskell/blob/assets/biscuit-logo.png" align=right>
+<img src="https://raw.githubusercontent.com/divarvel/biscuit-haskell/main/assets/biscuit-logo.png" align=right>
 
 This is the repository for `biscuit-haskell`, a binding to the [Biscuit][biscuit]  
 authorisation toolkit, created by [Geoffroy Couprie][gcouprie].
