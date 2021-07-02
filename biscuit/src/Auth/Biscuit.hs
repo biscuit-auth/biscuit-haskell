@@ -48,7 +48,12 @@ module Auth.Biscuit
   , verifier
   , verifyBiscuit
   , verifyBiscuitWithLimits
+  , verifyValidBiscuit
+  , verifyValidBiscuitWithLimits
   , checkBiscuitSignature
+  , ValidBiscuit
+  , validBiscuit
+  , checkedPublicKey
   , defaultLimits
   , Verifier
   , ParseError (..)
@@ -75,11 +80,15 @@ import           Auth.Biscuit.Sel              (Keypair (..), PrivateKey,
                                                 serializePrivateKey,
                                                 serializePublicKey)
 import           Auth.Biscuit.Token            (Biscuit, ParseError (..),
+                                                ValidBiscuit,
                                                 VerificationError (..),
                                                 addBlock, checkBiscuitSignature,
-                                                mkBiscuit, parseBiscuit,
-                                                serializeBiscuit, verifyBiscuit,
-                                                verifyBiscuitWithLimits)
+                                                checkedPublicKey, mkBiscuit,
+                                                parseBiscuit, serializeBiscuit,
+                                                validBiscuit, verifyBiscuit,
+                                                verifyBiscuitWithLimits,
+                                                verifyValidBiscuit,
+                                                verifyValidBiscuitWithLimits)
 import           Auth.Biscuit.Utils            (maybeToRight)
 
 -- $biscuitOverview
