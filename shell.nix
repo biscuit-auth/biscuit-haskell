@@ -6,5 +6,6 @@ mkShell {
     haskellPackages.c2hs
     pkg-config
     libsodium
+    zlib
   ];
 }
