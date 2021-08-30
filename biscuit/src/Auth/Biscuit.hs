@@ -62,6 +62,8 @@ module Auth.Biscuit
   , Limits (..)
   ) where
 
+import           Auth.Biscuit.Crypto           ()
+
 import           Control.Monad                 ((<=<))
 import           Data.Bifunctor                (first)
 import           Data.ByteString               (ByteString)

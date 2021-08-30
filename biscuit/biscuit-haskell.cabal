@@ -25,6 +25,7 @@ library
   exposed-modules:
       Auth.Biscuit
       Auth.Biscuit.Utils
+      Auth.Biscuit.Crypto
       Auth.Biscuit.Datalog.AST
       Auth.Biscuit.Datalog.Executor
       Auth.Biscuit.Datalog.Parser
@@ -48,6 +49,8 @@ library
     bytestring           ^>= 0.10,
     text                 ^>= 1.2,
     containers           ^>= 0.6,
+    cryptonite           ^>= 0.29,
+    memory               ^>= 0.16,
     template-haskell     ^>= 2.16,
     attoparsec           ^>= 0.13,
     primitive            ^>= 0.7,
@@ -99,6 +102,7 @@ test-suite biscuit-haskell-test
   main-is: Spec.hs
   other-modules:
       Spec.Crypto
+      Spec.NewCrypto
       Spec.Executor
       Spec.Parser
       Spec.Quasiquoter
@@ -120,6 +124,7 @@ test-suite biscuit-haskell-test
     , bytestring
     , cereal
     , containers
+    , cryptonite
     , libsodium
     , mtl
     , parser-combinators
