@@ -29,6 +29,7 @@ library
       Auth.Biscuit.Datalog.AST
       Auth.Biscuit.Datalog.Executor
       Auth.Biscuit.Datalog.Parser
+      Auth.Biscuit.Datalog.ScopedExecutor
       Auth.Biscuit.Example
       Auth.Biscuit.Proto
       Auth.Biscuit.ProtoBufAdapter
@@ -109,6 +110,7 @@ test-suite biscuit-haskell-test
       Spec.RevocationIds
       Spec.Roundtrip
       Spec.Samples
+      Spec.ScopedExecutor
       Spec.Verification
       Paths_biscuit_haskell
   hs-source-dirs:

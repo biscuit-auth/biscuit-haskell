@@ -25,6 +25,11 @@ module Auth.Biscuit.Datalog.Executor
   , evaluateExpression
   , runVerifier
   , runVerifierWithLimits
+
+  --
+  , getFactsForRule
+  , checkCheck
+  , checkPolicy
   ) where
 
 import           Control.Monad               (join, mfilter, when)
