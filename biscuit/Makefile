@@ -1,6 +1,10 @@
 .PHONY: ghcid
 ghcid:
-	ghcid -l -c 'stack ghci biscuit-haskell:lib biscuit-haskell:biscuit-haskell-test' -T main
+	ghcid -l -c 'cabal repl'
+	
+.PHONY: ghcid-tests
+ghcid-tests:
+	ghcid -l -c 'cabal repl biscuit-haskell-test' -T main
 
 .PHONY: configure
 configure:
