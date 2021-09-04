@@ -3,11 +3,14 @@
 {-# LANGUAGE QuasiQuotes       #-}
 {-# LANGUAGE RecordWildCards   #-}
 module Auth.Biscuit.Datalog.ScopedExecutor
-  (
-    runVerifier
+  ( BlockWithRevocationId
+  , runVerifier
   , runVerifierWithLimits
   , runVerifierNoTimeout
   , World (..)
+  , computeAllFacts
+  , runFactGeneration
+  , PureExecError (..)
   ) where
 
 import           Control.Monad                 (join, when)
@@ -35,6 +38,7 @@ import           Auth.Biscuit.Timer            (timer)
 type BlockWithRevocationId = (Block, ByteString)
 
 data PureExecError = Facts | Iterations
+  deriving (Eq, Show)
 
 data ComputeState
   = ComputeState
@@ -144,6 +148,12 @@ runVerifierNoTimeout limits authority blocks verifier = do
       (Just cs, Left Nothing)  -> Left $ ResultError $ NoPoliciesMatched (NE.toList cs)
       (Just cs, Left (Just p)) -> Left $ ResultError $ DenyRuleMatched (NE.toList cs) p
       (Just cs, Right _)       -> Left $ ResultError $ FailedChecks cs
+
+
+runFactGeneration :: Limits -> World -> Either PureExecError (Set Fact)
+runFactGeneration limits w =
+  let getFacts = sFacts . snd
+   in getFacts <$> runStateT (computeAllFacts w) (mkInitState limits)
 
 runAuthority :: BlockWithRevocationId
              -> Verifier

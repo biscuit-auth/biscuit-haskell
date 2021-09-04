@@ -5,13 +5,19 @@ module Spec.Roundtrip
   ( specs
   ) where
 
-import           Data.ByteString    (ByteString)
-import           Data.List.NonEmpty (NonEmpty ((:|)))
+import           Data.ByteString     (ByteString)
+import           Data.List.NonEmpty  (NonEmpty ((:|)))
 import           Test.Tasty
 import           Test.Tasty.HUnit
 
-import           Auth.Biscuit
-import           Auth.Biscuit.Token (Biscuit (..))
+import           Auth.Biscuit        hiding (Biscuit, ParseError, PublicKey,
+                                      addBlock, mkBiscuit, parse, publicKey,
+                                      serialize)
+import           Auth.Biscuit.Crypto
+import           Auth.Biscuit.Token2
+
+serialize = serializeBiscuit
+parse  = parseBiscuit
 
 specs :: TestTree
 specs = testGroup "Serde roundtrips"
@@ -28,12 +34,12 @@ specs = testGroup "Serde roundtrips"
       , multipleBlocks (serializeHex, parseHex)
       ]
   , testGroup "Keys serde"
-      [ private
+      [ secret
       , public
       ]
   ]
 
-type Roundtrip = (Biscuit -> ByteString, ByteString -> Either ParseError Biscuit)
+type Roundtrip = (Biscuit -> ByteString, PublicKey -> ByteString -> Either ParseError Biscuit)
 
 roundtrip :: Roundtrip
           -> NonEmpty Block
@@ -42,12 +48,14 @@ roundtrip (s,p) i@(authority' :| blocks') = do
   let addBlocks bs biscuit = case bs of
         (b:rest) -> addBlocks rest =<< addBlock b biscuit
         []       -> pure biscuit
-  keypair <- newKeypair
-  init' <- mkBiscuit keypair authority'
+  sk <- generateSecretKey
+  let pk = toPublic sk
+  init' <- mkBiscuit sk authority'
   final <- addBlocks blocks' init'
-  let serialized = s final
-      parsed = p serialized
-      getBlocks Biscuit{..} = snd (snd authority) :| (snd . snd <$> blocks)
+  let serialized = s $ fromOpen final
+      parsed = p pk serialized
+      getBlock ((_, b), _, _) = b
+      getBlocks Biscuit{..} = getBlock <$> authority :| blocks
   getBlocks <$> parsed @?= Right i
 
 singleBlock :: Roundtrip -> TestTree
@@ -114,22 +122,22 @@ multipleBlocks r = testCase "Multiple block" $ roundtrip r $
     |]
   ]
 
-private :: TestTree
-private = testGroup "Private key serde"
+secret :: TestTree
+secret = testGroup "Secret key serde"
   [ testCase "Raw bytes" $ do
-      pk <- privateKey <$> newKeypair
-      parsePrivateKey (serializePrivateKey pk) @?= Just pk
+      sk <- newSecret
+      parseSecretKey (serializeSecretKey sk) @?= Just sk
   , testCase "Hex encoding" $ do
-      pk <- privateKey <$> newKeypair
-      parsePrivateKeyHex (serializePrivateKeyHex pk) @?= Just pk
+      sk <- newSecret
+      parseSecretKeyHex (serializeSecretKeyHex sk) @?= Just sk
   ]
 
 public :: TestTree
 public = testGroup "Public key serde"
   [ testCase "Raw bytes" $ do
-      pk <- publicKey <$> newKeypair
+      pk <- toPublic <$> newSecret
       parsePublicKey (serializePublicKey pk) @?= Just pk
   , testCase "Hex encoding" $ do
-      pk <- publicKey <$> newKeypair
+      pk <- toPublic <$> newSecret
       parsePublicKeyHex (serializePublicKeyHex pk) @?= Just pk
   ]

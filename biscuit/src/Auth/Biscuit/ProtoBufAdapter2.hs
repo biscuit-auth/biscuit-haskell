@@ -10,16 +10,20 @@
   Maintainer  : clement@delafargue.name
   Conversion functions between biscuit components and protobuf-encoded components
 -}
-module Auth.Biscuit.ProtoBufAdapter
+module Auth.Biscuit.ProtoBufAdapter2
   ( Symbols
   , extractSymbols
   , commonSymbols
   , buildSymbolTable
   , pbToBlock
   , blockToPb
+  , pbToSignedBlock
+  , signedBlockToPb
+  , pbToProof
   ) where
 
 import           Control.Monad            (when)
+import           Data.Bifunctor           (first)
 import           Data.Int                 (Int32, Int64)
 import           Data.Map.Strict          (Map)
 import qualified Data.Map.Strict          as Map
@@ -30,8 +34,9 @@ import           Data.Time.Clock.POSIX    (posixSecondsToUTCTime,
                                            utcTimeToPOSIXSeconds)
 import           Data.Void                (absurd)
 
+import qualified Auth.Biscuit.Crypto      as Crypto
 import           Auth.Biscuit.Datalog.AST
-import qualified Auth.Biscuit.Proto       as PB
+import qualified Auth.Biscuit.Proto2      as PB
 import           Auth.Biscuit.Utils       (maybeToRight)
 
 -- | A map to get symbol names from symbol ids
@@ -77,51 +82,71 @@ reverseSymbols =
 getSymbolCode :: Integral i => ReverseSymbols -> Text -> i
 getSymbolCode = (fromIntegral .) . (Map.!)
 
+-- | Parse a protobuf signed block into a signed biscuit block
+pbToSignedBlock :: PB.SignedBlock -> Either String Crypto.SignedBlock
+pbToSignedBlock PB.SignedBlock{..} = do
+  sig <- first (const "Invalid signature") $ Crypto.eitherCryptoError $ Crypto.signature $ PB.getField signature
+  pk  <- first (const "Invalid public key") $ Crypto.eitherCryptoError $ Crypto.publicKey $ PB.getField nextKey
+  pure ( PB.getField block
+       , sig
+       , pk
+       )
+
+signedBlockToPb :: Crypto.SignedBlock -> PB.SignedBlock
+signedBlockToPb (block, sig, pk) = PB.SignedBlock
+  { block = PB.putField block
+  , signature = PB.putField $ Crypto.convert sig
+  , nextKey = PB.putField $ Crypto.convert pk
+  }
+
+pbToProof :: PB.Proof -> Either String (Either Crypto.Signature Crypto.SecretKey)
+pbToProof (PB.ProofSignature rawSig) = Left  <$> first (const "Invalid signature proof") (Crypto.eitherCryptoError $ Crypto.signature $ PB.getField rawSig)
+pbToProof (PB.ProofSecret    rawPk)  = Right <$> first (const "Invalid public key proof") (Crypto.eitherCryptoError $ Crypto.secretKey $ PB.getField rawPk)
+
 -- | Parse a protobuf block into a proper biscuit block
 pbToBlock :: Symbols -> PB.Block -> Either String Block
 pbToBlock s PB.Block{..} = do
   let bContext = PB.getField context
       bVersion = PB.getField version
-  bFacts <- traverse (pbToFact s) $ PB.getField facts_v1
-  bRules <- traverse (pbToRule s) $ PB.getField rules_v1
-  bChecks <- traverse (pbToCheck s) $ PB.getField checks_v1
-  when (bVersion /= Just 1) $ Left $ "Unsupported biscuit version: " <> maybe "0" show bVersion <> ". Only version 1 is supported"
+  bFacts <- traverse (pbToFact s) $ PB.getField facts_v2
+  bRules <- traverse (pbToRule s) $ PB.getField rules_v2
+  bChecks <- traverse (pbToCheck s) $ PB.getField checks_v2
+  when (bVersion /= Just 2) $ Left $ "Unsupported biscuit version: " <> maybe "0" show bVersion <> ". Only version 2 is supported"
   pure Block{ .. }
 
 -- | Turn a biscuit block into a protobuf block, for serialization,
 -- along with the newly defined symbols
-blockToPb :: Symbols -> Int -> Block -> (Symbols, PB.Block)
-blockToPb existingSymbols bIndex b@Block{..} =
+blockToPb :: Symbols -> Block -> (Symbols, PB.Block)
+blockToPb existingSymbols b@Block{..} =
   let
       bSymbols = buildSymbolTable existingSymbols b
       s = reverseSymbols $ existingSymbols <> bSymbols
-      index     = PB.putField $ fromIntegral bIndex
       symbols   = PB.putField $ Map.elems bSymbols
       context   = PB.putField bContext
-      version   = PB.putField $ Just 1
-      facts_v1  = PB.putField $ factToPb s <$> bFacts
-      rules_v1  = PB.putField $ ruleToPb s <$> bRules
-      checks_v1 = PB.putField $ checkToPb s <$> bChecks
+      version   = PB.putField $ Just 2
+      facts_v2  = PB.putField $ factToPb s <$> bFacts
+      rules_v2  = PB.putField $ ruleToPb s <$> bRules
+      checks_v2 = PB.putField $ checkToPb s <$> bChecks
    in (bSymbols, PB.Block {..})
 
-pbToFact :: Symbols -> PB.FactV1 -> Either String Fact
-pbToFact s PB.FactV1{predicate} = do
+pbToFact :: Symbols -> PB.FactV2 -> Either String Fact
+pbToFact s PB.FactV2{predicate} = do
   let pbName = PB.getField $ PB.name $ PB.getField predicate
       pbIds  = PB.getField $ PB.ids  $ PB.getField predicate
   name <- getSymbol s pbName
   terms <- traverse (pbToValue s) pbIds
   pure Predicate{..}
 
-factToPb :: ReverseSymbols -> Fact -> PB.FactV1
+factToPb :: ReverseSymbols -> Fact -> PB.FactV2
 factToPb s Predicate{..} =
   let
-      predicate = PB.PredicateV1
+      predicate = PB.PredicateV2
         { name = PB.putField $ getSymbolCode s name
         , ids  = PB.putField $ valueToPb s <$> terms
         }
-   in PB.FactV1{predicate = PB.putField predicate}
+   in PB.FactV2{predicate = PB.putField predicate}
 
-pbToRule :: Symbols -> PB.RuleV1 -> Either String Rule
+pbToRule :: Symbols -> PB.RuleV2 -> Either String Rule
 pbToRule s pbRule = do
   let pbHead = PB.getField $ PB.head pbRule
       pbBody = PB.getField $ PB.body pbRule
@@ -131,31 +156,31 @@ pbToRule s pbRule = do
   expressions <- traverse (pbToExpression s) pbExpressions
   pure Rule {..}
 
-ruleToPb :: ReverseSymbols -> Rule -> PB.RuleV1
+ruleToPb :: ReverseSymbols -> Rule -> PB.RuleV2
 ruleToPb s Rule{..} =
-  PB.RuleV1
+  PB.RuleV2
     { head = PB.putField $ predicateToPb s rhead
     , body = PB.putField $ predicateToPb s <$> body
     , expressions = PB.putField $ expressionToPb s <$> expressions
     }
 
-pbToCheck :: Symbols -> PB.CheckV1 -> Either String Check
-pbToCheck s PB.CheckV1{queries} = do
+pbToCheck :: Symbols -> PB.CheckV2 -> Either String Check
+pbToCheck s PB.CheckV2{queries} = do
   let toCheck Rule{body,expressions} = QueryItem{qBody = body, qExpressions = expressions }
   rules <- traverse (pbToRule s) $ PB.getField queries
   pure $ toCheck <$> rules
 
-checkToPb :: ReverseSymbols -> Check -> PB.CheckV1
+checkToPb :: ReverseSymbols -> Check -> PB.CheckV2
 checkToPb s items =
   let dummyHead = Predicate "query" []
       toQuery QueryItem{..} =
         ruleToPb s $ Rule dummyHead qBody qExpressions
-   in PB.CheckV1 { queries = PB.putField $ toQuery <$> items }
+   in PB.CheckV2 { queries = PB.putField $ toQuery <$> items }
 
 getSymbol :: (Show i, Integral i) => Symbols -> i -> Either String Text
 getSymbol s i = maybeToRight ("Missing symbol at id " <> show i) $ Map.lookup (fromIntegral i) s
 
-pbToPredicate :: Symbols -> PB.PredicateV1 -> Either String (Predicate' 'InPredicate 'RegularString)
+pbToPredicate :: Symbols -> PB.PredicateV2 -> Either String (Predicate' 'InPredicate 'RegularString)
 pbToPredicate s pbPredicate = do
   let pbName = PB.getField $ PB.name pbPredicate
       pbIds  = PB.getField $ PB.ids  pbPredicate
@@ -163,9 +188,9 @@ pbToPredicate s pbPredicate = do
   terms <- traverse (pbToTerm s) pbIds
   pure Predicate{..}
 
-predicateToPb :: ReverseSymbols -> Predicate -> PB.PredicateV1
+predicateToPb :: ReverseSymbols -> Predicate -> PB.PredicateV2
 predicateToPb s Predicate{..} =
-  PB.PredicateV1
+  PB.PredicateV2
     { name = PB.putField $ getSymbolCode s name
     , ids  = PB.putField $ termToPb s <$> terms
     }
@@ -173,7 +198,7 @@ predicateToPb s Predicate{..} =
 pbTimeToUtcTime :: Int64 -> UTCTime
 pbTimeToUtcTime = posixSecondsToUTCTime . fromIntegral
 
-pbToTerm :: Symbols -> PB.IDV1 -> Either String ID
+pbToTerm :: Symbols -> PB.IDV2 -> Either String ID
 pbToTerm s = \case
   PB.IDSymbol   f ->        Symbol  <$> getSymbol s (PB.getField f)
   PB.IDInteger  f -> pure $ LInteger $ fromIntegral $ PB.getField f
@@ -184,7 +209,7 @@ pbToTerm s = \case
   PB.IDVariable f -> Variable <$> getSymbol s (PB.getField f)
   PB.IDIDSet    f -> TermSet . Set.fromList <$> traverse (pbToSetValue s) (PB.getField . PB.set $ PB.getField f)
 
-termToPb :: ReverseSymbols -> ID -> PB.IDV1
+termToPb :: ReverseSymbols -> ID -> PB.IDV2
 termToPb s = \case
   Variable n -> PB.IDVariable $ PB.putField $ getSymbolCode s n
   Symbol   n -> PB.IDSymbol   $ PB.putField $ getSymbolCode s n
@@ -197,7 +222,7 @@ termToPb s = \case
 
   Antiquote v -> absurd v
 
-pbToValue :: Symbols -> PB.IDV1 -> Either String Value
+pbToValue :: Symbols -> PB.IDV2 -> Either String Value
 pbToValue s = \case
   PB.IDSymbol   f ->        Symbol  <$> getSymbol s (PB.getField f)
   PB.IDInteger  f -> pure $ LInteger $ fromIntegral $ PB.getField f
@@ -208,7 +233,7 @@ pbToValue s = \case
   PB.IDVariable _ -> Left "Variables can't appear in facts"
   PB.IDIDSet    f -> TermSet . Set.fromList <$> traverse (pbToSetValue s) (PB.getField . PB.set $ PB.getField f)
 
-valueToPb :: ReverseSymbols -> Value -> PB.IDV1
+valueToPb :: ReverseSymbols -> Value -> PB.IDV2
 valueToPb s = \case
   Symbol   n -> PB.IDSymbol  $ PB.putField $ getSymbolCode s n
   LInteger v -> PB.IDInteger $ PB.putField $ fromIntegral v
@@ -221,7 +246,7 @@ valueToPb s = \case
   Variable v  -> absurd v
   Antiquote v -> absurd v
 
-pbToSetValue :: Symbols -> PB.IDV1 -> Either String (ID' 'WithinSet 'InFact 'RegularString)
+pbToSetValue :: Symbols -> PB.IDV2 -> Either String (ID' 'WithinSet 'InFact 'RegularString)
 pbToSetValue s = \case
   PB.IDSymbol   f ->        Symbol   <$> getSymbol s (PB.getField f)
   PB.IDInteger  f -> pure $ LInteger $ fromIntegral $ PB.getField f
@@ -232,7 +257,7 @@ pbToSetValue s = \case
   PB.IDVariable _ -> Left "Variables can't appear in facts or sets"
   PB.IDIDSet    _ -> Left "Sets can't be nested"
 
-setValueToPb :: ReverseSymbols -> ID' 'WithinSet 'InFact 'RegularString -> PB.IDV1
+setValueToPb :: ReverseSymbols -> ID' 'WithinSet 'InFact 'RegularString -> PB.IDV2
 setValueToPb s = \case
   Symbol   n -> PB.IDSymbol  $ PB.putField $ getSymbolCode s n
   LInteger v -> PB.IDInteger $ PB.putField $ fromIntegral v
@@ -245,15 +270,15 @@ setValueToPb s = \case
   Variable  v -> absurd v
   Antiquote v -> absurd v
 
-pbToExpression :: Symbols -> PB.ExpressionV1 -> Either String Expression
-pbToExpression s PB.ExpressionV1{ops} = do
+pbToExpression :: Symbols -> PB.ExpressionV2 -> Either String Expression
+pbToExpression s PB.ExpressionV2{ops} = do
   parsedOps <- traverse (pbToOp s) $ PB.getField ops
   fromStack parsedOps
 
-expressionToPb :: ReverseSymbols -> Expression -> PB.ExpressionV1
+expressionToPb :: ReverseSymbols -> Expression -> PB.ExpressionV2
 expressionToPb s e =
   let ops = opToPb s <$> toStack e
-   in PB.ExpressionV1 { ops = PB.putField ops }
+   in PB.ExpressionV2 { ops = PB.putField ops }
 
 pbToOp :: Symbols -> PB.Op -> Either String Op
 pbToOp s = \case

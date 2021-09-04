@@ -1,15 +1,46 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE NamedFieldPuns        #-}
-module Auth.Biscuit.Crypto where
+module Auth.Biscuit.Crypto
+  ( SignedBlock
+  , signBlock
+  , verifyBlocks
+  , verifySecretProof
+  , verifySignatureProof
+
+  -- Ed25519 reexports
+  , PublicKey
+  , SecretKey
+  , Signature
+  , convert
+  , publicKey
+  , secretKey
+  , signature
+  , eitherCryptoError
+  , maybeCryptoError
+  , generateSecretKey
+  , toPublic
+
+  -- High-level helpers used in tests
+  , Token (..)
+  , SealedToken (..)
+  , Blocks
+  , signToken
+  , append
+  , seal
+  , verifyToken
+  , verifySealedToken
+  ) where
 
 import           Control.Arrow         ((&&&))
+import           Crypto.Error          (eitherCryptoError, maybeCryptoError)
 import           Crypto.PubKey.Ed25519
 import           Data.ByteArray        (convert)
 import           Data.ByteString       (ByteString)
 import           Data.List.NonEmpty    (NonEmpty (..))
 import qualified Data.List.NonEmpty    as NE
 
-type Blocks = NonEmpty (ByteString, Signature, PublicKey)
+type SignedBlock = (ByteString, Signature, PublicKey)
+type Blocks = NonEmpty SignedBlock
 
 data Token = Token
   { payload :: Blocks
@@ -21,37 +52,44 @@ data SealedToken = SealedToken
   , sig     :: Signature
   }
 
-signToken :: ByteString -> SecretKey -> IO Token
-signToken p sk = do
+signBlock :: SecretKey
+          -> ByteString
+          -> IO (SignedBlock, SecretKey)
+signBlock sk payload = do
   let pk = toPublic sk
   (nextPk, nextSk) <- (toPublic &&& id) <$> generateSecretKey
-  let toSign = p <> convert nextPk
-  let sig = sign sk pk toSign
+  let toSign = payload <> convert nextPk
+      sig = sign sk pk toSign
+  pure ((payload, sig, nextPk), nextSk)
+
+signToken :: ByteString -> SecretKey -> IO Token
+signToken p sk = do
+  (signedBlock, privKey) <- signBlock sk p
   pure Token
-    { payload = pure (p, sig, nextPk)
-    , privKey = nextSk
+    { payload = pure signedBlock
+    , privKey
     }
 
 append :: Token -> ByteString -> IO Token
 append t@Token{payload} p = do
-  (nextPk, nextSk) <- (toPublic &&& id) <$> generateSecretKey
-  let sk = privKey t
-      pk = toPublic sk
-      toSign = p <> convert nextPk
-      sig = sign sk pk toSign
+  (signedBlock, privKey) <- signBlock (privKey t) p
   pure Token
-    { payload = pure (p, sig, nextPk) <> payload
-    , privKey = nextSk
+    { payload = pure signedBlock <> payload
+    , privKey
     }
+
+getSignatureProof :: SignedBlock -> SecretKey -> Signature
+getSignatureProof (lastPayload, lastSig, lastPk) nextSecret =
+  let sk = nextSecret
+      pk = toPublic nextSecret
+      toSign = lastPayload <> convert lastSig <> convert lastPk
+   in sign sk pk toSign
 
 seal :: Token -> SealedToken
 seal Token{payload,privKey} =
-  let (lastPayload, lastSig, lastPk) = NE.head payload
-      toSign = lastPayload <> convert lastSig <> convert lastPk
-      sk = privKey
-      pk = toPublic sk
+  let lastBlock = NE.head payload
    in SealedToken
-        { sig = sign sk pk toSign
+        { sig = getSignatureProof lastBlock privKey
         , payload
         }
 
@@ -59,8 +97,6 @@ snocNE :: [a] -> a -> NonEmpty a
 snocNE (h : t) l = h :| (t <> [l])
 snocNE [] l      = l :| []
 
-fst' :: (a,b,c) -> a
-fst' (a, _, _) = a
 snd' :: (a,b,c) -> b
 snd' (_, b, _) = b
 trd' :: (a,b,c) -> c
@@ -85,14 +121,27 @@ verifyBlocks blocks rootPk =
       pkps = NE.zipWith to3t keys (NE.zip toSigs sigs)
    in all (uncurry3 verify) pkps
 
+verifySecretProof :: SecretKey
+                  -> SignedBlock
+                  -> Bool
+verifySecretProof nextSecret (_, _, lastPk) =
+  lastPk == toPublic nextSecret
+
 verifyToken :: Token
             -> PublicKey
             -> Bool
-verifyToken t@Token{payload} rootPk =
+verifyToken Token{payload, privKey} rootPk =
   let blocks = payload
       sigChecks = verifyBlocks blocks rootPk
-      lastCheck = toPublic (privKey t) == trd' (NE.head blocks)
+      lastCheck = verifySecretProof privKey (NE.head payload)
   in sigChecks && lastCheck
+
+verifySignatureProof :: Signature
+                     -> SignedBlock
+                     -> Bool
+verifySignatureProof extraSig (lastPayload, lastSig, lastPk) =
+  let toSign = lastPayload <> convert lastSig <> convert lastPk
+   in verify lastPk toSign extraSig
 
 verifySealedToken :: SealedToken
                   -> PublicKey
@@ -100,7 +149,5 @@ verifySealedToken :: SealedToken
 verifySealedToken SealedToken{payload, sig} rootPk =
   let blocks = payload
       sigChecks = verifyBlocks blocks rootPk
-      (lastPayload, lastSig, lastPk) = NE.head payload
-      toSign = lastPayload <> convert lastSig <> convert lastPk
-      lastCheck = verify lastPk toSign sig
+      lastCheck = verifySignatureProof sig (NE.head payload)
   in sigChecks && lastCheck

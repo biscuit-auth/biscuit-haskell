@@ -1,5 +1,4 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards   #-}
 module Spec.RevocationIds
   ( specs
   ) where
@@ -12,22 +11,20 @@ import           Test.Tasty
 import           Test.Tasty.HUnit
 
 import           Auth.Biscuit
-import           Auth.Biscuit.Token     (BlockWithRevocationIds (..),
-                                         getRevocationIds)
+import           Auth.Biscuit.Token2    (getRevocationIds)
+
+pk :: PublicKey
+pk = maybe undefined id $ parsePublicKeyHex "acdd6d5b53bfee478bf689f8e012fe7988bf755e3d7c5152947abc149bc20189"
 
 readFromFile :: FilePath -> IO Biscuit
 readFromFile path = do
-  result <- parse <$> ByteString.readFile ("test/samples/" <> path)
+  result <- parse pk <$> ByteString.readFile ("test/samples/v2/" <> path)
   case result of
     Left x  -> fail $ show x
     Right b -> pure b
 
-getHex :: Biscuit -> IO [(ByteString,ByteString)]
-getHex b = do
-  let gi BlockWithRevocationIds{..} =
-         (Hex.encode genericRevocationId, Hex.encode uniqueRevocationId)
-  rids  <- getRevocationIds b
-  pure . NE.toList $ gi <$> rids
+getHex :: Biscuit -> [ByteString]
+getHex = NE.toList . fmap Hex.encode . getRevocationIds
 
 specs :: TestTree
 specs = testGroup "Revocation ids"
@@ -38,25 +35,17 @@ specs = testGroup "Revocation ids"
 token1 :: TestTree
 token1 = testCase "Token 1" $ do
   b <- readFromFile "test1_basic.bc"
-  rids <- getHex b
+  let rids = getHex b
   rids @?=
-    [ ( "596a24631a8eeec5cbc0d84fc6c22fec1a524c7367bc8926827201ddd218f4bb"
-      , "0478d85ecc0176ecb7c4609216c10be4456bd288b28d1bc2d9ee6247935e968c"
-      )
-    , ( "dec4e0a7f817fe6c5964a18e9f0eae5564c12531b05dc4525f553570519baa87"
-      , "ac3e75a72e35b936963e77d06a6aee38fc2654084f5a964dd4aaf7b02ae25774"
-      )
+    [ "2d41aa8d0131f0a9f171ae849f99f78461157101001752852e1731281ad460b3"
+    , "601083ff09e19882d762976dbb9bc98851439052e8c1bf3da1f32718a5a57eed"
     ]
 
 token16 :: TestTree
 token16 = testCase "Token 16" $ do
   b <- readFromFile "test16_caveat_head_name.bc"
-  rids <- getHex b
+  let rids = getHex b
   rids @?=
-    [ ( "8f03890eeaa997cd03da71115168e41425b2be82731026225b0c5b87163e4d8e"
-      , "83b0b7f0135609102299bd6db8de46722a2c2fcad6a348e684435ba5e528b564"
-      )
-    , ( "94fff36a9fa4d4149ab1488bf4aa84ed0bab0075cc7d051270367fb9c9688795"
-      , "17b70d10fee614414e46e06f2aea2c3986c33eae4faee76a05a904d09f2a587e"
-      )
+    [ "4a366515e159a7577166d8158bdca3c0bb39cbabb4988824ad0c9aab5d3ea402"
+    , "2e8c19fefac5e54b7a8e21bb40eaf8aac70909e48f22c388ebb8cc742065d1dc"
     ]

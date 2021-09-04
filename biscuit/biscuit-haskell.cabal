@@ -33,10 +33,9 @@ library
       Auth.Biscuit.Example
       Auth.Biscuit.Proto
       Auth.Biscuit.Proto2
-      Auth.Biscuit.ProtoBufAdapter
-      Auth.Biscuit.Sel
+      Auth.Biscuit.ProtoBufAdapter2
       Auth.Biscuit.Timer
-      Auth.Biscuit.Token
+      Auth.Biscuit.Token2
   other-modules:
       Paths_biscuit_haskell
   autogen-modules:
@@ -103,14 +102,13 @@ test-suite biscuit-haskell-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
-      Spec.Crypto
       Spec.NewCrypto
       Spec.Executor
       Spec.Parser
       Spec.Quasiquoter
       Spec.RevocationIds
       Spec.Roundtrip
-      Spec.Samples
+      Spec.Samples2
       Spec.ScopedExecutor
       Spec.Verification
       Paths_biscuit_haskell

@@ -2,16 +2,21 @@
 {-# LANGUAGE QuasiQuotes       #-}
 module Spec.Executor (specs) where
 
-import           Data.Attoparsec.Text          (parseOnly)
-import           Data.Map.Strict               as Map
-import           Data.Set                      as Set
-import           Data.Text                     (Text, unpack)
+import           Data.Attoparsec.Text                (parseOnly)
+import           Data.Map.Strict                     as Map
+import           Data.Set                            as Set
+import           Data.Text                           (Text, unpack)
 import           Test.Tasty
 import           Test.Tasty.HUnit
 
 import           Auth.Biscuit.Datalog.AST
-import           Auth.Biscuit.Datalog.Executor
-import           Auth.Biscuit.Datalog.Parser   (expressionParser, fact, rule)
+import           Auth.Biscuit.Datalog.Executor       (ExecutionError (..),
+                                                      Limits (..),
+                                                      defaultLimits,
+                                                      evaluateExpression)
+import           Auth.Biscuit.Datalog.Parser         (expressionParser, fact,
+                                                      rule)
+import           Auth.Biscuit.Datalog.ScopedExecutor
 
 specs :: TestTree
 specs = testGroup "Datalog evaluation"
@@ -29,14 +34,13 @@ grandparent = testCase "Basic grandparent rule" $
         { rules = Set.fromList
                    [ [rule|grandparent($a,$b) <- parent($a,$c), parent($c,$b)|]
                    ]
-        , blockRules = mempty
         , facts = Set.fromList
                    [ [fact|parent("alice", "bob")|]
                    , [fact|parent("bob", "jean-pierre")|]
                    , [fact|parent("alice", "toto")|]
                    ]
         }
-   in computeAllFacts defaultLimits world @?= Right (Set.fromList
+   in runFactGeneration defaultLimits world @?= Right (Set.fromList
         [ [fact|parent("alice", "bob")|]
         , [fact|parent("bob", "jean-pierre")|]
         , [fact|parent("alice", "toto")|]
@@ -150,14 +154,13 @@ rulesWithConstraints = testCase "Rule with constraints" $
                    [ [rule|valid_date("file1") <- time(#ambient, $0), resource(#ambient, "file1"), $0 <= 2019-12-04T09:46:41+00:00|]
                    , [rule|valid_date("file2") <- time(#ambient, $0), resource(#ambient, "file2"), $0 <= 2010-12-04T09:46:41+00:00|]
                    ]
-        , blockRules = mempty
         , facts = Set.fromList
                    [ [fact|time(#ambient, 2019-12-04T01:00:00Z)|]
                    , [fact|resource(#ambient, "file1")|]
                    , [fact|resource(#ambient, "file2")|]
                    ]
         }
-   in computeAllFacts defaultLimits world @?= Right (Set.fromList
+   in runFactGeneration defaultLimits world @?= Right (Set.fromList
         [ [fact|time(#ambient, 2019-12-04T01:00:00Z)|]
         , [fact|resource(#ambient, "file1")|]
         , [fact|resource(#ambient, "file2")|]
@@ -170,12 +173,11 @@ ruleHeadWithNoVars = testCase "Rule head with no variables" $
         { rules = Set.fromList
                    [ [rule|operation(#authority,#read) <- test($yolo, #nothing)|]
                    ]
-        , blockRules = mempty
         , facts = Set.fromList
                    [ [fact|test(#whatever, #notNothing)|]
                    ]
         }
-   in computeAllFacts defaultLimits world @?= Right (Set.fromList
+   in runFactGeneration defaultLimits world @?= Right (Set.fromList
         [ [fact|test(#whatever, #notNothing)|]
         ])
 
@@ -186,7 +188,6 @@ limits =
                    [ [rule|ancestor($a,$b) <- parent($a,$c), ancestor($c,$b)|]
                    , [rule|ancestor($a,$b) <- parent($a,$b)|]
                    ]
-        , blockRules = mempty
         , facts = Set.fromList
                    [ [fact|parent("alice", "bob")|]
                    , [fact|parent("bob", "jean-pierre")|]
@@ -198,7 +199,7 @@ limits =
       iterLimits = defaultLimits { maxIterations = 2 }
    in testGroup "Facts generation limits"
         [ testCase "max facts" $
-            computeAllFacts factLimits world @?= Left TooManyFacts
+            runFactGeneration factLimits world @?= Left Facts
         , testCase "max iterations" $
-            computeAllFacts iterLimits world @?= Left TooManyIterations
+            runFactGeneration iterLimits world @?= Left Iterations
         ]

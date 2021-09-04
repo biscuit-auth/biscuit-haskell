@@ -13,6 +13,8 @@
 
 module Auth.Biscuit.Proto2
   ( Biscuit (..)
+  , SignedBlock (..)
+  , Proof (..)
   , Block (..)
   , FactV2 (..)
   , RuleV2 (..)
@@ -45,7 +47,7 @@ import           GHC.Generics         (Generic)
 
 data Biscuit = Biscuit
   { rootKeyId :: Optional 1 (Value Int32)
-  , authority :: Required 2 (Value ByteString)
+  , authority :: Required 2 (Message SignedBlock)
   , blocks    :: Repeated 3 (Message SignedBlock)
   , proof     :: Required 4 (Message Proof)
   } deriving (Generic, Show)
@@ -66,13 +68,12 @@ data SignedBlock = SignedBlock
   deriving anyclass (Decode, Encode)
 
 data Block = Block {
-    index     :: Required 1 (Value Int32)
-  , symbols   :: Repeated 2 (Value Text)
-  , context   :: Optional 6 (Value Text)
-  , version   :: Optional 7 (Value Int32)
-  , facts_v2  :: Repeated 8 (Message FactV2)
-  , rules_v2  :: Repeated 9 (Message RuleV2)
-  , checks_v2 :: Repeated 10 (Message CheckV2)
+    symbols   :: Repeated 1 (Value Text)
+  , context   :: Optional 2 (Value Text)
+  , version   :: Optional 3 (Value Int32)
+  , facts_v2  :: Repeated 4 (Message FactV2)
+  , rules_v2  :: Repeated 5 (Message RuleV2)
+  , checks_v2 :: Repeated 6 (Message CheckV2)
   } deriving (Generic, Show)
     deriving anyclass (Decode, Encode)
 
@@ -197,7 +198,7 @@ data Op =
     OpVValue  (Required 1 (Message IDV2))
   | OpVUnary  (Required 2 (Message OpUnary))
   | OpVBinary (Required 3 (Message OpBinary))
-  | OpVTernary (Required 4 (Message OpTernary))
+  -- | OpVTernary (Required 4 (Message OpTernary))
     deriving stock (Generic, Show)
     deriving anyclass (Decode, Encode)
 
@@ -227,7 +228,7 @@ data BinaryKind =
   | Or
   | Intersection
   | Union
-  | SignEd25519
+  -- | SignEd25519
   deriving stock (Show, Enum, Bounded)
 
 newtype OpBinary = OpBinary

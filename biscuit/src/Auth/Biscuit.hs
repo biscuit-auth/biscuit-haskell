@@ -13,20 +13,19 @@ module Auth.Biscuit
   -- $biscuitOverview
 
   -- * Creating keypairs
-    newKeypair
-  , fromPrivateKey
-  , PrivateKey
+    newSecret
+  , toPublic
+  , SecretKey
   , PublicKey
-  , Keypair (..)
 
   -- ** Parsing and serializing keypairs
-  , serializePrivateKeyHex
+  , serializeSecretKeyHex
   , serializePublicKeyHex
-  , parsePrivateKeyHex
+  , parseSecretKeyHex
   , parsePublicKeyHex
-  , serializePrivateKey
+  , serializeSecretKey
   , serializePublicKey
-  , parsePrivateKey
+  , parseSecretKey
   , parsePublicKey
 
   -- * Creating a biscuit
@@ -34,6 +33,8 @@ module Auth.Biscuit
   , blockContext
   , mkBiscuit
   , addBlock
+  , fromOpen
+  , fromSealed
   , Biscuit
   , Block
   -- ** Parsing and serializing biscuits
@@ -48,21 +49,14 @@ module Auth.Biscuit
   , verifier
   , verifyBiscuit
   , verifyBiscuitWithLimits
-  , verifyValidBiscuit
-  , verifyValidBiscuitWithLimits
-  , checkBiscuitSignature
-  , ValidBiscuit
-  , validBiscuit
-  , checkedPublicKey
   , defaultLimits
   , Verifier
   , ParseError (..)
-  , VerificationError (..)
   , ExecutionError (..)
   , Limits (..)
-  ) where
 
-import           Auth.Biscuit.Crypto           ()
+  , fromHex
+  ) where
 
 import           Control.Monad                 ((<=<))
 import           Data.Bifunctor                (first)
@@ -71,27 +65,18 @@ import qualified Data.ByteString.Base16        as Hex
 import qualified Data.ByteString.Base64.URL    as B64
 import           Data.Text                     (Text)
 
+import           Auth.Biscuit.Crypto
 import           Auth.Biscuit.Datalog.AST      (Block, Verifier, bContext)
 import           Auth.Biscuit.Datalog.Executor (ExecutionError (..),
                                                 Limits (..), defaultLimits)
 import           Auth.Biscuit.Datalog.Parser   (block, verifier)
-import           Auth.Biscuit.Sel              (Keypair (..), PrivateKey,
-                                                PublicKey, fromPrivateKey,
-                                                newKeypair, parsePrivateKey,
-                                                parsePublicKey,
-                                                serializePrivateKey,
-                                                serializePublicKey)
-import           Auth.Biscuit.Token            (Biscuit, ParseError (..),
-                                                ValidBiscuit,
-                                                VerificationError (..),
-                                                addBlock, checkBiscuitSignature,
-                                                checkedPublicKey, mkBiscuit,
-                                                parseBiscuit, serializeBiscuit,
-                                                validBiscuit, verifyBiscuit,
-                                                verifyBiscuitWithLimits,
-                                                verifyValidBiscuit,
-                                                verifyValidBiscuitWithLimits)
+import           Auth.Biscuit.Token2           (Biscuit, ParseError (..),
+                                                addBlock, fromOpen, fromSealed,
+                                                mkBiscuit, parseBiscuit,
+                                                serializeBiscuit, verifyBiscuit,
+                                                verifyBiscuitWithLimits)
 import           Auth.Biscuit.Utils            (maybeToRight)
+
 
 -- $biscuitOverview
 --
@@ -155,17 +140,32 @@ fromHex input = do
   (decoded, "") <- pure $ Hex.decode input
   pure decoded
 
+newSecret :: IO SecretKey
+newSecret = generateSecretKey
+
+serializeSecretKey :: SecretKey -> ByteString
+serializeSecretKey = convert
+
+serializePublicKey :: PublicKey -> ByteString
+serializePublicKey = convert
+
 -- | Get an hex bytestring from a private key
-serializePrivateKeyHex :: PrivateKey -> ByteString
-serializePrivateKeyHex = Hex.encode . serializePrivateKey
+serializeSecretKeyHex :: SecretKey -> ByteString
+serializeSecretKeyHex = Hex.encode . convert
 
 -- | Get an hex bytestring from a public key
 serializePublicKeyHex :: PublicKey -> ByteString
-serializePublicKeyHex = Hex.encode . serializePublicKey
+serializePublicKeyHex = Hex.encode . convert
+
+parseSecretKey :: ByteString -> Maybe SecretKey
+parseSecretKey = maybeCryptoError . secretKey
 
 -- | Read a private key from an hex bytestring
-parsePrivateKeyHex :: ByteString -> Maybe PrivateKey
-parsePrivateKeyHex = parsePrivateKey <=< fromHex
+parseSecretKeyHex :: ByteString -> Maybe SecretKey
+parseSecretKeyHex = parseSecretKey <=< fromHex
+
+parsePublicKey :: ByteString -> Maybe PublicKey
+parsePublicKey = maybeCryptoError . publicKey
 
 -- | Read a public key from an hex bytestring
 parsePublicKeyHex :: ByteString -> Maybe PublicKey
@@ -173,17 +173,19 @@ parsePublicKeyHex = parsePublicKey <=< fromHex
 
 -- | Parse a biscuit from a raw bytestring. If you want to parse
 -- from a URL-compatible base 64 bytestring, consider using `parseB64`
--- instead
-parse :: ByteString -> Either ParseError Biscuit
+-- instead.
+-- The biscuit signature is checked with the provided public key before
+-- completely decoding blocks
+parse :: PublicKey -> ByteString -> Either ParseError Biscuit
 parse = parseBiscuit
 
 -- | Parse a biscuit from a URL-compatible base 64 encoded bytestring
-parseB64 :: ByteString -> Either ParseError Biscuit
-parseB64 = parse <=< first (const InvalidB64Encoding) . B64.decodeBase64
+parseB64 :: PublicKey -> ByteString -> Either ParseError Biscuit
+parseB64 pk = parse pk <=< first (const InvalidB64Encoding) . B64.decodeBase64
 
 -- | Parse a biscuit from an hex-encoded bytestring
-parseHex :: ByteString -> Either ParseError Biscuit
-parseHex = parse <=< maybeToRight InvalidHexEncoding . fromHex
+parseHex :: PublicKey -> ByteString -> Either ParseError Biscuit
+parseHex pk = parse pk <=< maybeToRight InvalidHexEncoding . fromHex
 
 -- | Serialize a biscuit to a binary format. If you intend to send
 -- the biscuit over a text channel, consider using `serializeB64` or
