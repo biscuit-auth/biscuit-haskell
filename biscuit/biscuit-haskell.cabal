@@ -108,7 +108,7 @@ test-suite biscuit-haskell-test
       Spec.Quasiquoter
       Spec.RevocationIds
       Spec.Roundtrip
-      Spec.Samples2
+      Spec.SampleReader
       Spec.ScopedExecutor
       Spec.Verification
       Paths_biscuit_haskell
@@ -117,6 +117,7 @@ test-suite biscuit-haskell-test
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       async
+    , aeson
     , attoparsec
     , base >=4.7 && <5
     , base16-bytestring ^>=0.1
