@@ -39,7 +39,9 @@ specs = testGroup "Serde roundtrips"
       ]
   ]
 
-type Roundtrip = (Biscuit -> ByteString, PublicKey -> ByteString -> Either ParseError Biscuit)
+type Roundtrip = ( OpenBiscuit -> ByteString
+                 , PublicKey -> ByteString -> Either ParseError Biscuit
+                 )
 
 roundtrip :: Roundtrip
           -> NonEmpty Block
@@ -52,7 +54,7 @@ roundtrip (s,p) i@(authority' :| blocks') = do
   let pk = toPublic sk
   init' <- mkBiscuit sk authority'
   final <- addBlocks blocks' init'
-  let serialized = s $ fromOpen final
+  let serialized = s final
       parsed = p pk serialized
       getBlock ((_, b), _, _) = b
       getBlocks b = getBlock <$> authority b :| blocks b

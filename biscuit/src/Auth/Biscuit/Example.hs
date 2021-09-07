@@ -22,7 +22,7 @@ creation = do
        |]
   biscuit <- mkBiscuit privateKey' authority
   let block1 = [block|check if current_time($time), $time < 2021-05-08T00:00:00Z;|]
-  newBiscuit <- fromOpen <$> addBlock block1 biscuit
+  newBiscuit <- addBlock block1 biscuit
   pure $ serializeB64 newBiscuit
 
 verification :: ByteString -> IO Bool

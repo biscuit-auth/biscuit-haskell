@@ -72,7 +72,8 @@ import           Auth.Biscuit.Datalog.AST      (Block, Verifier, bContext)
 import           Auth.Biscuit.Datalog.Executor (ExecutionError (..),
                                                 Limits (..), defaultLimits)
 import           Auth.Biscuit.Datalog.Parser   (block, verifier)
-import           Auth.Biscuit.Token            (Biscuit, OpenBiscuit,
+import           Auth.Biscuit.Token            (Biscuit, Biscuit',
+                                                BiscuitProof (..), OpenBiscuit,
                                                 ParseError (..), SealedBiscuit,
                                                 addBlock, fromOpen, fromSealed,
                                                 mkBiscuit, parseBiscuit,
@@ -193,14 +194,14 @@ parseHex pk = parse pk <=< maybeToRight InvalidHexEncoding . fromHex
 -- | Serialize a biscuit to a binary format. If you intend to send
 -- the biscuit over a text channel, consider using `serializeB64` or
 -- `serializeHex` instead
-serialize :: Biscuit -> ByteString
+serialize :: BiscuitProof p => Biscuit' p -> ByteString
 serialize = serializeBiscuit
 
 -- | Serialize a biscuit to URL-compatible base 64, as recommended by the spec
-serializeB64 :: Biscuit -> ByteString
+serializeB64 :: BiscuitProof p => Biscuit' p -> ByteString
 serializeB64 = B64.encodeBase64' . serialize
 
 -- | Serialize a biscuit to a hex (base 16) string. Be advised that the specs
 -- recommends base 64 instead.
-serializeHex :: Biscuit -> ByteString
+serializeHex :: BiscuitProof p => Biscuit' p -> ByteString
 serializeHex = Hex.encode . serialize

@@ -1,5 +1,6 @@
-{-# LANGUAGE NamedFieldPuns  #-}
-{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE NamedFieldPuns    #-}
+{-# LANGUAGE RecordWildCards   #-}
 {-|
   Module      : Auth.Biscuit.Token
   Copyright   : © Clément Delafargue, 2021
@@ -11,6 +12,7 @@ module Auth.Biscuit.Token
   ( Biscuit
   , OpenBiscuit
   , SealedBiscuit
+  , BiscuitProof (..)
 
 
   , ParseError (..)
@@ -111,10 +113,20 @@ addBlock block b@Biscuit{..} = do
            , proof = nextSk
            }
 
+class BiscuitProof a where
+  toPossibleProofs :: a -> Either Signature SecretKey
+
+instance BiscuitProof (Either Signature SecretKey) where
+  toPossibleProofs = id
+instance BiscuitProof Signature where
+  toPossibleProofs = Left
+instance BiscuitProof SecretKey where
+  toPossibleProofs = Right
+
 -- | Serialize a biscuit to a raw bytestring
-serializeBiscuit :: Biscuit -> ByteString
+serializeBiscuit :: BiscuitProof p => Biscuit' p -> ByteString
 serializeBiscuit Biscuit{..} =
-  let proofField = case proof of
+  let proofField = case toPossibleProofs proof of
           Left sig -> PB.ProofSignature $ PB.putField (convert sig)
           Right sk -> PB.ProofSecret $ PB.putField (convert sk)
    in PB.encodeBlockList PB.Biscuit
