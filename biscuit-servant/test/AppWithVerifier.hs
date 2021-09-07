@@ -46,21 +46,21 @@ server :: Server API
 server b =
   let nowFact = do
         now <- liftIO getCurrentTime
-        pure [verifier|now(#ambient, ${now});|]
+        pure [verifier|time(${now});|]
       handleAuth :: WithVerifier Handler x -> Handler x
       handleAuth =
           handleBiscuit b
         . withPriorityVerifierM nowFact
-        . withPriorityVerifier [verifier|allow if right(#authority, #admin);|]
-        . withFallbackVerifier [verifier|allow if right(#authority, #anon);|]
+        . withPriorityVerifier [verifier|allow if right("admin");|]
+        . withFallbackVerifier [verifier|allow if right("anon");|]
       handlers = handler1 :<|> handler2 :<|> handler3
    in hoistServer @ProtectedAPI Proxy handleAuth handlers
 
 handler1 :: H Int
-handler1 = withVerifier [verifier|allow if right(#authority, #one);|] $ pure 1
+handler1 = withVerifier [verifier|allow if right("one");|] $ pure 1
 
 handler2 :: Int -> H Int
-handler2 v = withVerifier [verifier|allow if right(#authority, #two, ${v});|] $ pure 2
+handler2 v = withVerifier [verifier|allow if right("two", ${v});|] $ pure 2
 
 handler3 :: H Int
 handler3 = withVerifier [verifier|deny if true;|] $ pure 3

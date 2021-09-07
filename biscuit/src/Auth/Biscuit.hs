@@ -36,6 +36,8 @@ module Auth.Biscuit
   , fromOpen
   , fromSealed
   , Biscuit
+  , OpenBiscuit
+  , SealedBiscuit
   , Block
   -- ** Parsing and serializing biscuits
   , serializeB64
@@ -70,7 +72,8 @@ import           Auth.Biscuit.Datalog.AST      (Block, Verifier, bContext)
 import           Auth.Biscuit.Datalog.Executor (ExecutionError (..),
                                                 Limits (..), defaultLimits)
 import           Auth.Biscuit.Datalog.Parser   (block, verifier)
-import           Auth.Biscuit.Token2           (Biscuit, ParseError (..),
+import           Auth.Biscuit.Token2           (Biscuit, OpenBiscuit,
+                                                ParseError (..), SealedBiscuit,
                                                 addBlock, fromOpen, fromSealed,
                                                 mkBiscuit, parseBiscuit,
                                                 serializeBiscuit, verifyBiscuit,
