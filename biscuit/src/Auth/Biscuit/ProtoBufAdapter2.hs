@@ -200,9 +200,8 @@ pbTimeToUtcTime = posixSecondsToUTCTime . fromIntegral
 
 pbToTerm :: Symbols -> PB.IDV2 -> Either String ID
 pbToTerm s = \case
-  PB.IDSymbol   f ->        Symbol  <$> getSymbol s (PB.getField f)
   PB.IDInteger  f -> pure $ LInteger $ fromIntegral $ PB.getField f
-  PB.IDString   f -> pure $ LString  $ PB.getField f
+  PB.IDString   f ->        LString <$> getSymbol s (PB.getField f)
   PB.IDDate     f -> pure $ LDate    $ pbTimeToUtcTime $ PB.getField f
   PB.IDBytes    f -> pure $ LBytes   $ PB.getField f
   PB.IDBool     f -> pure $ LBool    $ PB.getField f
@@ -212,9 +211,8 @@ pbToTerm s = \case
 termToPb :: ReverseSymbols -> ID -> PB.IDV2
 termToPb s = \case
   Variable n -> PB.IDVariable $ PB.putField $ getSymbolCode s n
-  Symbol   n -> PB.IDSymbol   $ PB.putField $ getSymbolCode s n
   LInteger v -> PB.IDInteger  $ PB.putField $ fromIntegral v
-  LString  v -> PB.IDString   $ PB.putField v
+  LString  v -> PB.IDString   $ PB.putField $ getSymbolCode s v
   LDate    v -> PB.IDDate     $ PB.putField $ round $ utcTimeToPOSIXSeconds v
   LBytes   v -> PB.IDBytes    $ PB.putField v
   LBool    v -> PB.IDBool     $ PB.putField v
@@ -224,9 +222,8 @@ termToPb s = \case
 
 pbToValue :: Symbols -> PB.IDV2 -> Either String Value
 pbToValue s = \case
-  PB.IDSymbol   f ->        Symbol  <$> getSymbol s (PB.getField f)
   PB.IDInteger  f -> pure $ LInteger $ fromIntegral $ PB.getField f
-  PB.IDString   f -> pure $ LString  $ PB.getField f
+  PB.IDString   f ->        LString <$> getSymbol s (PB.getField f)
   PB.IDDate     f -> pure $ LDate    $ pbTimeToUtcTime $ PB.getField f
   PB.IDBytes    f -> pure $ LBytes   $ PB.getField f
   PB.IDBool     f -> pure $ LBool    $ PB.getField f
@@ -235,9 +232,8 @@ pbToValue s = \case
 
 valueToPb :: ReverseSymbols -> Value -> PB.IDV2
 valueToPb s = \case
-  Symbol   n -> PB.IDSymbol  $ PB.putField $ getSymbolCode s n
   LInteger v -> PB.IDInteger $ PB.putField $ fromIntegral v
-  LString  v -> PB.IDString  $ PB.putField v
+  LString  v -> PB.IDString  $ PB.putField $ getSymbolCode s v
   LDate    v -> PB.IDDate    $ PB.putField $ round $ utcTimeToPOSIXSeconds v
   LBytes   v -> PB.IDBytes   $ PB.putField v
   LBool    v -> PB.IDBool    $ PB.putField v
@@ -248,9 +244,8 @@ valueToPb s = \case
 
 pbToSetValue :: Symbols -> PB.IDV2 -> Either String (ID' 'WithinSet 'InFact 'RegularString)
 pbToSetValue s = \case
-  PB.IDSymbol   f ->        Symbol   <$> getSymbol s (PB.getField f)
   PB.IDInteger  f -> pure $ LInteger $ fromIntegral $ PB.getField f
-  PB.IDString   f -> pure $ LString  $ PB.getField f
+  PB.IDString   f ->        LString  <$> getSymbol s (PB.getField f)
   PB.IDDate     f -> pure $ LDate    $ pbTimeToUtcTime $ PB.getField f
   PB.IDBytes    f -> pure $ LBytes   $ PB.getField f
   PB.IDBool     f -> pure $ LBool    $ PB.getField f
@@ -259,9 +254,8 @@ pbToSetValue s = \case
 
 setValueToPb :: ReverseSymbols -> ID' 'WithinSet 'InFact 'RegularString -> PB.IDV2
 setValueToPb s = \case
-  Symbol   n -> PB.IDSymbol  $ PB.putField $ getSymbolCode s n
   LInteger v -> PB.IDInteger $ PB.putField $ fromIntegral v
-  LString  v -> PB.IDString  $ PB.putField v
+  LString  v -> PB.IDString  $ PB.putField $ getSymbolCode s v
   LDate    v -> PB.IDDate    $ PB.putField $ round $ utcTimeToPOSIXSeconds v
   LBytes   v -> PB.IDBytes   $ PB.putField v
   LBool    v -> PB.IDBool    $ PB.putField v

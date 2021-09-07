@@ -85,7 +85,7 @@ type HasTermParsers inSet pof ctx =
   )
 type HasParsers pof ctx = HasTermParsers 'NotWithinSet pof ctx
 
--- | Parser for an identifier (predicate name, variable name, symbol name, …)
+-- | Parser for an identifier (predicate name, variable name, …)
 nameParser :: Parser Text
 nameParser = takeWhile1 $ inClass "a-zA-Z0-9_"
 
@@ -242,7 +242,6 @@ termParser = skipSpace *> choice
   [ Antiquote <$> ifPresent "slice" (Slice <$> (string "${" *> many1 letter <* char '}'))
   , Variable <$> ifPresent "var" (char '$' *> nameParser)
   , TermSet <$> parseSet @inSet @ctx
-  , Symbol <$> (char '#' *> nameParser)
   , LBytes <$> hexBsParser
   , LDate <$> rfc3339DateParser
   , LInteger <$> signed decimal

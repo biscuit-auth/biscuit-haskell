@@ -34,8 +34,8 @@ ifFalse = [QueryItem [] [EValue $ LBool False]]
 singleBlock :: TestTree
 singleBlock = testCase "Single block" $ do
   secret <- newSecret
-  biscuit <- fromOpen <$> mkBiscuit secret [block|right(#authority, "file1", #read);|]
-  res <- verifyBiscuit biscuit [verifier|check if right(#authority, "file1", #read);allow if true;|]
+  biscuit <- fromOpen <$> mkBiscuit secret [block|right("file1", "read");|]
+  res <- verifyBiscuit biscuit [verifier|check if right("file1", "read");allow if true;|]
   res @?= Right ifTrue
 
 errorAccumulation :: TestTree
@@ -60,25 +60,25 @@ errorAccumulation = testGroup "Error accumulation"
 unboundVarRule :: TestTree
 unboundVarRule = testCase "Rule with unbound variable" $ do
   secret <- newSecret
-  b1 <- mkBiscuit secret [block|check if operation(#ambient, #read);|]
-  b2 <- fromOpen <$> addBlock [block|operation($unbound, #read) <- operation($any1, $any2);|] b1
-  res <- verifyBiscuit b2 [verifier|operation(#ambient,#write);allow if true;|]
-  res @?= Left (Executor.ResultError $ Executor.FailedChecks $ pure [check|check if operation(#ambient, #read)|])
+  b1 <- mkBiscuit secret [block|check if operation("read");|]
+  b2 <- fromOpen <$> addBlock [block|operation($unbound, "read") <- operation($any1, $any2);|] b1
+  res <- verifyBiscuit b2 [verifier|operation("write");allow if true;|]
+  res @?= Left (Executor.ResultError $ Executor.FailedChecks $ pure [check|check if operation("read")|])
 
 symbolRestrictions :: TestTree
 symbolRestrictions = testGroup "Restricted symbols in blocks"
   [ testCase "In facts" $ do
       secret <- newSecret
-      b1 <- mkBiscuit secret [block|check if operation(#ambient, #read);|]
-      b2 <- fromOpen <$> addBlock [block|operation(#ambient, #read);|] b1
+      b1 <- mkBiscuit secret [block|check if operation("read");|]
+      b2 <- fromOpen <$> addBlock [block|operation("read");|] b1
       res <- verifyBiscuit b2 [verifier|allow if true;|]
-      res @?= Left (Executor.ResultError $ Executor.FailedChecks $ pure [check|check if operation(#ambient, #read)|])
+      res @?= Left (Executor.ResultError $ Executor.FailedChecks $ pure [check|check if operation("read")|])
   , testCase "In rules" $ do
       secret <- newSecret
-      b1 <- mkBiscuit secret [block|check if operation(#ambient, #read);|]
-      b2 <- fromOpen <$> addBlock [block|operation($ambient, #read) <- operation($ambient, $any);|] b1
-      res <- verifyBiscuit b2 [verifier|operation(#ambient,#write);allow if true;|]
-      res @?= Left (Executor.ResultError $ Executor.FailedChecks $ pure [check|check if operation(#ambient, #read)|])
+      b1 <- mkBiscuit secret [block|check if operation("read");|]
+      b2 <- fromOpen <$> addBlock [block|operation($ambient, "read") <- operation($ambient, $any);|] b1
+      res <- verifyBiscuit b2 [verifier|operation("write");allow if true;|]
+      res @?= Left (Executor.ResultError $ Executor.FailedChecks $ pure [check|check if operation("read")|])
   ]
 
 factsRestrictions :: TestTree
@@ -87,14 +87,14 @@ factsRestrictions =
    in testGroup "No facts or rules in blocks"
         [ testCase "No facts" $ do
             secret <- newSecret
-            b1 <- mkBiscuit secret [block|right(#read);|]
-            b2 <- fromOpen <$> addBlock [block|right(#write);|] b1
-            res <- verifyBiscuitWithLimits limits b2 [verifier|allow if right(#write);|]
+            b1 <- mkBiscuit secret [block|right("read");|]
+            b2 <- fromOpen <$> addBlock [block|right("write");|] b1
+            res <- verifyBiscuitWithLimits limits b2 [verifier|allow if right("write");|]
             res @?= Left (Executor.ResultError $ Executor.NoPoliciesMatched [])
         , testCase "No rules" $ do
             secret <- newSecret
-            b1 <- mkBiscuit secret [block|right(#read);|]
-            b2 <- fromOpen <$> addBlock [block|right(#write) <- right(#read);|] b1
-            res <- verifyBiscuitWithLimits limits b2 [verifier|allow if right(#write);|]
+            b1 <- mkBiscuit secret [block|right("read");|]
+            b2 <- fromOpen <$> addBlock [block|right("write") <- right("read");|] b1
+            res <- verifyBiscuitWithLimits limits b2 [verifier|allow if right("write");|]
             res @?= Left (Executor.ResultError $ Executor.NoPoliciesMatched [])
         ]

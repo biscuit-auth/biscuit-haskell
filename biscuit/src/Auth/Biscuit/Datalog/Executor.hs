@@ -161,7 +161,6 @@ applyBindings p@Predicate{terms} bindings =
   let newTerms = traverse replaceTerm terms
       replaceTerm :: ID -> Maybe Value
       replaceTerm (Variable n)  = Map.lookup n bindings
-      replaceTerm (Symbol t)    = Just $ Symbol t
       replaceTerm (LInteger t)  = Just $ LInteger t
       replaceTerm (LString t)   = Just $ LString t
       replaceTerm (LDate t)     = Just $ LDate t
@@ -205,7 +204,6 @@ getCandidateBindings facts predicates =
     in keepFacts <$> predicates
 
 isSame :: ID -> Value -> Bool
-isSame (Symbol t)   (Symbol t')   = t == t'
 isSame (LInteger t) (LInteger t') = t == t'
 isSame (LString t)  (LString t')  = t == t'
 isSame (LDate t)    (LDate t')    = t == t'
@@ -233,7 +231,6 @@ applyVariable :: Bindings
               -> Either String Value
 applyVariable bindings = \case
   Variable n -> maybeToRight "Unbound variable" $ bindings !? n
-  Symbol t   -> Right $ Symbol t
   LInteger t -> Right $ LInteger t
   LString t  -> Right $ LString t
   LDate t    -> Right $ LDate t
@@ -253,7 +250,6 @@ evalUnary Length _ = Left "Only strings, bytes and sets support `.length()`"
 
 evalBinary :: Limits -> Binary -> Value -> Value -> Either String Value
 -- eq / ord operations
-evalBinary _ Equal (Symbol s) (Symbol s')     = pure $ LBool (s == s')
 evalBinary _ Equal (LInteger i) (LInteger i') = pure $ LBool (i == i')
 evalBinary _ Equal (LString t) (LString t')   = pure $ LBool (t == t')
 evalBinary _ Equal (LDate t) (LDate t')       = pure $ LBool (t == t')

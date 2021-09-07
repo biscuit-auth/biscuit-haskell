@@ -111,9 +111,7 @@ type family SetType (inSet :: IsWithinSet) (ctx :: ParsedAs) where
 -- | This can be a value, a set of items, or a slice (a value that will be injected later),
 -- | depending on the context
 data ID' (inSet :: IsWithinSet) (pof :: PredicateOrFact) (ctx :: ParsedAs) =
-    Symbol Text
-  -- ^ A symbol (eg. @#authority@)
-  | Variable (VariableType inSet pof)
+    Variable (VariableType inSet pof)
   -- ^ A variable (eg. @$0@)
   | LInteger Int
   -- ^ An integer literal (eg. @42@)
@@ -159,7 +157,6 @@ instance  ( Lift (VariableType inSet pof)
           , Lift (SliceType ctx)
           )
          => Lift (ID' inSet pof ctx) where
-  lift (Symbol n)      = [| Symbol n |]
   lift (Variable n)    = [| Variable n |]
   lift (LInteger i)    = [| LInteger i |]
   lift (LString s)     = [| LString s |]
@@ -198,7 +195,6 @@ instance ToLiteralId UTCTime where
 toSetTerm :: Value
           -> Maybe (ID' 'WithinSet 'InFact 'RegularString)
 toSetTerm = \case
-  Symbol i -> Just $ Symbol i
   LInteger i -> Just $ LInteger i
   LString i -> Just $ LString i
   LDate i -> Just $ LDate i
@@ -213,7 +209,6 @@ renderId' :: (VariableType inSet pof -> Text)
           -> (SliceType ctx -> Text)
           -> ID' inSet pof ctx -> Text
 renderId' var set slice = \case
-  Symbol name   -> "#" <> name
   Variable name -> var name
   LInteger int  -> pack $ show int
   LString str   -> pack $ show str
@@ -238,7 +233,7 @@ renderFactId = renderId' absurd (renderSet absurd) absurd
 
 listSymbolsInTerm :: ID -> Set.Set Text
 listSymbolsInTerm = \case
-  Symbol name   -> Set.singleton name
+  LString  v    -> Set.singleton v
   Variable name -> Set.singleton name
   TermSet terms -> foldMap listSymbolsInSetValue terms
   Antiquote v   -> absurd v
@@ -246,7 +241,7 @@ listSymbolsInTerm = \case
 
 listSymbolsInValue :: Value -> Set.Set Text
 listSymbolsInValue = \case
-  Symbol name   -> Set.singleton name
+  LString  v    -> Set.singleton v
   TermSet terms -> foldMap listSymbolsInSetValue terms
   Variable  v   -> absurd v
   Antiquote v   -> absurd v
@@ -254,7 +249,7 @@ listSymbolsInValue = \case
 
 listSymbolsInSetValue :: SetValue -> Set.Set Text
 listSymbolsInSetValue = \case
-  Symbol name   -> Set.singleton name
+  LString  v    -> Set.singleton v
   TermSet   v   -> absurd v
   Variable  v   -> absurd v
   Antiquote v   -> absurd v

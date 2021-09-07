@@ -101,14 +101,13 @@ data PredicateV2 = PredicateV2
     deriving anyclass (Decode, Encode)
 
 data IDV2 =
-    IDSymbol (Required 1 (Value Int64))
-  | IDVariable (Required 2 (Value Int32))
-  | IDInteger (Required 3 (Value Int64))
-  | IDString (Required 4 (Value Text))
-  | IDDate (Required 5 (Value Int64))
-  | IDBytes (Required 6 (Value ByteString))
-  | IDBool (Required 7 (Value Bool))
-  | IDIDSet (Required 8 (Message IDSet))
+    IDVariable (Required 1 (Value Int32))
+  | IDInteger  (Required 2 (Value Int64))
+  | IDString   (Required 3 (Value Int64))
+  | IDDate     (Required 4 (Value Int64))
+  | IDBytes    (Required 5 (Value ByteString))
+  | IDBool     (Required 6 (Value Bool))
+  | IDIDSet    (Required 7 (Message IDSet))
     deriving stock (Generic, Show)
     deriving anyclass (Decode, Encode)
 

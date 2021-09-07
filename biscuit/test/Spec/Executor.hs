@@ -70,9 +70,7 @@ exprEval = do
     , ("\"test\".length()", LInteger 4)
     , ("hex:ababab.length()", LInteger 3)
     , ("[].length()", LInteger 0)
-    , ("[#test, #test].length()", LInteger 1)
-    , ("#toto == #toto", LBool True)
-    , ("#toto == #truc", LBool False)
+    , ("[\"test\", \"test\"].length()", LInteger 1)
     , ("1 == 1", LBool True)
     , ("2 == 1", LBool False)
     , ("\"toto\" == \"toto\"", LBool True)
@@ -123,14 +121,14 @@ exprEval = do
     , ("true || false", LBool True)
     , ("false || true", LBool True)
     , ("false || false", LBool False)
-    , ("[#test].contains([#test])", LBool True)
-    , ("[#test].contains(#test)", LBool True)
-    , ("[].contains(#test)", LBool False)
-    , ("[\"test\"].contains(#test)", LBool False)
-    , ("[#test].intersection([#test])", TermSet (Set.fromList [Symbol "test"]))
-    , ("[#test].intersection([\"test\"])", TermSet (Set.fromList []))
-    , ("[#test].union([#test])", TermSet (Set.fromList [Symbol "test"]))
-    , ("[#test].union([\"test\"])", TermSet (Set.fromList [Symbol "test", LString "test"]))
+    , ("[1].contains([1])", LBool True)
+    , ("[1].contains(1)", LBool True)
+    , ("[].contains(1)", LBool False)
+    , ("[\"test\"].contains(2)", LBool False)
+    , ("[1].intersection([1])", TermSet (Set.fromList [LInteger 1]))
+    , ("[1].intersection([\"test\"])", TermSet (Set.fromList []))
+    , ("[1].union([1])", TermSet (Set.fromList [LInteger 1]))
+    , ("[1].union([\"test\"])", TermSet (Set.fromList [LInteger 1, LString "test"]))
     ]
 
 exprEvalError :: TestTree
@@ -151,19 +149,19 @@ rulesWithConstraints :: TestTree
 rulesWithConstraints = testCase "Rule with constraints" $
   let world = World
         { rules = Set.fromList
-                   [ [rule|valid_date("file1") <- time(#ambient, $0), resource(#ambient, "file1"), $0 <= 2019-12-04T09:46:41+00:00|]
-                   , [rule|valid_date("file2") <- time(#ambient, $0), resource(#ambient, "file2"), $0 <= 2010-12-04T09:46:41+00:00|]
+                   [ [rule|valid_date("file1") <- time($0), resource("file1"), $0 <= 2019-12-04T09:46:41+00:00|]
+                   , [rule|valid_date("file2") <- time($0), resource("file2"), $0 <= 2010-12-04T09:46:41+00:00|]
                    ]
         , facts = Set.fromList
-                   [ [fact|time(#ambient, 2019-12-04T01:00:00Z)|]
-                   , [fact|resource(#ambient, "file1")|]
-                   , [fact|resource(#ambient, "file2")|]
+                   [ [fact|time(2019-12-04T01:00:00Z)|]
+                   , [fact|resource("file1")|]
+                   , [fact|resource("file2")|]
                    ]
         }
    in runFactGeneration defaultLimits world @?= Right (Set.fromList
-        [ [fact|time(#ambient, 2019-12-04T01:00:00Z)|]
-        , [fact|resource(#ambient, "file1")|]
-        , [fact|resource(#ambient, "file2")|]
+        [ [fact|time(2019-12-04T01:00:00Z)|]
+        , [fact|resource("file1")|]
+        , [fact|resource("file2")|]
         , [fact|valid_date("file1")|]
         ])
 
@@ -171,14 +169,14 @@ ruleHeadWithNoVars :: TestTree
 ruleHeadWithNoVars = testCase "Rule head with no variables" $
   let world = World
         { rules = Set.fromList
-                   [ [rule|operation(#authority,#read) <- test($yolo, #nothing)|]
+                   [ [rule|operation("authority", "read") <- test($yolo, "nothing")|]
                    ]
         , facts = Set.fromList
-                   [ [fact|test(#whatever, #notNothing)|]
+                   [ [fact|test("whatever", "notNothing")|]
                    ]
         }
    in runFactGeneration defaultLimits world @?= Right (Set.fromList
-        [ [fact|test(#whatever, #notNothing)|]
+        [ [fact|test("whatever", "notNothing")|]
         ])
 
 limits :: TestTree

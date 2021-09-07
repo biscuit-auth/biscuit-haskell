@@ -61,22 +61,22 @@ roundtrip (s,p) i@(authority' :| blocks') = do
 singleBlock :: Roundtrip -> TestTree
 singleBlock r = testCase "Single block" $ roundtrip r $ pure
   [block|
-    right(#authority, "file1", #read);
-    right(#authority, "file2", #read);
-    right(#authority, "file1", #write);
+    right("file1", "read");
+    right("file2", "read");
+    right("file1", "write");
   |]
 
 multipleBlocks :: Roundtrip -> TestTree
 multipleBlocks r = testCase "Multiple block" $ roundtrip r $
     [block|
-      right(#authority, "file1", #read);
-      right(#authority, "file2", #read);
-      right(#authority, "file1", #write);
+      right("file1", "read");
+      right("file2", "read");
+      right("file1", "write");
     |] :|
   [ [block|
-      valid_date("file1") <- time(#ambient, $0), resource(#ambient, "file1"), $0 <= 2030-12-31T12:59:59+00:00;
-      valid_date($1) <- time(#ambient, $0), resource(#ambient, $1), $0 <= 1999-12-31T12:59:59+00:00, !["file1"].contains($1);
-      check if valid_date($0), resource(#ambient, $0);
+      valid_date("file1") <- time($0), resource("file1"), $0 <= 2030-12-31T12:59:59+00:00;
+      valid_date($1) <- time($0), resource($1), $0 <= 1999-12-31T12:59:59+00:00, !["file1"].contains($1);
+      check if valid_date($0), resource($0);
     |]
   , [block|
       check if true;
@@ -101,24 +101,23 @@ multipleBlocks r = testCase "Multiple block" $ roundtrip r $
       check if 2020-12-04T09:46:41+00:00 >= 2019-12-04T09:46:41+00:00;
       check if 2020-12-04T09:46:41+00:00 >= 2020-12-04T09:46:41+00:00;
       check if 2020-12-04T09:46:41+00:00 == 2020-12-04T09:46:41+00:00;
-      check if #abc == #abc;
       check if hex:12ab == hex:12ab;
       check if [1, 2].contains(2);
       check if [2019-12-04T09:46:41+00:00, 2020-12-04T09:46:41+00:00].contains(2020-12-04T09:46:41+00:00);
       check if [false, true].contains(true);
       check if ["abc", "def"].contains("abc");
       check if [hex:12ab, hex:34de].contains(hex:34de);
-      check if [#hello, #world].contains(#hello);
+      check if ["hello", "world"].contains("hello");
     |]
   , [block|
       check if
-        resource(#ambient, $0),
-        operation(#ambient, #read),
-        right(#authority, $0, #read);
+        resource($0),
+        operation("read"),
+        right($0, "read");
     |]
   , [block|
-      check if resource(#ambient, "file1");
-      check if time(#ambient, $date), $date <= 2018-12-20T00:00:00+00:00;
+      check if resource("file1");
+      check if time($date), $date <= 2018-12-20T00:00:00+00:00;
     |]
   ]
 
