@@ -10,7 +10,7 @@
   Maintainer  : clement@delafargue.name
   Conversion functions between biscuit components and protobuf-encoded components
 -}
-module Auth.Biscuit.ProtoBufAdapter2
+module Auth.Biscuit.ProtoBufAdapter
   ( Symbols
   , extractSymbols
   , commonSymbols
@@ -36,7 +36,7 @@ import           Data.Void                (absurd)
 
 import qualified Auth.Biscuit.Crypto      as Crypto
 import           Auth.Biscuit.Datalog.AST
-import qualified Auth.Biscuit.Proto2      as PB
+import qualified Auth.Biscuit.Proto       as PB
 import           Auth.Biscuit.Utils       (maybeToRight)
 
 -- | A map to get symbol names from symbol ids

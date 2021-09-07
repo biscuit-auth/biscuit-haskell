@@ -14,7 +14,7 @@ import           Auth.Biscuit        hiding (Biscuit, ParseError, PublicKey,
                                       addBlock, mkBiscuit, parse, publicKey,
                                       serialize)
 import           Auth.Biscuit.Crypto
-import           Auth.Biscuit.Token2
+import           Auth.Biscuit.Token
 
 serialize = serializeBiscuit
 parse  = parseBiscuit
@@ -55,7 +55,7 @@ roundtrip (s,p) i@(authority' :| blocks') = do
   let serialized = s $ fromOpen final
       parsed = p pk serialized
       getBlock ((_, b), _, _) = b
-      getBlocks Biscuit{..} = getBlock <$> authority :| blocks
+      getBlocks b = getBlock <$> authority b :| blocks b
   getBlocks <$> parsed @?= Right i
 
 singleBlock :: Roundtrip -> TestTree

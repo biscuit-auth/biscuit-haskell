@@ -34,15 +34,16 @@ import           Auth.Biscuit
 import           Auth.Biscuit.Datalog.Executor (ExecutionError (..),
                                                 ResultError (..))
 import           Auth.Biscuit.Datalog.Parser   (blockParser, verifierParser)
-import           Auth.Biscuit.Token2           (Biscuit' (..))
+import           Auth.Biscuit.Token
 
+getB :: ParsedSignedBlock -> Block
 getB ((_, b), _, _) = b
 
 getAuthority :: Biscuit -> Block
-getAuthority Biscuit{authority} = getB authority
+getAuthority = getB . authority
 
 getBlocks :: Biscuit -> [Block]
-getBlocks Biscuit{blocks} = getB <$> blocks
+getBlocks = fmap getB . blocks
 
 instance FromJSON SecretKey where
   parseJSON = withText "Ed25519 secret key" $ \t -> do

@@ -7,32 +7,34 @@
   Maintainer  : clement@delafargue.name
   Module defining the main biscuit-related operations
 -}
-module Auth.Biscuit.Token2
-  -- ( Biscuit (..)
-  -- , ValidBiscuit
-  -- , validBiscuit
-  -- , checkedPublicKey
-  -- , ParseError (..)
-  -- , VerificationError (..)
-  -- , ExistingBlock
-  -- , mkBiscuit
-  -- , addBlock
-  -- , checkBiscuitSignature
-  -- , parseBiscuit
-  -- , serializeBiscuit
-  -- , verifyBiscuit
-  -- , verifyBiscuitWithLimits
-  -- , verifyValidBiscuit
-  -- , verifyValidBiscuitWithLimits
+module Auth.Biscuit.Token
+  ( Biscuit
+  , OpenBiscuit
+  , SealedBiscuit
 
-  -- , BlockWithRevocationId
-  -- , getRevocationIds
-  -- ) where
-      where
+
+  , ParseError (..)
+  , ExistingBlock
+  , ParsedSignedBlock
+  , mkBiscuit
+  , addBlock
+  , parseBiscuit
+  , serializeBiscuit
+  , verifyBiscuit
+  , verifyBiscuitWithLimits
+  , fromOpen
+  , fromSealed
+
+  , Biscuit'
+  , rootKeyId
+  , symbols
+  , authority
+  , blocks
+  , proof
+  , getRevocationIds
+  ) where
 
 import           Control.Monad                       (when)
--- import           Control.Monad.Except                (runExceptT, throwError)
--- import           Control.Monad.IO.Class              (liftIO)
 import           Data.Bifunctor                      (first)
 import           Data.ByteString                     (ByteString)
 import           Data.List.NonEmpty                  (NonEmpty ((:|)))
@@ -43,8 +45,8 @@ import           Auth.Biscuit.Datalog.AST            (Block, Query, Verifier)
 import           Auth.Biscuit.Datalog.Executor       (ExecutionError, Limits,
                                                       defaultLimits)
 import           Auth.Biscuit.Datalog.ScopedExecutor (runVerifierWithLimits)
-import qualified Auth.Biscuit.Proto2                 as PB
-import           Auth.Biscuit.ProtoBufAdapter2       (Symbols, blockToPb,
+import qualified Auth.Biscuit.Proto                  as PB
+import           Auth.Biscuit.ProtoBufAdapter        (Symbols, blockToPb,
                                                       commonSymbols,
                                                       extractSymbols, pbToBlock,
                                                       pbToProof,
@@ -195,7 +197,7 @@ getRevocationIds Biscuit{authority, blocks} =
 --
 -- - make sure the biscuit has been signed with the private key associated to the public key
 -- - make sure the biscuit is valid for the provided verifier
-verifyBiscuitWithLimits :: Limits -> Biscuit -> Verifier -> IO (Either ExecutionError Query)
+verifyBiscuitWithLimits :: Limits -> Biscuit' a -> Verifier -> IO (Either ExecutionError Query)
 verifyBiscuitWithLimits l Biscuit{..} verifier =
   let toBlockWithRevocationId ((_, block), sig, _) = (block, convert sig)
    in runVerifierWithLimits l
@@ -204,5 +206,5 @@ verifyBiscuitWithLimits l Biscuit{..} verifier =
         verifier
 
 -- | Same as `verifyBiscuitWithLimits`, but with default limits (1ms timeout, max 1000 facts, max 100 iterations)
-verifyBiscuit :: Biscuit -> Verifier -> IO (Either ExecutionError Query)
+verifyBiscuit :: Biscuit' a -> Verifier -> IO (Either ExecutionError Query)
 verifyBiscuit = verifyBiscuitWithLimits defaultLimits

@@ -32,10 +32,9 @@ library
       Auth.Biscuit.Datalog.ScopedExecutor
       Auth.Biscuit.Example
       Auth.Biscuit.Proto
-      Auth.Biscuit.Proto2
-      Auth.Biscuit.ProtoBufAdapter2
+      Auth.Biscuit.ProtoBufAdapter
       Auth.Biscuit.Timer
-      Auth.Biscuit.Token2
+      Auth.Biscuit.Token
   other-modules:
       Paths_biscuit_haskell
   autogen-modules:

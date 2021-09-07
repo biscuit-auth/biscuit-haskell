@@ -72,7 +72,7 @@ import           Auth.Biscuit.Datalog.AST      (Block, Verifier, bContext)
 import           Auth.Biscuit.Datalog.Executor (ExecutionError (..),
                                                 Limits (..), defaultLimits)
 import           Auth.Biscuit.Datalog.Parser   (block, verifier)
-import           Auth.Biscuit.Token2           (Biscuit, OpenBiscuit,
+import           Auth.Biscuit.Token            (Biscuit, OpenBiscuit,
                                                 ParseError (..), SealedBiscuit,
                                                 addBlock, fromOpen, fromSealed,
                                                 mkBiscuit, parseBiscuit,
