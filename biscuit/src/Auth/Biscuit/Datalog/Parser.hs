@@ -29,6 +29,7 @@ module Auth.Biscuit.Datalog.Parser
   , predicateParser
   , ruleParser
   , termParser
+  , blockParser
   , verifierParser
   , HasParsers
   , HasTermParsers
@@ -316,7 +317,7 @@ verifierParser :: ( HasParsers 'InPredicate ctx
                   )
                => Parser (Verifier' ctx)
 verifierParser = do
-  elems <- many1 (skipSpace *> verifierElementParser)
+  elems <- many' (skipSpace *> verifierElementParser)
   pure $ foldMap elementToVerifier elems
 
 blockParser :: ( HasParsers 'InPredicate ctx
@@ -325,7 +326,7 @@ blockParser :: ( HasParsers 'InPredicate ctx
                )
             => Parser (Block' ctx)
 blockParser = do
-  elems <- many1 (skipSpace *> blockElementParser)
+  elems <- many' (skipSpace *> blockElementParser)
   pure $ foldMap elementToBlock elems
 
 policyParser :: HasParsers 'InPredicate ctx => Parser (Policy' ctx)
