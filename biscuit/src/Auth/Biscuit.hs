@@ -38,6 +38,8 @@ module Auth.Biscuit
   , Biscuit
   , OpenBiscuit
   , SealedBiscuit
+  , Biscuit'
+  , BiscuitProof
   , Block
   -- ** Parsing and serializing biscuits
   , serializeB64

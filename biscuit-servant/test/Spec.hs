@@ -52,8 +52,8 @@ main = do
 appSecretKey :: SecretKey
 appSecretKey = fromJust . parseSecretKeyHex $ "c2b7507af4f849fd028d0f7e90b04a4e74d9727b358fca18b65beffd86c47209"
 
-toText :: OpenBiscuit -> Text
-toText = decodeUtf8 . serializeB64 . fromOpen
+toText :: BiscuitProof p => Biscuit' p -> Text
+toText = decodeUtf8 . serializeB64
 
 mkAdminBiscuit :: SecretKey -> IO OpenBiscuit
 mkAdminBiscuit sk = mkBiscuit sk [block|right("admin");|]
