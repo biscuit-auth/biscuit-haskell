@@ -31,10 +31,11 @@ module Auth.Biscuit.Servant
   , withPriorityVerifier
   , withFallbackVerifierM
   , withPriorityVerifierM
+
+  , module Biscuit
   ) where
 
-import           Auth.Biscuit                     (Biscuit, PublicKey, Verifier,
-                                                   parseB64, verifyBiscuit)
+import           Auth.Biscuit                     as Biscuit
 import           Control.Applicative              (liftA2)
 import           Control.Monad.Except             (MonadError, throwError)
 import           Control.Monad.IO.Class           (MonadIO, liftIO)
@@ -174,7 +175,7 @@ import           Servant.Server.Experimental.Auth
 -- be performed separately with either 'checkBiscuit' (for simple
 -- use-cases) or 'handleBiscuit' (for more complex use-cases).
 type RequireBiscuit = AuthProtect "biscuit"
-type instance AuthServerData RequireBiscuit = Biscuit
+type instance AuthServerData RequireBiscuit = Biscuit OpenOrSealed 'Checked
 
 -- | Wrapper for a servant handler, equipped with a biscuit 'Verifier'
 -- that will be used to authorize the request. If the authorization
@@ -183,7 +184,7 @@ type instance AuthServerData RequireBiscuit = Biscuit
 -- a 'ReaderT' 'Biscuit'.
 data WithVerifier m a
   = WithVerifier
-  { handler_  :: ReaderT Biscuit m a
+  { handler_  :: ReaderT (Biscuit OpenOrSealed 'Checked) m a
   -- ^ the wrapped handler, in a 'ReaderT' to give easy access to the biscuit
   , verifier_ :: m Verifier
   -- ^ the 'Verifier' associated to the handler
@@ -265,7 +266,10 @@ withPriorityVerifierM newV h@WithVerifier{verifier_} =
 --
 -- If you need to perform effects to compute the verifier (eg. to get the current date,
 -- or to query a database), you can use 'withVerifierM' instead.
-withVerifier :: Applicative m => Verifier -> ReaderT Biscuit m a -> WithVerifier m a
+withVerifier :: Applicative m
+             => Verifier
+             -> ReaderT (Biscuit OpenOrSealed 'Checked) m a
+             -> WithVerifier m a
 withVerifier v handler_ =
   WithVerifier
     { handler_
@@ -280,7 +284,9 @@ withVerifier v handler_ =
 --
 -- Here, the 'Verifier' can be computed effectfully. If you don't need to perform effects,
 -- you can use 'withVerifier' instead.
-withVerifierM :: m Verifier -> ReaderT Biscuit m a -> WithVerifier m a
+withVerifierM :: m Verifier
+              -> ReaderT (Biscuit OpenOrSealed 'Checked) m a
+              -> WithVerifier m a
 withVerifierM verifier_ handler_ =
   WithVerifier
     { handler_
@@ -316,7 +322,9 @@ withVerifierM_ v = withVerifierM v . lift
 --
 -- This function can be used together with 'withFallbackVerifier' or 'withPriorityVerifier'
 -- to apply policies on several handlers at the same time (with 'hoistServer' for instance).
-noVerifier :: Applicative m => ReaderT Biscuit m a -> WithVerifier m a
+noVerifier :: Applicative m
+           => ReaderT (Biscuit OpenOrSealed 'Checked) m a
+           -> WithVerifier m a
 noVerifier = withVerifier mempty
 
 -- | Wraps an existing handler block, attaching an empty 'Verifier'. The handler can be
@@ -333,7 +341,9 @@ noVerifier_ = noVerifier . lift
 -- - the biscuit is b64-encoded
 -- - prefixed with the @Bearer @ string
 -- - in the @Authorization@ header
-extractBiscuit :: PublicKey -> Request -> Either String Biscuit
+extractBiscuit :: PublicKey
+               -> Request
+               -> Either String (Biscuit OpenOrSealed 'Checked)
 extractBiscuit pk req = do
   let note e = maybe (Left e) Right
   authHeader <- note "Missing Authorization header" . lookup "Authorization" $ requestHeaders req
@@ -343,7 +353,8 @@ extractBiscuit pk req = do
 -- | Servant authorization handler. This extracts the biscuit from the request,
 -- checks its signature (but not the datalog part) and returns a 'Biscuit'
 -- upon success.
-authHandler :: PublicKey -> AuthHandler Request Biscuit
+authHandler :: PublicKey
+            -> AuthHandler Request (Biscuit OpenOrSealed 'Checked)
 authHandler publicKey = mkAuthHandler handler
   where
     authError s = err401 { errBody = LBS.fromStrict (C8.pack s) }
@@ -354,7 +365,8 @@ authHandler publicKey = mkAuthHandler handler
 
 -- | Helper function generating a servant context containing the authorization
 -- handler.
-genBiscuitCtx :: PublicKey -> Context '[AuthHandler Request Biscuit]
+genBiscuitCtx :: PublicKey
+              -> Context '[AuthHandler Request (Biscuit OpenOrSealed 'Checked)]
 genBiscuitCtx pk = authHandler pk :. EmptyContext
 
 -- | Given a 'Biscuit' (provided by the servant authorization mechanism),
@@ -368,7 +380,7 @@ genBiscuitCtx pk = authHandler pk :. EmptyContext
 -- (on endpoints), 'withFallbackVerifier' and 'withPriorityVerifier' (on API sub-trees)
 -- and 'handleBiscuit' (on the whole API).
 checkBiscuit :: (MonadIO m, MonadError ServerError m)
-             => Biscuit
+             => Biscuit OpenOrSealed 'Checked
              -> Verifier
              -> m a
              -> m a
@@ -390,7 +402,7 @@ checkBiscuit vb v h = do
 -- 'withFallbackVerifier' and 'withPriorityVerifier' (on API sub-trees) and 'handleBiscuit'
 -- (on the whole API).
 checkBiscuitM :: (MonadIO m, MonadError ServerError m)
-              => Biscuit
+              => Biscuit OpenOrSealed 'Checked
               -> m Verifier
               -> m a
               -> m a
@@ -408,7 +420,7 @@ checkBiscuitM vb mv h = do
 -- For simpler use cases, consider using 'checkBiscuit' instead, which works on regular
 -- servant handlers.
 handleBiscuit :: (MonadIO m, MonadError ServerError m)
-              => Biscuit
+              => Biscuit OpenOrSealed 'Checked
               -> WithVerifier m a
               -> m a
 handleBiscuit b WithVerifier{verifier_, handler_} =

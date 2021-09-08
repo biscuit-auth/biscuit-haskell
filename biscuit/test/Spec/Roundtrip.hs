@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds         #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes       #-}
 {-# LANGUAGE RecordWildCards   #-}
@@ -39,8 +40,8 @@ specs = testGroup "Serde roundtrips"
       ]
   ]
 
-type Roundtrip = ( OpenBiscuit -> ByteString
-                 , PublicKey -> ByteString -> Either ParseError Biscuit
+type Roundtrip = ( Biscuit Open 'Checked -> ByteString
+                 , PublicKey -> ByteString -> Either ParseError (Biscuit OpenOrSealed 'Checked)
                  )
 
 roundtrip :: Roundtrip

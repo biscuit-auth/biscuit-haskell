@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds          #-}
 {-# LANGUAGE DeriveAnyClass     #-}
 {-# LANGUAGE DeriveGeneric      #-}
 {-# LANGUAGE DeriveTraversable  #-}
@@ -39,10 +40,10 @@ import           Auth.Biscuit.Token
 getB :: ParsedSignedBlock -> Block
 getB ((_, b), _, _) = b
 
-getAuthority :: Biscuit -> Block
+getAuthority :: Biscuit OpenOrSealed 'Checked -> Block
 getAuthority = getB . authority
 
-getBlocks :: Biscuit -> [Block]
+getBlocks :: Biscuit OpenOrSealed 'Checked -> [Block]
 getBlocks = fmap getB . blocks
 
 instance FromJSON SecretKey where
@@ -151,7 +152,7 @@ readSamplesFile = do
   readBiscuits f
 
 checkTokenBlocks :: (String -> IO ())
-                 -> Biscuit
+                 -> Biscuit OpenOrSealed 'Checked
                  -> NonEmpty BlockDesc
                  -> Assertion
 checkTokenBlocks step b blockDescs = do
@@ -202,7 +203,7 @@ execErrorToRust (Left e) = Err $ case e of
   ResultError (DenyRuleMatched cs q) -> ["todo"]
 
 processValidation :: (String -> IO ())
-                  -> Biscuit
+                  -> Biscuit OpenOrSealed 'Checked
                   -> (String, ValidationR)
                   -> Assertion
 processValidation step b (name, ValidationR{..}) = do

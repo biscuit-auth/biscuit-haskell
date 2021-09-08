@@ -52,21 +52,21 @@ main = do
 appSecretKey :: SecretKey
 appSecretKey = fromJust . parseSecretKeyHex $ "c2b7507af4f849fd028d0f7e90b04a4e74d9727b358fca18b65beffd86c47209"
 
-toText :: BiscuitProof p => Biscuit' p -> Text
+toText :: BiscuitProof p => Biscuit p 'Checked -> Text
 toText = decodeUtf8 . serializeB64
 
-mkAdminBiscuit :: SecretKey -> IO OpenBiscuit
+mkAdminBiscuit :: SecretKey -> IO (Biscuit Open 'Checked)
 mkAdminBiscuit sk = mkBiscuit sk [block|right("admin");|]
 
-mkAnonBiscuit :: SecretKey -> IO OpenBiscuit
+mkAnonBiscuit :: SecretKey -> IO (Biscuit Open 'Checked)
 mkAnonBiscuit sk = mkBiscuit sk [block|right("anon");|]
 
-mkE1Biscuit :: SecretKey -> IO OpenBiscuit
+mkE1Biscuit :: SecretKey -> IO (Biscuit Open 'Checked)
 mkE1Biscuit sk = mkBiscuit sk [block|right("one");|]
 
-mkE2Biscuit :: Int -> SecretKey -> IO OpenBiscuit
+mkE2Biscuit :: Int -> SecretKey -> IO (Biscuit Open 'Checked)
 mkE2Biscuit v sk = mkBiscuit sk [block|right("two", ${v});|]
 
-addTtl :: UTCTime -> OpenBiscuit -> IO OpenBiscuit
+addTtl :: UTCTime -> (Biscuit Open 'Checked) -> IO (Biscuit Open 'Checked)
 addTtl expiration =
   addBlock [block|check if time($now), $now < ${expiration};|]

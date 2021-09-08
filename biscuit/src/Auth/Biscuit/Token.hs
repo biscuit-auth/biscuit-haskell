@@ -13,14 +13,16 @@
 -}
 module Auth.Biscuit.Token
   ( Biscuit
-  , OpenBiscuit
-  , SealedBiscuit
   , BiscuitProof (..)
 
 
   , ParseError (..)
+  , ProofChecked (..)
   , ExistingBlock
   , ParsedSignedBlock
+  , OpenOrSealed
+  , Open
+  , Sealed
   , mkBiscuit
   , addBlock
   , addBlockUnchecked
@@ -32,8 +34,6 @@ module Auth.Biscuit.Token
   , fromOpen
   , fromSealed
 
-  , Biscuit'
-  , UncheckedBiscuit'
   , rootKeyId
   , symbols
   , authority
@@ -68,8 +68,15 @@ type ParsedSignedBlock = (ExistingBlock, Signature, PublicKey)
 
 data ProofChecked = Checked | NotChecked
 
+data OpenOrSealed
+  = SealedProof Signature
+  | OpenProof SecretKey
+
+newtype Open = Open SecretKey
+newtype Sealed = Sealed Signature
+
 -- | A parsed biscuit
-data Biscuit'' (check :: ProofChecked) proof
+data Biscuit proof (check :: ProofChecked)
   = Biscuit
   { rootKeyId :: Maybe Int
   -- ^ an optional identifier for the expected public key
@@ -85,25 +92,18 @@ data Biscuit'' (check :: ProofChecked) proof
   }
   deriving (Eq, Show)
 
-type Biscuit' = Biscuit'' 'Checked
-type UncheckedBiscuit' = Biscuit'' 'NotChecked
-type Biscuit = Biscuit' (Either Signature SecretKey)
-type UncheckedBiscuit = UncheckedBiscuit' (Either Signature SecretKey)
-type SealedBiscuit = Biscuit' Signature
-type OpenBiscuit = Biscuit' SecretKey
+fromOpen :: Biscuit Open 'Checked -> Biscuit OpenOrSealed 'Checked
+fromOpen b@Biscuit{proof = Open p } = b { proof = OpenProof p }
 
-fromOpen :: OpenBiscuit -> Biscuit
-fromOpen b@Biscuit{proof} = b { proof = Right proof }
-
-fromSealed :: SealedBiscuit -> Biscuit
-fromSealed b@Biscuit{proof} = b { proof = Left proof }
+fromSealed :: Biscuit Sealed 'Checked -> Biscuit OpenOrSealed 'Checked
+fromSealed b@Biscuit{proof = Sealed p } = b { proof = SealedProof p }
 
 toParsedSignedBlock :: Block -> SignedBlock -> ParsedSignedBlock
 toParsedSignedBlock block (serializedBlock, sig, pk) = ((serializedBlock, block), sig, pk)
 
 
 -- | Create a new biscuit with the provided authority block
-mkBiscuit :: SecretKey -> Block -> IO OpenBiscuit
+mkBiscuit :: SecretKey -> Block -> IO (Biscuit Open 'Checked)
 mkBiscuit sk authority = do
   let (authoritySymbols, authoritySerialized) = PB.encodeBlock <$> blockToPb commonSymbols authority
   (signedBlock, nextSk) <- signBlock sk authoritySerialized
@@ -111,45 +111,49 @@ mkBiscuit sk authority = do
                , authority = toParsedSignedBlock authority signedBlock
                , blocks = []
                , symbols = commonSymbols <> authoritySymbols
-               , proof = nextSk
+               , proof = Open nextSk
                }
 
 -- | Add a block to an existing biscuit.
-addBlock :: Block -> OpenBiscuit -> IO OpenBiscuit
+addBlock :: Block
+         -> Biscuit Open 'Checked
+         -> IO (Biscuit Open 'Checked)
 addBlock block b@Biscuit{..} = do
   let (blockSymbols, blockSerialized) = PB.encodeBlock <$> blockToPb symbols block
-  (signedBlock, nextSk) <- signBlock proof blockSerialized
+      Open p = proof
+  (signedBlock, nextSk) <- signBlock p blockSerialized
   pure $ b { blocks = blocks <> [toParsedSignedBlock block signedBlock]
            , symbols = symbols <> blockSymbols
-           , proof = nextSk
+           , proof = Open nextSk
            }
 
 -- | Add a block to an existing biscuit, without checking its signatures first
-addBlockUnchecked :: Block -> Biscuit'' 'NotChecked SecretKey -> IO (Biscuit'' 'NotChecked SecretKey)
+addBlockUnchecked :: Block -> Biscuit Open 'NotChecked -> IO (Biscuit Open 'NotChecked)
 addBlockUnchecked block b@Biscuit{..} = do
   let (blockSymbols, blockSerialized) = PB.encodeBlock <$> blockToPb symbols block
-  (signedBlock, nextSk) <- signBlock proof blockSerialized
+      Open p = proof
+  (signedBlock, nextSk) <- signBlock p blockSerialized
   pure $ b { blocks = blocks <> [toParsedSignedBlock block signedBlock]
            , symbols = symbols <> blockSymbols
-           , proof = nextSk
+           , proof = Open nextSk
            }
 
 class BiscuitProof a where
-  toPossibleProofs :: a -> Either Signature SecretKey
+  toPossibleProofs :: a -> OpenOrSealed
 
-instance BiscuitProof (Either Signature SecretKey) where
+instance BiscuitProof OpenOrSealed where
   toPossibleProofs = id
-instance BiscuitProof Signature where
-  toPossibleProofs = Left
-instance BiscuitProof SecretKey where
-  toPossibleProofs = Right
+instance BiscuitProof Sealed where
+  toPossibleProofs (Sealed sig) = SealedProof sig
+instance BiscuitProof Open where
+  toPossibleProofs (Open sk) = OpenProof sk
 
 -- | Serialize a biscuit to a raw bytestring
-serializeBiscuit :: BiscuitProof p => Biscuit' p -> ByteString
+serializeBiscuit :: BiscuitProof p => Biscuit p 'Checked -> ByteString
 serializeBiscuit Biscuit{..} =
   let proofField = case toPossibleProofs proof of
-          Left sig -> PB.ProofSignature $ PB.putField (convert sig)
-          Right sk -> PB.ProofSecret $ PB.putField (convert sk)
+          SealedProof sig -> PB.ProofSignature $ PB.putField (convert sig)
+          OpenProof   sk  -> PB.ProofSecret $ PB.putField (convert sk)
    in PB.encodeBlockList PB.Biscuit
         { rootKeyId = PB.putField Nothing -- TODO
         , authority = PB.putField $ toPBSignedBlock authority
@@ -185,7 +189,7 @@ data BiscuitWrapper
   = BiscuitWrapper
   { wAuthority :: SignedBlock
   , wBlocks    :: [SignedBlock]
-  , wProof     :: Either Signature SecretKey
+  , wProof     :: OpenOrSealed
   , wRootKeyId :: Maybe Int
   }
 
@@ -200,7 +204,9 @@ parseBiscuitWrapper bs = do
   pure $ BiscuitWrapper
     { wAuthority = signedAuthority
     , wBlocks = signedBlocks
-    , wProof  = proof
+    , wProof  = either SealedProof
+                       OpenProof
+                       proof
     , wRootKeyId = rootKeyId
     , ..
     }
@@ -220,7 +226,7 @@ parseBlocks BiscuitWrapper{..} = do
   blocks    <- traverse (rawSignedBlockToParsedSignedBlock symbols) rawBlocks
   pure (symbols, authority :| blocks)
 
-parseBiscuitUnchecked :: ByteString -> Either ParseError UncheckedBiscuit
+parseBiscuitUnchecked :: ByteString -> Either ParseError (Biscuit OpenOrSealed 'NotChecked)
 parseBiscuitUnchecked bs = do
   w@BiscuitWrapper{..} <- parseBiscuitWrapper bs
   (symbols, authority :| blocks) <- parseBlocks w
@@ -229,14 +235,14 @@ parseBiscuitUnchecked bs = do
                  , .. }
 
 -- | Parse a biscuit from a raw bytestring, first checking its signature.
-parseBiscuit :: PublicKey -> ByteString -> Either ParseError Biscuit
+parseBiscuit :: PublicKey -> ByteString -> Either ParseError (Biscuit OpenOrSealed 'Checked)
 parseBiscuit pk bs = do
   w@BiscuitWrapper{..} <- parseBiscuitWrapper bs
   let allBlocks = NE.reverse $ wAuthority :| wBlocks
   let blocksResult = verifyBlocks allBlocks pk
   let proofResult = case wProof of
-        Left  sig -> verifySignatureProof sig (NE.head allBlocks)
-        Right sk  -> verifySecretProof sk     (NE.head allBlocks)
+        SealedProof sig -> verifySignatureProof sig (NE.head allBlocks)
+        OpenProof   sk  -> verifySecretProof sk     (NE.head allBlocks)
   when (not blocksResult || not proofResult) $ Left InvalidSignatures
 
   (symbols, authority :| blocks) <- parseBlocks w
@@ -251,7 +257,7 @@ rawSignedBlockToParsedSignedBlock s ((payload, pbBlock), sig, pk) = do
   block   <- first (InvalidProtobuf False) $ pbToBlock s pbBlock
   pure ((payload, block), sig, pk)
 
-getRevocationIds :: Biscuit -> NonEmpty ByteString
+getRevocationIds :: Biscuit OpenOrSealed 'Checked -> NonEmpty ByteString
 getRevocationIds Biscuit{authority, blocks} =
   let allBlocks = authority :| blocks
       getRevocationId (_, sig, _) = convert sig
@@ -262,7 +268,7 @@ getRevocationIds Biscuit{authority, blocks} =
 --
 -- - make sure the biscuit has been signed with the private key associated to the public key
 -- - make sure the biscuit is valid for the provided verifier
-verifyBiscuitWithLimits :: Limits -> Biscuit' a -> Verifier -> IO (Either ExecutionError Query)
+verifyBiscuitWithLimits :: Limits -> Biscuit a 'Checked -> Verifier -> IO (Either ExecutionError Query)
 verifyBiscuitWithLimits l Biscuit{..} verifier =
   let toBlockWithRevocationId ((_, block), sig, _) = (block, convert sig)
    in runVerifierWithLimits l
@@ -271,5 +277,5 @@ verifyBiscuitWithLimits l Biscuit{..} verifier =
         verifier
 
 -- | Same as `verifyBiscuitWithLimits`, but with default limits (1ms timeout, max 1000 facts, max 100 iterations)
-verifyBiscuit :: Biscuit' a -> Verifier -> IO (Either ExecutionError Query)
+verifyBiscuit :: Biscuit a 'Checked -> Verifier -> IO (Either ExecutionError Query)
 verifyBiscuit = verifyBiscuitWithLimits defaultLimits
