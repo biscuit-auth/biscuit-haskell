@@ -1,6 +1,9 @@
+{-# LANGUAGE DataKinds         #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE KindSignatures    #-}
 {-# LANGUAGE NamedFieldPuns    #-}
 {-# LANGUAGE RecordWildCards   #-}
+{- HLINT ignore "Reduce duplication" -}
 {-|
   Module      : Auth.Biscuit.Token
   Copyright   : © Clément Delafargue, 2021
@@ -20,7 +23,9 @@ module Auth.Biscuit.Token
   , ParsedSignedBlock
   , mkBiscuit
   , addBlock
+  , addBlockUnchecked
   , parseBiscuit
+  , parseBiscuitUnchecked
   , serializeBiscuit
   , verifyBiscuit
   , verifyBiscuitWithLimits
@@ -28,6 +33,7 @@ module Auth.Biscuit.Token
   , fromSealed
 
   , Biscuit'
+  , UncheckedBiscuit'
   , rootKeyId
   , symbols
   , authority
@@ -53,7 +59,6 @@ import           Auth.Biscuit.ProtoBufAdapter        (Symbols, blockToPb,
                                                       extractSymbols, pbToBlock,
                                                       pbToProof,
                                                       pbToSignedBlock)
--- import           Auth.Biscuit.Utils                  (maybeToRight)
 
 -- | Protobuf serialization does not have a guaranteed deterministic behaviour,
 -- so we need to keep the initial serialized payload around in order to compute
@@ -61,8 +66,10 @@ import           Auth.Biscuit.ProtoBufAdapter        (Symbols, blockToPb,
 type ExistingBlock = (ByteString, Block)
 type ParsedSignedBlock = (ExistingBlock, Signature, PublicKey)
 
+data ProofChecked = Checked | NotChecked
+
 -- | A parsed biscuit
-data Biscuit' proof
+data Biscuit'' (check :: ProofChecked) proof
   = Biscuit
   { rootKeyId :: Maybe Int
   -- ^ an optional identifier for the expected public key
@@ -78,7 +85,10 @@ data Biscuit' proof
   }
   deriving (Eq, Show)
 
+type Biscuit' = Biscuit'' 'Checked
+type UncheckedBiscuit' = Biscuit'' 'NotChecked
 type Biscuit = Biscuit' (Either Signature SecretKey)
+type UncheckedBiscuit = UncheckedBiscuit' (Either Signature SecretKey)
 type SealedBiscuit = Biscuit' Signature
 type OpenBiscuit = Biscuit' SecretKey
 
@@ -103,9 +113,20 @@ mkBiscuit sk authority = do
                , symbols = commonSymbols <> authoritySymbols
                , proof = nextSk
                }
+
 -- | Add a block to an existing biscuit.
 addBlock :: Block -> OpenBiscuit -> IO OpenBiscuit
 addBlock block b@Biscuit{..} = do
+  let (blockSymbols, blockSerialized) = PB.encodeBlock <$> blockToPb symbols block
+  (signedBlock, nextSk) <- signBlock proof blockSerialized
+  pure $ b { blocks = blocks <> [toParsedSignedBlock block signedBlock]
+           , symbols = symbols <> blockSymbols
+           , proof = nextSk
+           }
+
+-- | Add a block to an existing biscuit, without checking its signatures first
+addBlockUnchecked :: Block -> Biscuit'' 'NotChecked SecretKey -> IO (Biscuit'' 'NotChecked SecretKey)
+addBlockUnchecked block b@Biscuit{..} = do
   let (blockSymbols, blockSerialized) = PB.encodeBlock <$> blockToPb symbols block
   (signedBlock, nextSk) <- signBlock proof blockSerialized
   pure $ b { blocks = blocks <> [toParsedSignedBlock block signedBlock]
@@ -160,36 +181,68 @@ data ParseError
   -- ^ The signatures were invalid
   deriving (Eq, Show)
 
--- | Parse a biscuit from a raw bytestring, first checking its signature.
-parseBiscuit :: PublicKey -> ByteString -> Either ParseError Biscuit
-parseBiscuit pk bs = do
+data BiscuitWrapper
+  = BiscuitWrapper
+  { wAuthority :: SignedBlock
+  , wBlocks    :: [SignedBlock]
+  , wProof     :: Either Signature SecretKey
+  , wRootKeyId :: Maybe Int
+  }
+
+parseBiscuitWrapper :: ByteString -> Either ParseError BiscuitWrapper
+parseBiscuitWrapper bs = do
   blockList <- first (InvalidProtobufSer True) $ PB.decodeBlockList bs
   let rootKeyId = fromEnum <$> PB.getField (PB.rootKeyId blockList)
   signedAuthority <- first (InvalidProtobuf True) $ pbToSignedBlock $ PB.getField $ PB.authority blockList
   signedBlocks    <- first (InvalidProtobuf True) $ traverse pbToSignedBlock $ PB.getField $ PB.blocks blockList
   proof         <- first (InvalidProtobuf True) $ pbToProof $ PB.getField $ PB.proof blockList
 
-  let allBlocks = NE.reverse $ signedAuthority :| signedBlocks
-  let blocksResult = verifyBlocks allBlocks pk
-  let proofResult = case proof of
-        Left  sig -> verifySignatureProof sig (NE.head allBlocks)
-        Right sk  -> verifySecretProof sk     (NE.head allBlocks)
-  when (not blocksResult || not proofResult) $ Left InvalidSignatures
+  pure $ BiscuitWrapper
+    { wAuthority = signedAuthority
+    , wBlocks = signedBlocks
+    , wProof  = proof
+    , wRootKeyId = rootKeyId
+    , ..
+    }
 
-  -- now parsing the block contents
+parseBlocks :: BiscuitWrapper -> Either ParseError (Symbols, NonEmpty ParsedSignedBlock)
+parseBlocks BiscuitWrapper{..} = do
   let toRawSignedBlock (payload, sig, pk') = do
         pbBlock <- first (InvalidProtobufSer False) $ PB.decodeBlock payload
         pure ((payload, pbBlock), sig, pk')
 
-  rawAuthority <- toRawSignedBlock signedAuthority
-  rawBlocks    <- traverse toRawSignedBlock signedBlocks
+  rawAuthority <- toRawSignedBlock wAuthority
+  rawBlocks    <- traverse toRawSignedBlock wBlocks
 
   let symbols = extractSymbols commonSymbols $ (\((_, p), _, _) -> p) <$> rawAuthority : rawBlocks
 
   authority <- rawSignedBlockToParsedSignedBlock symbols rawAuthority
   blocks    <- traverse (rawSignedBlockToParsedSignedBlock symbols) rawBlocks
+  pure (symbols, authority :| blocks)
 
-  pure Biscuit{..}
+parseBiscuitUnchecked :: ByteString -> Either ParseError UncheckedBiscuit
+parseBiscuitUnchecked bs = do
+  w@BiscuitWrapper{..} <- parseBiscuitWrapper bs
+  (symbols, authority :| blocks) <- parseBlocks w
+  pure $ Biscuit { rootKeyId = wRootKeyId
+                 , proof = wProof
+                 , .. }
+
+-- | Parse a biscuit from a raw bytestring, first checking its signature.
+parseBiscuit :: PublicKey -> ByteString -> Either ParseError Biscuit
+parseBiscuit pk bs = do
+  w@BiscuitWrapper{..} <- parseBiscuitWrapper bs
+  let allBlocks = NE.reverse $ wAuthority :| wBlocks
+  let blocksResult = verifyBlocks allBlocks pk
+  let proofResult = case wProof of
+        Left  sig -> verifySignatureProof sig (NE.head allBlocks)
+        Right sk  -> verifySecretProof sk     (NE.head allBlocks)
+  when (not blocksResult || not proofResult) $ Left InvalidSignatures
+
+  (symbols, authority :| blocks) <- parseBlocks w
+  pure $ Biscuit { rootKeyId = wRootKeyId
+                 , proof = wProof
+                 , .. }
 
 rawSignedBlockToParsedSignedBlock :: Symbols
                                   -> ((ByteString, PB.Block), Signature, PublicKey)
