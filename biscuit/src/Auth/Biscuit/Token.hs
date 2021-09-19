@@ -17,12 +17,13 @@ module Auth.Biscuit.Token
 
 
   , ParseError (..)
-  , ProofChecked (..)
   , ExistingBlock
   , ParsedSignedBlock
   , OpenOrSealed
   , Open
   , Sealed
+  , Checked
+  , NotChecked
   , mkBiscuit
   , addBlock
   , addBlockUnchecked
@@ -40,6 +41,7 @@ module Auth.Biscuit.Token
   , blocks
   , proof
   , getRevocationIds
+  , getCheckedBiscuitSignature
   ) where
 
 import           Control.Monad                       (when)
@@ -66,8 +68,6 @@ import           Auth.Biscuit.ProtoBufAdapter        (Symbols, blockToPb,
 type ExistingBlock = (ByteString, Block)
 type ParsedSignedBlock = (ExistingBlock, Signature, PublicKey)
 
-data ProofChecked = Checked | NotChecked
-
 data OpenOrSealed
   = SealedProof Signature
   | OpenProof SecretKey
@@ -75,27 +75,31 @@ data OpenOrSealed
 newtype Open = Open SecretKey
 newtype Sealed = Sealed Signature
 
+newtype Checked = Checked PublicKey
+data NotChecked = NotChecked
+
 -- | A parsed biscuit
-data Biscuit proof (check :: ProofChecked)
+data Biscuit proof check
   = Biscuit
-  { rootKeyId :: Maybe Int
+  { rootKeyId  :: Maybe Int
   -- ^ an optional identifier for the expected public key
-  , symbols   :: Symbols
+  , symbols    :: Symbols
   -- ^ The symbols already defined in the contained blocks
-  , authority :: ParsedSignedBlock
+  , authority  :: ParsedSignedBlock
   -- ^ The authority block, along with the associated public key. The public key
   -- is kept around since it's embedded in the serialized biscuit, but should not
   -- be used for verification. An externally provided public key should be used instead.
-  , blocks    :: [ParsedSignedBlock]
+  , blocks     :: [ParsedSignedBlock]
   -- ^ The extra blocks, along with the public keys needed
-  , proof     :: proof
+  , proof      :: proof
+  , proofCheck :: check
   }
   deriving (Eq, Show)
 
-fromOpen :: Biscuit Open 'Checked -> Biscuit OpenOrSealed 'Checked
+fromOpen :: Biscuit Open Checked -> Biscuit OpenOrSealed Checked
 fromOpen b@Biscuit{proof = Open p } = b { proof = OpenProof p }
 
-fromSealed :: Biscuit Sealed 'Checked -> Biscuit OpenOrSealed 'Checked
+fromSealed :: Biscuit Sealed Checked -> Biscuit OpenOrSealed Checked
 fromSealed b@Biscuit{proof = Sealed p } = b { proof = SealedProof p }
 
 toParsedSignedBlock :: Block -> SignedBlock -> ParsedSignedBlock
@@ -103,7 +107,7 @@ toParsedSignedBlock block (serializedBlock, sig, pk) = ((serializedBlock, block)
 
 
 -- | Create a new biscuit with the provided authority block
-mkBiscuit :: SecretKey -> Block -> IO (Biscuit Open 'Checked)
+mkBiscuit :: SecretKey -> Block -> IO (Biscuit Open Checked)
 mkBiscuit sk authority = do
   let (authoritySymbols, authoritySerialized) = PB.encodeBlock <$> blockToPb commonSymbols authority
   (signedBlock, nextSk) <- signBlock sk authoritySerialized
@@ -112,12 +116,13 @@ mkBiscuit sk authority = do
                , blocks = []
                , symbols = commonSymbols <> authoritySymbols
                , proof = Open nextSk
+               , proofCheck = Checked $ toPublic sk
                }
 
 -- | Add a block to an existing biscuit.
 addBlock :: Block
-         -> Biscuit Open 'Checked
-         -> IO (Biscuit Open 'Checked)
+         -> Biscuit Open Checked
+         -> IO (Biscuit Open Checked)
 addBlock block b@Biscuit{..} = do
   let (blockSymbols, blockSerialized) = PB.encodeBlock <$> blockToPb symbols block
       Open p = proof
@@ -128,7 +133,7 @@ addBlock block b@Biscuit{..} = do
            }
 
 -- | Add a block to an existing biscuit, without checking its signatures first
-addBlockUnchecked :: Block -> Biscuit Open 'NotChecked -> IO (Biscuit Open 'NotChecked)
+addBlockUnchecked :: Block -> Biscuit Open NotChecked -> IO (Biscuit Open NotChecked)
 addBlockUnchecked block b@Biscuit{..} = do
   let (blockSymbols, blockSerialized) = PB.encodeBlock <$> blockToPb symbols block
       Open p = proof
@@ -149,7 +154,7 @@ instance BiscuitProof Open where
   toPossibleProofs (Open sk) = OpenProof sk
 
 -- | Serialize a biscuit to a raw bytestring
-serializeBiscuit :: BiscuitProof p => Biscuit p 'Checked -> ByteString
+serializeBiscuit :: BiscuitProof p => Biscuit p Checked -> ByteString
 serializeBiscuit Biscuit{..} =
   let proofField = case toPossibleProofs proof of
           SealedProof sig -> PB.ProofSignature $ PB.putField (convert sig)
@@ -226,16 +231,17 @@ parseBlocks BiscuitWrapper{..} = do
   blocks    <- traverse (rawSignedBlockToParsedSignedBlock symbols) rawBlocks
   pure (symbols, authority :| blocks)
 
-parseBiscuitUnchecked :: ByteString -> Either ParseError (Biscuit OpenOrSealed 'NotChecked)
+parseBiscuitUnchecked :: ByteString -> Either ParseError (Biscuit OpenOrSealed NotChecked)
 parseBiscuitUnchecked bs = do
   w@BiscuitWrapper{..} <- parseBiscuitWrapper bs
   (symbols, authority :| blocks) <- parseBlocks w
   pure $ Biscuit { rootKeyId = wRootKeyId
                  , proof = wProof
+                 , proofCheck = NotChecked
                  , .. }
 
 -- | Parse a biscuit from a raw bytestring, first checking its signature.
-parseBiscuit :: PublicKey -> ByteString -> Either ParseError (Biscuit OpenOrSealed 'Checked)
+parseBiscuit :: PublicKey -> ByteString -> Either ParseError (Biscuit OpenOrSealed Checked)
 parseBiscuit pk bs = do
   w@BiscuitWrapper{..} <- parseBiscuitWrapper bs
   let allBlocks = NE.reverse $ wAuthority :| wBlocks
@@ -248,6 +254,7 @@ parseBiscuit pk bs = do
   (symbols, authority :| blocks) <- parseBlocks w
   pure $ Biscuit { rootKeyId = wRootKeyId
                  , proof = wProof
+                 , proofCheck = Checked pk
                  , .. }
 
 rawSignedBlockToParsedSignedBlock :: Symbols
@@ -257,7 +264,7 @@ rawSignedBlockToParsedSignedBlock s ((payload, pbBlock), sig, pk) = do
   block   <- first (InvalidProtobuf False) $ pbToBlock s pbBlock
   pure ((payload, block), sig, pk)
 
-getRevocationIds :: Biscuit OpenOrSealed 'Checked -> NonEmpty ByteString
+getRevocationIds :: Biscuit OpenOrSealed Checked -> NonEmpty ByteString
 getRevocationIds Biscuit{authority, blocks} =
   let allBlocks = authority :| blocks
       getRevocationId (_, sig, _) = convert sig
@@ -268,7 +275,7 @@ getRevocationIds Biscuit{authority, blocks} =
 --
 -- - make sure the biscuit has been signed with the private key associated to the public key
 -- - make sure the biscuit is valid for the provided verifier
-verifyBiscuitWithLimits :: Limits -> Biscuit a 'Checked -> Verifier -> IO (Either ExecutionError Query)
+verifyBiscuitWithLimits :: Limits -> Biscuit a Checked -> Verifier -> IO (Either ExecutionError Query)
 verifyBiscuitWithLimits l Biscuit{..} verifier =
   let toBlockWithRevocationId ((_, block), sig, _) = (block, convert sig)
    in runVerifierWithLimits l
@@ -277,5 +284,11 @@ verifyBiscuitWithLimits l Biscuit{..} verifier =
         verifier
 
 -- | Same as `verifyBiscuitWithLimits`, but with default limits (1ms timeout, max 1000 facts, max 100 iterations)
-verifyBiscuit :: Biscuit a 'Checked -> Verifier -> IO (Either ExecutionError Query)
+verifyBiscuit :: Biscuit a Checked -> Verifier -> IO (Either ExecutionError Query)
 verifyBiscuit = verifyBiscuitWithLimits defaultLimits
+
+-- | Retrieve the `PublicKey` which was used to verify the `Biscuit` signatures
+getCheckedBiscuitSignature :: Biscuit a Checked -> PublicKey
+getCheckedBiscuitSignature Biscuit{proofCheck} =
+  let Checked pk = proofCheck
+   in pk

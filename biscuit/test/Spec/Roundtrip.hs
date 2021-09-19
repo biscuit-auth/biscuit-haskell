@@ -40,8 +40,8 @@ specs = testGroup "Serde roundtrips"
       ]
   ]
 
-type Roundtrip = ( Biscuit Open 'Checked -> ByteString
-                 , PublicKey -> ByteString -> Either ParseError (Biscuit OpenOrSealed 'Checked)
+type Roundtrip = ( Biscuit Open Checked -> ByteString
+                 , PublicKey -> ByteString -> Either ParseError (Biscuit OpenOrSealed Checked)
                  )
 
 roundtrip :: Roundtrip

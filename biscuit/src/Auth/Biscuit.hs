@@ -38,9 +38,10 @@ module Auth.Biscuit
   , fromSealed
   , Biscuit
   , OpenOrSealed
-  , ProofChecked (..)
   , Open
   , Sealed
+  , Checked
+  , NotChecked
   , BiscuitProof
   , Block
   -- ** Parsing and serializing biscuits
@@ -61,6 +62,10 @@ module Auth.Biscuit
   , ExecutionError (..)
   , Limits (..)
 
+  -- * Retrieving information from a biscuit
+  , getRevocationIds
+  , getCheckedBiscuitSignature
+
   , fromHex
   ) where
 
@@ -77,12 +82,14 @@ import           Auth.Biscuit.Datalog.Executor (ExecutionError (..),
                                                 Limits (..), defaultLimits)
 import           Auth.Biscuit.Datalog.Parser   (block, verifier)
 import           Auth.Biscuit.Token            (Biscuit, BiscuitProof (..),
-                                                Open, OpenOrSealed,
-                                                ParseError (..),
-                                                ProofChecked (..), Sealed,
-                                                addBlock, fromOpen, fromSealed,
-                                                mkBiscuit, parseBiscuit,
-                                                serializeBiscuit, verifyBiscuit,
+                                                Checked, NotChecked, Open,
+                                                OpenOrSealed, ParseError (..),
+                                                Sealed, addBlock, fromOpen,
+                                                fromSealed,
+                                                getCheckedBiscuitSignature,
+                                                getRevocationIds, mkBiscuit,
+                                                parseBiscuit, serializeBiscuit,
+                                                verifyBiscuit,
                                                 verifyBiscuitWithLimits)
 import           Auth.Biscuit.Utils            (maybeToRight)
 
@@ -185,28 +192,28 @@ parsePublicKeyHex = parsePublicKey <=< fromHex
 -- instead.
 -- The biscuit signature is checked with the provided public key before
 -- completely decoding blocks
-parse :: PublicKey -> ByteString -> Either ParseError (Biscuit OpenOrSealed 'Checked)
+parse :: PublicKey -> ByteString -> Either ParseError (Biscuit OpenOrSealed Checked)
 parse = parseBiscuit
 
 -- | Parse a biscuit from a URL-compatible base 64 encoded bytestring
-parseB64 :: PublicKey -> ByteString -> Either ParseError (Biscuit OpenOrSealed 'Checked)
+parseB64 :: PublicKey -> ByteString -> Either ParseError (Biscuit OpenOrSealed Checked)
 parseB64 pk = parse pk <=< first (const InvalidB64Encoding) . B64.decodeBase64
 
 -- | Parse a biscuit from an hex-encoded bytestring
-parseHex :: PublicKey -> ByteString -> Either ParseError (Biscuit OpenOrSealed 'Checked)
+parseHex :: PublicKey -> ByteString -> Either ParseError (Biscuit OpenOrSealed Checked)
 parseHex pk = parse pk <=< maybeToRight InvalidHexEncoding . fromHex
 
 -- | Serialize a biscuit to a binary format. If you intend to send
 -- the biscuit over a text channel, consider using `serializeB64` or
 -- `serializeHex` instead
-serialize :: BiscuitProof p => Biscuit p 'Checked -> ByteString
+serialize :: BiscuitProof p => Biscuit p Checked -> ByteString
 serialize = serializeBiscuit
 
 -- | Serialize a biscuit to URL-compatible base 64, as recommended by the spec
-serializeB64 :: BiscuitProof p => Biscuit p 'Checked -> ByteString
+serializeB64 :: BiscuitProof p => Biscuit p Checked -> ByteString
 serializeB64 = B64.encodeBase64' . serialize
 
 -- | Serialize a biscuit to a hex (base 16) string. Be advised that the specs
 -- recommends base 64 instead.
-serializeHex :: BiscuitProof p => Biscuit p 'Checked -> ByteString
+serializeHex :: BiscuitProof p => Biscuit p Checked -> ByteString
 serializeHex = Hex.encode . serialize
