@@ -6,6 +6,7 @@ module Spec.Verification
   ) where
 
 import           Data.List.NonEmpty            (NonEmpty ((:|)))
+import qualified Data.Set                      as Set
 import           Test.Tasty
 import           Test.Tasty.HUnit
 
@@ -14,7 +15,7 @@ import           Auth.Biscuit.Datalog.AST      (Expression' (..), Query,
                                                 QueryItem' (..), Term' (..))
 import           Auth.Biscuit.Datalog.Executor (ResultError (..))
 import qualified Auth.Biscuit.Datalog.Executor as Executor
-import           Auth.Biscuit.Datalog.Parser   (check)
+import           Auth.Biscuit.Datalog.Parser   (check, fact)
 
 specs :: TestTree
 specs = testGroup "Datalog checks"
@@ -36,7 +37,7 @@ singleBlock = testCase "Single block" $ do
   secret <- newSecret
   biscuit <- mkBiscuit secret [block|right("file1", "read");|]
   res <- verifyBiscuit biscuit [verifier|check if right("file1", "read");allow if true;|]
-  res @?= Right ifTrue
+  matchedAllowQuery <$> res @?= Right ifTrue
 
 errorAccumulation :: TestTree
 errorAccumulation = testGroup "Error accumulation"

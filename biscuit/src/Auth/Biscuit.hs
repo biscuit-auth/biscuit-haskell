@@ -60,6 +60,7 @@ module Auth.Biscuit
   , Verifier
   , ParseError (..)
   , ExecutionError (..)
+  , VerificationSuccess (..)
   , Limits (..)
 
   -- * Retrieving information from a biscuit
@@ -69,29 +70,34 @@ module Auth.Biscuit
   , fromHex
   ) where
 
-import           Control.Monad                 ((<=<))
-import           Data.Bifunctor                (first)
-import           Data.ByteString               (ByteString)
-import qualified Data.ByteString.Base16        as Hex
-import qualified Data.ByteString.Base64.URL    as B64
-import           Data.Text                     (Text)
+import           Control.Monad                       ((<=<))
+import           Data.Bifunctor                      (first)
+import           Data.ByteString                     (ByteString)
+import qualified Data.ByteString.Base16              as Hex
+import qualified Data.ByteString.Base64.URL          as B64
+import           Data.Text                           (Text)
 
 import           Auth.Biscuit.Crypto
-import           Auth.Biscuit.Datalog.AST      (Block, Verifier, bContext)
-import           Auth.Biscuit.Datalog.Executor (ExecutionError (..),
-                                                Limits (..), defaultLimits)
-import           Auth.Biscuit.Datalog.Parser   (block, verifier)
-import           Auth.Biscuit.Token            (Biscuit, BiscuitProof (..),
-                                                Checked, NotChecked, Open,
-                                                OpenOrSealed, ParseError (..),
-                                                Sealed, addBlock, fromOpen,
-                                                fromSealed,
-                                                getCheckedBiscuitSignature,
-                                                getRevocationIds, mkBiscuit,
-                                                parseBiscuit, serializeBiscuit,
-                                                verifyBiscuit,
-                                                verifyBiscuitWithLimits)
-import           Auth.Biscuit.Utils            (maybeToRight)
+import           Auth.Biscuit.Datalog.AST            (Block, Verifier, bContext)
+import           Auth.Biscuit.Datalog.Executor       (ExecutionError (..),
+                                                      Limits (..),
+                                                      defaultLimits)
+import           Auth.Biscuit.Datalog.Parser         (block, verifier)
+import           Auth.Biscuit.Datalog.ScopedExecutor (VerificationSuccess (..))
+import           Auth.Biscuit.Token                  (Biscuit,
+                                                      BiscuitProof (..),
+                                                      Checked, NotChecked, Open,
+                                                      OpenOrSealed,
+                                                      ParseError (..), Sealed,
+                                                      addBlock, fromOpen,
+                                                      fromSealed,
+                                                      getCheckedBiscuitSignature,
+                                                      getRevocationIds,
+                                                      mkBiscuit, parseBiscuit,
+                                                      serializeBiscuit,
+                                                      verifyBiscuit,
+                                                      verifyBiscuitWithLimits)
+import           Auth.Biscuit.Utils                  (maybeToRight)
 
 
 -- $biscuitOverview

@@ -51,10 +51,11 @@ import           Data.List.NonEmpty                  (NonEmpty ((:|)))
 import qualified Data.List.NonEmpty                  as NE
 --
 import           Auth.Biscuit.Crypto
-import           Auth.Biscuit.Datalog.AST            (Block, Query, Verifier)
+import           Auth.Biscuit.Datalog.AST            (Block, Verifier)
 import           Auth.Biscuit.Datalog.Executor       (ExecutionError, Limits,
                                                       defaultLimits)
-import           Auth.Biscuit.Datalog.ScopedExecutor (runVerifierWithLimits)
+import           Auth.Biscuit.Datalog.ScopedExecutor (VerificationSuccess,
+                                                      runVerifierWithLimits)
 import qualified Auth.Biscuit.Proto                  as PB
 import           Auth.Biscuit.ProtoBufAdapter        (Symbols, blockToPb,
                                                       commonSymbols,
@@ -275,7 +276,7 @@ getRevocationIds Biscuit{authority, blocks} =
 --
 -- - make sure the biscuit has been signed with the private key associated to the public key
 -- - make sure the biscuit is valid for the provided verifier
-verifyBiscuitWithLimits :: Limits -> Biscuit a Checked -> Verifier -> IO (Either ExecutionError Query)
+verifyBiscuitWithLimits :: Limits -> Biscuit a Checked -> Verifier -> IO (Either ExecutionError VerificationSuccess)
 verifyBiscuitWithLimits l Biscuit{..} verifier =
   let toBlockWithRevocationId ((_, block), sig, _) = (block, convert sig)
    in runVerifierWithLimits l
@@ -284,7 +285,7 @@ verifyBiscuitWithLimits l Biscuit{..} verifier =
         verifier
 
 -- | Same as `verifyBiscuitWithLimits`, but with default limits (1ms timeout, max 1000 facts, max 100 iterations)
-verifyBiscuit :: Biscuit a Checked -> Verifier -> IO (Either ExecutionError Query)
+verifyBiscuit :: Biscuit a Checked -> Verifier -> IO (Either ExecutionError VerificationSuccess)
 verifyBiscuit = verifyBiscuitWithLimits defaultLimits
 
 -- | Retrieve the `PublicKey` which was used to verify the `Biscuit` signatures
