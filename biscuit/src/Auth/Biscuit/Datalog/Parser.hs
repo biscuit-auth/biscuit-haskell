@@ -237,7 +237,7 @@ rfc3339DateParser =
 termParser :: forall inSet pof ctx
             . ( HasTermParsers inSet pof ctx
               )
-           => Parser (ID' inSet pof ctx)
+           => Parser (Term' inSet pof ctx)
 termParser = skipSpace *> choice
   [ Antiquote <$> ifPresent "slice" (Slice <$> (string "${" *> many1 letter <* char '}'))
   , Variable <$> ifPresent "var" (char '$' *> nameParser)

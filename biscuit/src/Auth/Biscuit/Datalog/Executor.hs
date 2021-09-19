@@ -151,7 +151,7 @@ extractVariables :: [Predicate] -> Set Name
 extractVariables predicates =
   let keepVariable = \case
         Variable name -> Just name
-        _ -> Nothing
+        _             -> Nothing
       extractVariables' Predicate{terms} = mapMaybe keepVariable terms
    in Set.fromList $ extractVariables' =<< predicates
 
@@ -159,7 +159,7 @@ extractVariables predicates =
 applyBindings :: Predicate -> Bindings -> Maybe Fact
 applyBindings p@Predicate{terms} bindings =
   let newTerms = traverse replaceTerm terms
-      replaceTerm :: ID -> Maybe Value
+      replaceTerm :: Term -> Maybe Value
       replaceTerm (Variable n)  = Map.lookup n bindings
       replaceTerm (LInteger t)  = Just $ LInteger t
       replaceTerm (LString t)   = Just $ LString t
@@ -203,7 +203,7 @@ getCandidateBindings facts predicates =
        keepFacts p = mapMaybeS (factMatchesPredicate p) facts
     in keepFacts <$> predicates
 
-isSame :: ID -> Value -> Bool
+isSame :: Term -> Value -> Bool
 isSame (LInteger t) (LInteger t') = t == t'
 isSame (LString t)  (LString t')  = t == t'
 isSame (LDate t)    (LDate t')    = t == t'
@@ -218,7 +218,7 @@ factMatchesPredicate Predicate{name = predicateName, terms = predicateTerms }
   let namesMatch = predicateName == factName
       lengthsMatch = length predicateTerms == length factTerms
       allMatches = sequenceA $ zipWith yolo predicateTerms factTerms
-      yolo :: ID -> Value -> Maybe Bindings
+      yolo :: Term -> Value -> Maybe Bindings
       yolo (Variable vname) value = Just (Map.singleton vname value)
       yolo t t' | isSame t t' = Just mempty
                 | otherwise   = Nothing
@@ -227,16 +227,16 @@ factMatchesPredicate Predicate{name = predicateName, terms = predicateTerms }
       else Nothing
 
 applyVariable :: Bindings
-              -> ID
+              -> Term
               -> Either String Value
 applyVariable bindings = \case
-  Variable n -> maybeToRight "Unbound variable" $ bindings !? n
-  LInteger t -> Right $ LInteger t
-  LString t  -> Right $ LString t
-  LDate t    -> Right $ LDate t
-  LBytes t   -> Right $ LBytes t
-  LBool t    -> Right $ LBool t
-  TermSet t  -> Right $ TermSet t
+  Variable n  -> maybeToRight "Unbound variable" $ bindings !? n
+  LInteger t  -> Right $ LInteger t
+  LString t   -> Right $ LString t
+  LDate t     -> Right $ LDate t
+  LBytes t    -> Right $ LBytes t
+  LBool t     -> Right $ LBool t
+  TermSet t   -> Right $ TermSet t
   Antiquote v -> absurd v
 
 evalUnary :: Unary -> Value -> Either String Value

@@ -131,18 +131,18 @@ blockToPb existingSymbols b@Block{..} =
 
 pbToFact :: Symbols -> PB.FactV2 -> Either String Fact
 pbToFact s PB.FactV2{predicate} = do
-  let pbName = PB.getField $ PB.name $ PB.getField predicate
-      pbIds  = PB.getField $ PB.ids  $ PB.getField predicate
+  let pbName  = PB.getField $ PB.name  $ PB.getField predicate
+      pbTerms = PB.getField $ PB.terms $ PB.getField predicate
   name <- getSymbol s pbName
-  terms <- traverse (pbToValue s) pbIds
+  terms <- traverse (pbToValue s) pbTerms
   pure Predicate{..}
 
 factToPb :: ReverseSymbols -> Fact -> PB.FactV2
 factToPb s Predicate{..} =
   let
       predicate = PB.PredicateV2
-        { name = PB.putField $ getSymbolCode s name
-        , ids  = PB.putField $ valueToPb s <$> terms
+        { name  = PB.putField $ getSymbolCode s name
+        , terms = PB.putField $ valueToPb s <$> terms
         }
    in PB.FactV2{predicate = PB.putField predicate}
 
@@ -182,83 +182,83 @@ getSymbol s i = maybeToRight ("Missing symbol at id " <> show i) $ Map.lookup (f
 
 pbToPredicate :: Symbols -> PB.PredicateV2 -> Either String (Predicate' 'InPredicate 'RegularString)
 pbToPredicate s pbPredicate = do
-  let pbName = PB.getField $ PB.name pbPredicate
-      pbIds  = PB.getField $ PB.ids  pbPredicate
+  let pbName  = PB.getField $ PB.name  pbPredicate
+      pbTerms = PB.getField $ PB.terms pbPredicate
   name <- getSymbol s pbName
-  terms <- traverse (pbToTerm s) pbIds
+  terms <- traverse (pbToTerm s) pbTerms
   pure Predicate{..}
 
 predicateToPb :: ReverseSymbols -> Predicate -> PB.PredicateV2
 predicateToPb s Predicate{..} =
   PB.PredicateV2
-    { name = PB.putField $ getSymbolCode s name
-    , ids  = PB.putField $ termToPb s <$> terms
+    { name  = PB.putField $ getSymbolCode s name
+    , terms = PB.putField $ termToPb s <$> terms
     }
 
 pbTimeToUtcTime :: Int64 -> UTCTime
 pbTimeToUtcTime = posixSecondsToUTCTime . fromIntegral
 
-pbToTerm :: Symbols -> PB.IDV2 -> Either String ID
+pbToTerm :: Symbols -> PB.TermV2 -> Either String Term
 pbToTerm s = \case
-  PB.IDInteger  f -> pure $ LInteger $ fromIntegral $ PB.getField f
-  PB.IDString   f ->        LString <$> getSymbol s (PB.getField f)
-  PB.IDDate     f -> pure $ LDate    $ pbTimeToUtcTime $ PB.getField f
-  PB.IDBytes    f -> pure $ LBytes   $ PB.getField f
-  PB.IDBool     f -> pure $ LBool    $ PB.getField f
-  PB.IDVariable f -> Variable <$> getSymbol s (PB.getField f)
-  PB.IDIDSet    f -> TermSet . Set.fromList <$> traverse (pbToSetValue s) (PB.getField . PB.set $ PB.getField f)
+  PB.TermInteger  f -> pure $ LInteger $ fromIntegral $ PB.getField f
+  PB.TermString   f ->        LString <$> getSymbol s (PB.getField f)
+  PB.TermDate     f -> pure $ LDate    $ pbTimeToUtcTime $ PB.getField f
+  PB.TermBytes    f -> pure $ LBytes   $ PB.getField f
+  PB.TermBool     f -> pure $ LBool    $ PB.getField f
+  PB.TermVariable f -> Variable <$> getSymbol s (PB.getField f)
+  PB.TermTermSet  f -> TermSet . Set.fromList <$> traverse (pbToSetValue s) (PB.getField . PB.set $ PB.getField f)
 
-termToPb :: ReverseSymbols -> ID -> PB.IDV2
+termToPb :: ReverseSymbols -> Term -> PB.TermV2
 termToPb s = \case
-  Variable n -> PB.IDVariable $ PB.putField $ getSymbolCode s n
-  LInteger v -> PB.IDInteger  $ PB.putField $ fromIntegral v
-  LString  v -> PB.IDString   $ PB.putField $ getSymbolCode s v
-  LDate    v -> PB.IDDate     $ PB.putField $ round $ utcTimeToPOSIXSeconds v
-  LBytes   v -> PB.IDBytes    $ PB.putField v
-  LBool    v -> PB.IDBool     $ PB.putField v
-  TermSet vs -> PB.IDIDSet    $ PB.putField $ PB.IDSet $ PB.putField $ setValueToPb s <$> Set.toList vs
+  Variable n -> PB.TermVariable $ PB.putField $ getSymbolCode s n
+  LInteger v -> PB.TermInteger  $ PB.putField $ fromIntegral v
+  LString  v -> PB.TermString   $ PB.putField $ getSymbolCode s v
+  LDate    v -> PB.TermDate     $ PB.putField $ round $ utcTimeToPOSIXSeconds v
+  LBytes   v -> PB.TermBytes    $ PB.putField v
+  LBool    v -> PB.TermBool     $ PB.putField v
+  TermSet vs -> PB.TermTermSet  $ PB.putField $ PB.TermSet $ PB.putField $ setValueToPb s <$> Set.toList vs
 
   Antiquote v -> absurd v
 
-pbToValue :: Symbols -> PB.IDV2 -> Either String Value
+pbToValue :: Symbols -> PB.TermV2 -> Either String Value
 pbToValue s = \case
-  PB.IDInteger  f -> pure $ LInteger $ fromIntegral $ PB.getField f
-  PB.IDString   f ->        LString <$> getSymbol s (PB.getField f)
-  PB.IDDate     f -> pure $ LDate    $ pbTimeToUtcTime $ PB.getField f
-  PB.IDBytes    f -> pure $ LBytes   $ PB.getField f
-  PB.IDBool     f -> pure $ LBool    $ PB.getField f
-  PB.IDVariable _ -> Left "Variables can't appear in facts"
-  PB.IDIDSet    f -> TermSet . Set.fromList <$> traverse (pbToSetValue s) (PB.getField . PB.set $ PB.getField f)
+  PB.TermInteger  f -> pure $ LInteger $ fromIntegral $ PB.getField f
+  PB.TermString   f ->        LString <$> getSymbol s (PB.getField f)
+  PB.TermDate     f -> pure $ LDate    $ pbTimeToUtcTime $ PB.getField f
+  PB.TermBytes    f -> pure $ LBytes   $ PB.getField f
+  PB.TermBool     f -> pure $ LBool    $ PB.getField f
+  PB.TermVariable _ -> Left "Variables can't appear in facts"
+  PB.TermTermSet  f -> TermSet . Set.fromList <$> traverse (pbToSetValue s) (PB.getField . PB.set $ PB.getField f)
 
-valueToPb :: ReverseSymbols -> Value -> PB.IDV2
+valueToPb :: ReverseSymbols -> Value -> PB.TermV2
 valueToPb s = \case
-  LInteger v -> PB.IDInteger $ PB.putField $ fromIntegral v
-  LString  v -> PB.IDString  $ PB.putField $ getSymbolCode s v
-  LDate    v -> PB.IDDate    $ PB.putField $ round $ utcTimeToPOSIXSeconds v
-  LBytes   v -> PB.IDBytes   $ PB.putField v
-  LBool    v -> PB.IDBool    $ PB.putField v
-  TermSet vs -> PB.IDIDSet   $ PB.putField $ PB.IDSet $ PB.putField $ setValueToPb s <$> Set.toList vs
+  LInteger v -> PB.TermInteger $ PB.putField $ fromIntegral v
+  LString  v -> PB.TermString  $ PB.putField $ getSymbolCode s v
+  LDate    v -> PB.TermDate    $ PB.putField $ round $ utcTimeToPOSIXSeconds v
+  LBytes   v -> PB.TermBytes   $ PB.putField v
+  LBool    v -> PB.TermBool    $ PB.putField v
+  TermSet vs -> PB.TermTermSet $ PB.putField $ PB.TermSet $ PB.putField $ setValueToPb s <$> Set.toList vs
 
   Variable v  -> absurd v
   Antiquote v -> absurd v
 
-pbToSetValue :: Symbols -> PB.IDV2 -> Either String (ID' 'WithinSet 'InFact 'RegularString)
+pbToSetValue :: Symbols -> PB.TermV2 -> Either String (Term' 'WithinSet 'InFact 'RegularString)
 pbToSetValue s = \case
-  PB.IDInteger  f -> pure $ LInteger $ fromIntegral $ PB.getField f
-  PB.IDString   f ->        LString  <$> getSymbol s (PB.getField f)
-  PB.IDDate     f -> pure $ LDate    $ pbTimeToUtcTime $ PB.getField f
-  PB.IDBytes    f -> pure $ LBytes   $ PB.getField f
-  PB.IDBool     f -> pure $ LBool    $ PB.getField f
-  PB.IDVariable _ -> Left "Variables can't appear in facts or sets"
-  PB.IDIDSet    _ -> Left "Sets can't be nested"
+  PB.TermInteger  f -> pure $ LInteger $ fromIntegral $ PB.getField f
+  PB.TermString   f ->        LString  <$> getSymbol s (PB.getField f)
+  PB.TermDate     f -> pure $ LDate    $ pbTimeToUtcTime $ PB.getField f
+  PB.TermBytes    f -> pure $ LBytes   $ PB.getField f
+  PB.TermBool     f -> pure $ LBool    $ PB.getField f
+  PB.TermVariable _ -> Left "Variables can't appear in facts or sets"
+  PB.TermTermSet  _ -> Left "Sets can't be nested"
 
-setValueToPb :: ReverseSymbols -> ID' 'WithinSet 'InFact 'RegularString -> PB.IDV2
+setValueToPb :: ReverseSymbols -> Term' 'WithinSet 'InFact 'RegularString -> PB.TermV2
 setValueToPb s = \case
-  LInteger v -> PB.IDInteger $ PB.putField $ fromIntegral v
-  LString  v -> PB.IDString  $ PB.putField $ getSymbolCode s v
-  LDate    v -> PB.IDDate    $ PB.putField $ round $ utcTimeToPOSIXSeconds v
-  LBytes   v -> PB.IDBytes   $ PB.putField v
-  LBool    v -> PB.IDBool    $ PB.putField v
+  LInteger v  -> PB.TermInteger $ PB.putField $ fromIntegral v
+  LString  v  -> PB.TermString  $ PB.putField $ getSymbolCode s v
+  LDate    v  -> PB.TermDate    $ PB.putField $ round $ utcTimeToPOSIXSeconds v
+  LBytes   v  -> PB.TermBytes   $ PB.putField v
+  LBool    v  -> PB.TermBool    $ PB.putField v
 
   TermSet   v -> absurd v
   Variable  v -> absurd v
@@ -276,8 +276,8 @@ expressionToPb s e =
 
 pbToOp :: Symbols -> PB.Op -> Either String Op
 pbToOp s = \case
-  PB.OpVValue v -> VOp <$> pbToTerm s (PB.getField v)
-  PB.OpVUnary v -> pure . UOp . pbToUnary $ PB.getField v
+  PB.OpVValue v  -> VOp <$> pbToTerm s (PB.getField v)
+  PB.OpVUnary v  -> pure . UOp . pbToUnary $ PB.getField v
   PB.OpVBinary v -> pure . BOp . pbToBinary $ PB.getField v
 
 opToPb :: ReverseSymbols -> Op -> PB.Op

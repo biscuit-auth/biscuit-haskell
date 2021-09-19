@@ -20,9 +20,9 @@ module Auth.Biscuit.Proto
   , RuleV2 (..)
   , CheckV2 (..)
   , PredicateV2 (..)
-  , IDV2 (..)
+  , TermV2 (..)
   , ExpressionV2 (..)
-  , IDSet (..)
+  , TermSet (..)
   , Op (..)
   , OpUnary (..)
   , UnaryKind (..)
@@ -95,25 +95,25 @@ newtype CheckV2 = CheckV2
     deriving anyclass (Decode, Encode)
 
 data PredicateV2 = PredicateV2
-  { name :: Required 1 (Value Int64)
-  , ids  :: Repeated 2 (Message IDV2)
+  { name  :: Required 1 (Value Int64)
+  , terms :: Repeated 2 (Message TermV2)
   } deriving stock (Generic, Show)
     deriving anyclass (Decode, Encode)
 
-data IDV2 =
-    IDVariable (Required 1 (Value Int32))
-  | IDInteger  (Required 2 (Value Int64))
-  | IDString   (Required 3 (Value Int64))
-  | IDDate     (Required 4 (Value Int64))
-  | IDBytes    (Required 5 (Value ByteString))
-  | IDBool     (Required 6 (Value Bool))
-  | IDIDSet    (Required 7 (Message IDSet))
+data TermV2 =
+    TermVariable (Required 1 (Value Int32))
+  | TermInteger  (Required 2 (Value Int64))
+  | TermString   (Required 3 (Value Int64))
+  | TermDate     (Required 4 (Value Int64))
+  | TermBytes    (Required 5 (Value ByteString))
+  | TermBool     (Required 6 (Value Bool))
+  | TermTermSet  (Required 7 (Message TermSet))
     deriving stock (Generic, Show)
     deriving anyclass (Decode, Encode)
 
 
-newtype IDSet = IDSet
-  { set :: Repeated 1 (Message IDV2)
+newtype TermSet = TermSet
+  { set :: Repeated 1 (Message TermV2)
   } deriving stock (Generic, Show)
     deriving anyclass (Decode, Encode)
 
@@ -194,7 +194,7 @@ newtype ExpressionV2 = ExpressionV2
     deriving anyclass (Decode, Encode)
 
 data Op =
-    OpVValue  (Required 1 (Message IDV2))
+    OpVValue  (Required 1 (Message TermV2))
   | OpVUnary  (Required 2 (Message OpUnary))
   | OpVBinary (Required 3 (Message OpBinary))
     deriving stock (Generic, Show)

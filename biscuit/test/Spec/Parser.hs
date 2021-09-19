@@ -15,10 +15,10 @@ import           Auth.Biscuit.Datalog.Parser (checkParser, expressionParser,
                                               ruleParser, termParser,
                                               verifierParser)
 
-parseTerm :: Text -> Either String ID
+parseTerm :: Text -> Either String Term
 parseTerm = parseOnly termParser
 
-parseTermQQ :: Text -> Either String QQID
+parseTermQQ :: Text -> Either String QQTerm
 parseTermQQ = parseOnly termParser
 
 parsePredicate :: Text -> Either String Predicate

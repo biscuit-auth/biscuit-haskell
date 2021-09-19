@@ -10,8 +10,8 @@ import           Test.Tasty
 import           Test.Tasty.HUnit
 
 import           Auth.Biscuit
-import           Auth.Biscuit.Datalog.AST      (Expression' (..), ID' (..),
-                                                Query, QueryItem' (..))
+import           Auth.Biscuit.Datalog.AST      (Expression' (..), Query,
+                                                QueryItem' (..), Term' (..))
 import           Auth.Biscuit.Datalog.Executor (ResultError (..))
 import qualified Auth.Biscuit.Datalog.Executor as Executor
 import           Auth.Biscuit.Datalog.Parser   (check)
