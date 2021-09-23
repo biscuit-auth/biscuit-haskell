@@ -389,16 +389,18 @@ check = QuasiQuoter
   , quoteDec = error "not supported"
   }
 
--- | Quasiquoter for a block expression. You can reference haskell variables
--- like this: @${variableName}@.
+-- | Compile-time parser for a block expression, intended to be used with the
+-- @QuasiQuotes@ extension.
 --
 -- A typical use of 'block' looks like this:
 --
--- > [block|
--- >   resource(#authority, ${fileName});
--- >   rule($variable) <- fact($value), other_fact($value);
--- >   check if operation(#ambient, #read);
--- > |]
+-- > let fileName = "data.pdf"
+-- >  in [block|
+-- >       // datalog can reference haskell variables with ${variableName}
+-- >       resource(${fileName});
+-- >       rule($variable) <- fact($value), other_fact($value);
+-- >       check if operation("read");
+-- >     |]
 block :: QuasiQuoter
 block = QuasiQuoter
   { quoteExp = compileParser (blockParser @'QuasiQuote)
@@ -407,16 +409,23 @@ block = QuasiQuoter
   , quoteDec = error "not supported"
   }
 
--- | Quasiquoter for a verifier expression. You can reference haskell variables
--- like this: @${variableName}@.
+-- | Compile-time parser for a verifier expression, intended to be used with the
+-- @QuasiQuotes@ extension.
 --
--- A typical use of 'block' looks like this:
+-- A typical use of 'verifier' looks like this:
 --
--- > [verifier|
--- >   current_time(#ambient, ${now});
--- >   allow if resource(#authority, "file1");
--- >   deny if true;
--- > |]
+-- > do
+-- >   now <- getCurrentTime
+-- >   pure [verifier|
+-- >          // datalog can reference haskell variables with ${variableName}
+-- >          current_time(${now});
+-- >          // verifiers can contain facts, rules and checks like blocks, but
+-- >          // also declare policies. While every check has to pass for a biscuit to
+-- >          // be valid, policies are tried in order. The first one to match decides
+-- >          // if the token is valid or not
+-- >          allow if resource("file1");
+-- >          deny if true;
+-- >        |]
 verifier :: QuasiQuoter
 verifier = QuasiQuoter
   { quoteExp = compileParser (verifierParser @'QuasiQuote)

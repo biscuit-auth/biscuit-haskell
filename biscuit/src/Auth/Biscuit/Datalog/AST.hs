@@ -476,11 +476,13 @@ renderExpression =
 
 -- | A biscuit block, containing facts, rules and checks.
 --
--- 'Block' has a 'Monoid' instance, this is the expected way
+-- 'Block' has a 'Monoid' instance, which is the expected way
 -- to build composite blocks (eg if you need to generate a list of facts):
 --
--- > -- build a block containing a list of facts `value("a"); value("b"); value("c");`.
--- > foldMap (\v -> [block| value(${v}) |]) ["a", "b", "c"]
+-- > -- build a block from multiple variables v1, v2, v3
+-- > [block| value(${v1}); |] <>
+-- > [block| value(${v2}); |] <>
+-- > [block| value(${v3}); |]
 type Block = Block' 'RegularString
 
 -- | A biscuit block, that may or may not contain slices referencing

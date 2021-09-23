@@ -63,7 +63,10 @@ data ResultError
   -- ^ A deny rule matched. additionally some checks may have failed
   deriving (Eq, Show)
 
--- | The result of running verification
+-- | An error that can happen while running a datalog verification.
+-- The datalog computation itself can be aborted by runtime failsafe
+-- mechanisms, or it can run to completion but fail to fullfil checks
+-- and policies ('ResultError').
 data ExecutionError
   = Timeout
   -- ^ Verification took too much time
@@ -74,31 +77,36 @@ data ExecutionError
   | FactsInBlocks
   -- ^ Some blocks contained either rules or facts while it was forbidden
   | ResultError ResultError
-  -- ^ The checks and policies were not fulfilled after evaluation
+  -- ^ The evaluation ran to completion, but checks and policies were not
+  -- fulfilled.
   deriving (Eq, Show)
 
--- | Settings for the executor restrictions
+-- | Settings for the executor runtime restrictions.
 -- See `defaultLimits` for default values.
 data Limits
   = Limits
   { maxFacts          :: Int
-  -- ^ maximum number of facts that can be produced (else `TooManyFacts` is thrown)
+  -- ^ maximum number of facts that can be produced before throwing `TooManyFacts`
   , maxIterations     :: Int
   -- ^ maximum number of iterations before throwing `TooManyIterations`
   , maxTime           :: Int
   -- ^ maximum duration the verification can take (in μs)
   , allowRegexes      :: Bool
-  -- ^ whether or not allowing `.matches()` during verification
+  -- ^ whether or not allowing `.matches()` during verification (untrusted regex computation
+  -- can enable DoS attacks). This security risk is mitigated by the 'maxTime' setting.
   , allowBlockFacts   :: Bool
-  -- ^ wheter or not accept facts and rules in blocks. Even when they are enabled, they
-  -- can’t give rise to facts containing `#authority` or `#ambient` symbols
+  -- ^ whether or not accept facts and rules in blocks
   , checkRevocationId :: ByteString -> IO (Either () ())
   -- ^ how to check for token revocation `Left ()` means that the given id is revoked,
   -- `Right ()` means it’s not revoked.
   }
 
 -- | Default settings for the executor restrictions.
--- (1000 facts, 100 iterations, 1000μs max, regexes are allowed, facts and rules are allowed in blocks)
+--   - 1000 facts
+--   - 100 iterations
+--   - 1000μs max
+--   - regexes are allowed
+--   - facts and rules are allowed in blocks
 defaultLimits :: Limits
 defaultLimits = Limits
   { maxFacts = 1000

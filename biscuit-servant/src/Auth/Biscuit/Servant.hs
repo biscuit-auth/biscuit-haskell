@@ -70,48 +70,62 @@ import           Servant.Server.Experimental.Auth
 -- >   :<|> "endpoint2" :> Capture "int" Int :> Get '[JSON] Int
 -- >   :<|> "endpoint3" :> Get '[JSON] Int
 -- >
--- > app :: Application
--- > app = serveWithContext (Proxy :: Proxy API)
--- >         (genBiscuitCtx publicKey) -- servant needs access to the biscuit /public/
--- >                                   -- key to be able to check biscuit signatures.
--- >                                   -- The public key can be read from the environment
--- >                                   -- and parsed using 'parsePublicKeyHex' for instance.
--- >         server
+-- > app :: PublicKey -> Application
+-- > app publicKey =
+-- >   -- servant needs access to the biscuit /public/
+-- >   -- key to be able to check biscuit signatures.
+-- >   -- The public key can be read from the environment
+-- >   -- and parsed using 'parsePublicKeyHex' for instance.
+-- >   serveWithContext
+-- >     (Proxy :: Proxy API)
+-- >     (genBiscuitCtx publicKey)
+-- >     server
 -- >
--- > server :: Server API -- Biscuit -> Server ProtectedAPI
+-- > -- server :: Biscuit OpenOrSealed Checked -> Server ProtectedAPI
+-- > server :: Server API
 -- > server biscuit = … -- this will be detailed later
 --
 -- This will instruct servant to extract the biscuit from the requests and
--- check its signature. *It will not*, however, run any datalog check (as
+-- check its signature. /It will not/, however, run any datalog check (as
 -- the checks typically depend on the request contents).
 --
 -- $singleEndpointVerifier
 --
--- The corresponding @Server API@ value will be a @Biscuit -> Server ProtectedAPI@.
+-- The corresponding @Server API@ value will be a @Biscuit OpenOrSealed Checked -> Server ProtectedAPI@.
 -- The next step is to provide a 'Verifier' so that the biscuit datalog can be
--- verified. For that, you can use 'checkBiscuit' (or 'checkBiscuitM').
+-- verified. For that, you can use 'checkBiscuit' (or 'checkBiscuitM' for effectful checks).
 --
 -- > server :: Server API
 -- > server biscuit = h1 biscuit
 -- >             :<|> h2 biscuit
 -- >             :<|> h3 biscuit
 -- >
--- > h1 :: Biscuit -> Handler Int
+-- > h1 :: Biscuit OpenOrSealed Checked -> Handler Int
 -- > h1 biscuit =
 -- >   checkBiscuit biscuit
--- >     [verifier|allow if right(#authority,#one);|]
--- >     -- ^ only allow biscuits granting access to the endpoint tagged `#one`
+-- >     [verifier|allow if right("one");|]
+-- >     -- ^ only allow biscuits granting access to the endpoint tagged "one"
 -- >     (pure 1)
 -- >
--- > h2 :: Biscuit -> Int -> Handler Int
+-- > h2 :: Biscuit OpenOrSealed Checked -> Int -> Handler Int
 -- > h2 biscuit value =
--- >   checkBiscuit biscuit
--- >     [verifier|allow if right(#authority,#two, ${value});|]
--- >     -- ^ only allow biscuits granting access to the endpoint tagged `#two`
--- >     -- AND for the provided int value.
+-- >   let verifier' = do
+-- >         now <- liftIO getCurrentTime
+-- >         pure [verifier|
+-- >                // provide the current time so that TTL checks embedded in
+-- >                // the biscuit can decide if it's still valid
+-- >                // this show how to run an effectful check with
+-- >                // checkBiscuitM (getting the current time is an effect)
+-- >                time(${now});
+-- >                // only allow biscuits granting access to the endpoint tagged "two"
+-- >                // AND for the provided int value. This show how the checks can depend
+-- >                // on the http request contents.
+-- >                allow if right("two", ${value});
+-- >              |]
+-- >   checkBiscuitM biscuit verifier
 -- >     (pure 2)
 -- >
--- > h3 :: Biscuit -> Handler Int
+-- > h3 :: Biscuit OpenOrSealed Checked -> Handler Int
 -- > h3 biscuit =
 -- >   checkBiscuit biscuit
 -- >     [verifier|deny if true;|]
@@ -120,54 +134,58 @@ import           Servant.Server.Experimental.Auth
 --
 -- $composableVerifiers
 --
--- 'checkBiscuit' allows you to describe validation rules endpoint by endpoint. Since 'Verifier'
--- has a 'Monoid' instance, you can avoid duplication by extracting common rules, but that still
--- requires some boilerplate (and it won't prevent you from forgetting to add them on some endpoints).
+-- 'checkBiscuit' allows you to describe validation rules endpoint by endpoint. If your
+-- application has a lot of endpoints with the same policies, it can become tedious to
+-- maintain.
 --
--- 'biscuit-servant' provides a way to apply verifiers on whole API trees, in a composable way, thanks
--- to 'hoistServer':
+-- 'biscuit-servant' provides a way to apply verifiers on whole API trees,
+-- in a composable way, thanks to 'hoistServer'. 'hoistServer' is a mechanism
+-- provided by servant-server that lets apply a transformation function to whole
+-- API trees.
 --
--- > -- 'withVerifier' wraps a 'Handler' and lets you attach a verifier
+-- > -- 'withVerifier' wraps a 'Handler' and lets you attach a verifier to a
+-- > -- specific endoint. This verifier may be combined with other verifiers
+-- > -- attached to the whole API tree
 -- > handler1 :: WithVerifier Handler Int
 -- > handler1 = withVerifier
--- >   [verifier|allow if right(#authority, #one);|]
+-- >   [verifier|allow if right("one");|]
 -- >   (pure 1)
 -- >
 -- > handler2 :: Int -> WithVerifier Handler Int
 -- > handler2 value = withVerifier
--- >   [verifier|allow if right(#authority, #two, ${value});|]
+-- >   [verifier|allow if right("two", ${value});|]
 -- >   (pure 2)
 -- >
 -- > handler3 :: WithVerifier Handler Int
 -- > handler3 = withVerifier
--- >   [verifier|allow if right(#authority, #three);|]
+-- >   [verifier|allow if right("three");|]
 -- >   (pure 3)
 -- >
--- > server :: Server API
--- > server =
+-- > server :: Biscuit OpenOrSealed Checked -> Server ProtectedAPI
+-- > server biscuit =
 -- >  let nowFact = do
 -- >        now <- liftIO getCurrentTime
--- >        pure [verifier|now(#ambient, ${now});|]
+-- >        pure [verifier|time(${now});|]
 -- >      handleAuth :: WithVerifier Handler x -> Handler x
 -- >      handleAuth =
--- >          handleBiscuit b
+-- >          handleBiscuit biscuit
 -- >          -- ^ this runs datalog checks on the biscuit, based on verifiers attached to
 -- >          -- the handlers
 -- >        . withPriorityVerifierM nowFact
 -- >          -- ^ this provides the current time to the verification context so that biscuits with
 -- >          -- a TTL can verify if they are still valid.
--- >          -- Verifiers can be provided in a monadic context (it just has to be the same as
+-- >          -- Verifiers can be provided in a monadic context (it has to be the same monad as
 -- >          -- the handlers themselves, so here it's 'Handler').
--- >        . withPriorityVerifier [verifier|allow if right(#authority, #admin);|]
+-- >        . withPriorityVerifier [verifier|allow if right("admin");|]
 -- >          -- ^ this policy will be tried /before/ any endpoint policy, so `endpoint3` will be
 -- >          -- reachable with an admin biscuit
--- >        . withFallbackVerifier [verifier|allow if right(#authority, #anon);|]
+-- >        . withFallbackVerifier [verifier|allow if right("anon");|]
 -- >          -- ^ this policy will be tried /after/ the endpoints policies, so `endpoint3` will
 -- >          -- *not* be reachable with an anon macaroon.
 -- >      handlers = handler1 :<|> handler2 :<|> handler3
 -- >   in hoistServer @ProtectedAPI Proxy handleAuth handlers
 -- >        -- ^ this will apply `handleAuth` on all 'ProtectedAPI' endpoints.
---
+
 -- | Type used to protect and API tree, requiring a biscuit token
 -- to be attached to requests. The associated auth handler will
 -- only check the biscuit signature. Checking the datalog part
@@ -181,7 +199,7 @@ type instance AuthServerData RequireBiscuit = Biscuit OpenOrSealed Checked
 -- that will be used to authorize the request. If the authorization
 -- succeeds, the handler is ran.
 -- The handler itself is given access to the verified biscuit through
--- a 'ReaderT' 'Biscuit'.
+-- a @ReaderT (Biscuit OpenOrSealed Checked)@.
 data WithVerifier m a
   = WithVerifier
   { handler_  :: ReaderT (Biscuit OpenOrSealed Checked) m a
@@ -193,7 +211,9 @@ data WithVerifier m a
 -- | Combines the provided 'Verifier' to the 'Verifier' attached to the wrapped
 -- handler. /facts/, /rules/ and /checks/ are unordered, but /policies/ have a
 -- specific order. 'withFallbackVerifier' puts the provided policies at the /bottom/
--- of the list (ie as /fallback/ policies).
+-- of the list (ie as /fallback/ policies): these policies will be tried /after/
+-- the policies declared through 'withPriorityVerifier' and after the policies
+-- declared by the endpoints.
 --
 -- If you want the policies to be tried before the ones of the wrapped handler, you
 -- can use 'withPriorityVerifier'.
@@ -210,7 +230,9 @@ withFallbackVerifier newV h@WithVerifier{verifier_} =
 -- | Combines the provided 'Verifier' to the 'Verifier' attached to the wrapped
 -- handler. /facts/, /rules/ and /checks/ are unordered, but /policies/ have a
 -- specific order. 'withFallbackVerifier' puts the provided policies at the /bottom/
--- of the list (ie as /fallback/ policies).
+-- of the list (ie as /fallback/ policies): these policies will be tried /after/
+-- the policies declared through 'withPriorityVerifier' and after the policies
+-- declared by the endpoints.
 --
 -- If you want the policies to be tried before the ones of the wrapped handler, you
 -- can use 'withPriorityVerifier'.
@@ -227,7 +249,9 @@ withFallbackVerifierM newV h@WithVerifier{verifier_} =
 -- | Combines the provided 'Verifier' to the 'Verifier' attached to the wrapped
 -- handler. /facts/, /rules/ and /checks/ are unordered, but /policies/ have a
 -- specific order. 'withFallbackVerifier' puts the provided policies at the /top/
--- of the list (ie as /priority/ policies).
+-- of the list (ie as /priority/ policies): these policies will be tried /after/
+-- the policies declared through 'withPriorityVerifier' and after the policies
+-- declared by the endpoints.
 --
 -- If you want the policies to be tried after the ones of the wrapped handler, you
 -- can use 'withFallbackVerifier'.
@@ -244,7 +268,9 @@ withPriorityVerifier newV h@WithVerifier{verifier_} =
 -- | Combines the provided 'Verifier' to the 'Verifier' attached to the wrapped
 -- handler. /facts/, /rules/ and /checks/ are unordered, but /policies/ have a
 -- specific order. 'withFallbackVerifier' puts the provided policies at the /top/
--- of the list (ie as /priority/ policies).
+-- of the list (ie as /priority/ policies): these policies will be tried /after/
+-- the policies declared through 'withPriorityVerifier' and after the policies
+-- declared by the endpoints.
 --
 -- If you want the policies to be tried after the ones of the wrapped handler, you
 -- can use 'withFallbackVerifier'.
@@ -259,8 +285,7 @@ withPriorityVerifierM newV h@WithVerifier{verifier_} =
      h { verifier_ = liftA2 (<>) newV verifier_ }
 
 -- | Wraps an existing handler block, attaching a 'Verifier'. The handler has
--- to be a 'ReaderT' 'Biscuit' to be able to access the token.
---
+-- to be a @ReaderT (Biscuit OpenOrSealed Checked)' to be able to access the token.
 -- If you don't need to access the token from the handler block, you can use
 -- 'withVerifier_' instead.
 --
@@ -277,8 +302,7 @@ withVerifier v handler_ =
     }
 
 -- | Wraps an existing handler block, attaching a 'Verifier'. The handler has
--- to be a 'ReaderT' 'Biscuit' to be able to access the token.
---
+-- to be a @ReaderT (Biscuit OpenOrSealed Checked)@ to be able to access the token.
 -- If you don't need to access the token from the handler block, you can use
 -- 'withVerifier_' instead.
 --
@@ -294,10 +318,8 @@ withVerifierM verifier_ handler_ =
     }
 
 -- | Wraps an existing handler block, attaching a 'Verifier'. The handler can be
--- any monad, but won't be able to access the 'Biscuit'.
---
--- If you want to read the biscuit token from the handler block, you can use 'withVerifier'
--- instead.
+-- any monad, but won't be able to access the biscuit. If you want to read the biscuit
+-- token from the handler block, you can use 'withVerifier' instead.
 --
 -- If you need to perform effects to compute the verifier (eg. to get the current date,
 -- or to query a database), you can use 'withVerifierM_' instead.
@@ -316,23 +338,27 @@ withVerifierM_ :: Monad m => m Verifier -> m a -> WithVerifier m a
 withVerifierM_ v = withVerifierM v . lift
 
 -- | Wraps an existing handler block, attaching an empty 'Verifier'. The handler has
--- to be a 'ReaderT' 'Biscuit' to be able to access the token. If you don't need
+-- to be a @ReaderT (Biscuit OpenOrSealed Checked)@ to be able to access the token. If you don't need
 -- to access the token from the handler block, you can use 'noVerifier_'
 -- instead.
 --
--- This function can be used together with 'withFallbackVerifier' or 'withPriorityVerifier'
--- to apply policies on several handlers at the same time (with 'hoistServer' for instance).
+-- This function is useful when the endpoint does not have any specific verifier
+-- context, and the verifier context is applied on the whole API tree through
+-- 'withFallbackVerifier' or 'withPriorityVerifier' to apply policies on several
+-- handlers at the same time (with 'hoistServer' for instance).
 noVerifier :: Applicative m
            => ReaderT (Biscuit OpenOrSealed Checked) m a
            -> WithVerifier m a
 noVerifier = withVerifier mempty
 
 -- | Wraps an existing handler block, attaching an empty 'Verifier'. The handler can be
--- any monad, but won't be able to access the 'Biscuit'. If you want to read the
+-- any monad, but won't be able to access the biscuit. If you want to read the
 -- biscuit token from the handler block, you can use 'noVerifier' instead.
 --
--- This function can be used together with 'withFallbackVerifier' or 'withPriorityVerifier'
--- to apply policies on several handlers at the same time (with 'hoistServer' for instance).
+-- This function is useful when the endpoint does not have any specific verifier
+-- context, and the verifier context is applied on the whole API tree through
+-- 'withFallbackVerifier' or 'withPriorityVerifier' to apply policies on several
+-- handlers at the same time (with 'hoistServer' for instance).
 noVerifier_ :: Monad m => m a -> WithVerifier m a
 noVerifier_ = noVerifier . lift
 
@@ -368,11 +394,12 @@ genBiscuitCtx :: PublicKey
               -> Context '[AuthHandler Request (Biscuit OpenOrSealed Checked)]
 genBiscuitCtx pk = authHandler pk :. EmptyContext
 
--- | Given a 'Biscuit' (provided by the servant authorization mechanism),
+-- | Given a biscuit (provided by the servant authorization mechanism),
 -- verify its validity (with the provided 'Verifier').
 --
 -- If you need to perform effects in the verification phase (eg to get the current time,
--- or if you need to issue a DB query to get context), you can use 'checkBiscuitM' instead.
+-- or if you need to issue a DB query to retrieve extra information needed to check the token),
+-- you can use 'checkBiscuitM' instead.
 --
 -- If you don't want to pass the biscuit manually to all the endpoints or want to
 -- blanket apply verifiers on whole API trees, you can consider using 'withVerifier'
