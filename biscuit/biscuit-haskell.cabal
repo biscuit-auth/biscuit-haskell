@@ -49,14 +49,12 @@ library
     bytestring           ^>= 0.10,
     text                 ^>= 1.2,
     containers           ^>= 0.6,
-    cryptonite           ^>= 0.29,
-    memory               ^>= 0.16,
+    cryptonite           ^>= 0.27,
+    memory               ^>= 0.15,
     template-haskell     ^>= 2.16,
     attoparsec           ^>= 0.13,
-    primitive            ^>= 0.7,
     base64               ^>= 0.4,
     cereal               ^>= 0.5,
-    libsodium            ^>= 1.0,
     mtl                  ^>= 2.2,
     parser-combinators   ^>= 1.2,
     protobuf             ^>= 0.2,
@@ -84,10 +82,8 @@ executable biscuit-haskell-exe
     , bytestring
     , cereal
     , containers
-    , libsodium
     , mtl
     , parser-combinators
-    , primitive
     , protobuf
     , random
     , template-haskell
@@ -126,10 +122,8 @@ test-suite biscuit-haskell-test
     , cereal
     , containers
     , cryptonite
-    , libsodium
     , mtl
     , parser-combinators
-    , primitive
     , protobuf
     , random
     , tasty
