@@ -1,11 +1,10 @@
-{-# LANGUAGE DataKinds   #-}
 {-# LANGUAGE QuasiQuotes #-}
 import           Criterion.Main
 
 import           Auth.Biscuit
 import           Data.Maybe     (fromJust)
 
-buildToken :: SecretKey -> IO (Biscuit Open 'Checked)
+buildToken :: SecretKey -> IO (Biscuit Open Checked)
 buildToken sk = do
   mkBiscuit sk [block|user_id("user_1234");|]
 
