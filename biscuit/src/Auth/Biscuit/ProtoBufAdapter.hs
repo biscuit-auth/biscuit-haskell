@@ -23,6 +23,7 @@ module Auth.Biscuit.ProtoBufAdapter
   ) where
 
 import           Control.Monad            (when)
+import           Crypto.PubKey.Ed25519    (PublicKey)
 import           Data.Bifunctor           (first)
 import           Data.Int                 (Int32, Int64)
 import           Data.Map.Strict          (Map)
@@ -82,21 +83,34 @@ reverseSymbols =
 getSymbolCode :: Integral i => ReverseSymbols -> Text -> i
 getSymbolCode = (fromIntegral .) . (Map.!)
 
+pbToPublicKey :: PB.PublicKey -> Either String PublicKey
+pbToPublicKey PB.PublicKey{..} =
+  let keyBytes = PB.getField key
+      parseKey = Crypto.eitherCryptoError . Crypto.publicKey
+   in case PB.getField algorithm of
+        PB.Ed25519 -> first (const "Invalid ed25519 public key") $ parseKey keyBytes
+
 -- | Parse a protobuf signed block into a signed biscuit block
 pbToSignedBlock :: PB.SignedBlock -> Either String Crypto.SignedBlock
 pbToSignedBlock PB.SignedBlock{..} = do
   sig <- first (const "Invalid signature") $ Crypto.eitherCryptoError $ Crypto.signature $ PB.getField signature
-  pk  <- first (const "Invalid public key") $ Crypto.eitherCryptoError $ Crypto.publicKey $ PB.getField nextKey
+  pk  <- pbToPublicKey $ PB.getField nextKey
   pure ( PB.getField block
        , sig
        , pk
        )
 
+publicKeyToPb :: PublicKey -> PB.PublicKey
+publicKeyToPb pk = PB.PublicKey
+  { algorithm = PB.putField PB.Ed25519
+  , key = PB.putField $ Crypto.convert pk
+  }
+
 signedBlockToPb :: Crypto.SignedBlock -> PB.SignedBlock
 signedBlockToPb (block, sig, pk) = PB.SignedBlock
   { block = PB.putField block
   , signature = PB.putField $ Crypto.convert sig
-  , nextKey = PB.putField $ Crypto.convert pk
+  , nextKey = PB.putField $ publicKeyToPb pk
   }
 
 pbToProof :: PB.Proof -> Either String (Either Crypto.Signature Crypto.SecretKey)

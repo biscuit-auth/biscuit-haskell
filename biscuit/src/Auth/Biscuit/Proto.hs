@@ -14,6 +14,8 @@
 module Auth.Biscuit.Proto
   ( Biscuit (..)
   , SignedBlock (..)
+  , PublicKey (..)
+  , Algorithm (..)
   , Proof (..)
   , Block (..)
   , FactV2 (..)
@@ -61,8 +63,18 @@ data Proof =
 
 data SignedBlock = SignedBlock
   { block     :: Required 1 (Value ByteString)
-  , nextKey   :: Required 2 (Value ByteString)
+  , nextKey   :: Required 2 (Message PublicKey)
   , signature :: Required 3 (Value ByteString)
+  }
+  deriving (Generic, Show)
+  deriving anyclass (Decode, Encode)
+
+data Algorithm = Ed25519
+  deriving stock (Show, Enum, Bounded)
+
+data PublicKey = PublicKey
+  { algorithm :: Required 1 (Enumeration Algorithm)
+  , key       :: Required 2 (Value ByteString)
   }
   deriving (Generic, Show)
   deriving anyclass (Decode, Encode)

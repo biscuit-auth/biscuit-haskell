@@ -61,7 +61,8 @@ import           Auth.Biscuit.ProtoBufAdapter        (Symbols, blockToPb,
                                                       commonSymbols,
                                                       extractSymbols, pbToBlock,
                                                       pbToProof,
-                                                      pbToSignedBlock)
+                                                      pbToSignedBlock,
+                                                      signedBlockToPb)
 
 -- | Protobuf serialization does not have a guaranteed deterministic behaviour,
 -- so we need to keep the initial serialized payload around in order to compute
@@ -223,12 +224,7 @@ serializeBiscuit Biscuit{..} =
         }
 
 toPBSignedBlock :: ParsedSignedBlock -> PB.SignedBlock
-toPBSignedBlock ((block, _), sig, pk) =
-  PB.SignedBlock
-    { block = PB.putField block
-    , nextKey = PB.putField (convert pk)
-    , signature = PB.putField (convert sig)
-    }
+toPBSignedBlock ((block, _), sig, pk) = signedBlockToPb (block, sig, pk)
 
 -- | Errors that can happen when parsing a biscuit. Since complete parsing of a biscuit
 -- requires a signature check, an invalid signature check is a parsing error

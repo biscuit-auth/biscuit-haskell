@@ -36,8 +36,12 @@ import           Crypto.Error          (eitherCryptoError, maybeCryptoError)
 import           Crypto.PubKey.Ed25519
 import           Data.ByteArray        (convert)
 import           Data.ByteString       (ByteString)
+import           Data.Int              (Int32)
 import           Data.List.NonEmpty    (NonEmpty (..))
 import qualified Data.List.NonEmpty    as NE
+
+import qualified Auth.Biscuit.Proto    as PB
+import qualified Data.Serialize        as PB
 
 type SignedBlock = (ByteString, Signature, PublicKey)
 type Blocks = NonEmpty SignedBlock
@@ -52,13 +56,21 @@ data SealedToken = SealedToken
   , sig     :: Signature
   }
 
+serializePublicKey :: PublicKey -> ByteString
+serializePublicKey pk =
+  let keyBytes = convert pk
+      algId :: Int32
+      algId = fromIntegral $ fromEnum PB.Ed25519
+      algBytes = PB.runPut $ PB.putInt32le algId
+   in algBytes <> keyBytes
+
 signBlock :: SecretKey
           -> ByteString
           -> IO (SignedBlock, SecretKey)
 signBlock sk payload = do
   let pk = toPublic sk
   (nextPk, nextSk) <- (toPublic &&& id) <$> generateSecretKey
-  let toSign = payload <> convert nextPk
+  let toSign = payload <> serializePublicKey nextPk
       sig = sign sk pk toSign
   pure ((payload, sig, nextPk), nextSk)
 
@@ -82,7 +94,7 @@ getSignatureProof :: SignedBlock -> SecretKey -> Signature
 getSignatureProof (lastPayload, lastSig, lastPk) nextSecret =
   let sk = nextSecret
       pk = toPublic nextSecret
-      toSign = lastPayload <> convert lastPk <> convert lastSig
+      toSign = lastPayload <> serializePublicKey lastPk <> convert lastSig
    in sign sk pk toSign
 
 seal :: Token -> SealedToken
@@ -108,7 +120,7 @@ uncurry3 f (a, b, c) = f a b c
 
 getToSig :: (ByteString, a, PublicKey) -> ByteString
 getToSig (p, _, nextPk) =
-    p <> convert nextPk
+    p <> serializePublicKey nextPk
 
 verifyBlocks :: Blocks
              -> PublicKey
@@ -140,7 +152,7 @@ verifySignatureProof :: Signature
                      -> SignedBlock
                      -> Bool
 verifySignatureProof extraSig (lastPayload, lastSig, lastPk) =
-  let toSign = lastPayload <> convert lastPk <> convert lastSig
+  let toSign = lastPayload <> serializePublicKey lastPk <> convert lastSig
    in verify lastPk toSign extraSig
 
 verifySealedToken :: SealedToken
