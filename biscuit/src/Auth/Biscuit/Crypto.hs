@@ -82,7 +82,7 @@ getSignatureProof :: SignedBlock -> SecretKey -> Signature
 getSignatureProof (lastPayload, lastSig, lastPk) nextSecret =
   let sk = nextSecret
       pk = toPublic nextSecret
-      toSign = lastPayload <> convert lastSig <> convert lastPk
+      toSign = lastPayload <> convert lastPk <> convert lastSig
    in sign sk pk toSign
 
 seal :: Token -> SealedToken
@@ -140,7 +140,7 @@ verifySignatureProof :: Signature
                      -> SignedBlock
                      -> Bool
 verifySignatureProof extraSig (lastPayload, lastSig, lastPk) =
-  let toSign = lastPayload <> convert lastSig <> convert lastPk
+  let toSign = lastPayload <> convert lastPk <> convert lastSig
    in verify lastPk toSign extraSig
 
 verifySealedToken :: SealedToken
