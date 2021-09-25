@@ -1,8 +1,9 @@
-{-# LANGUAGE DataKinds         #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE KindSignatures    #-}
-{-# LANGUAGE NamedFieldPuns    #-}
-{-# LANGUAGE RecordWildCards   #-}
+{-# LANGUAGE DataKinds          #-}
+{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE FlexibleInstances  #-}
+{-# LANGUAGE KindSignatures     #-}
+{-# LANGUAGE NamedFieldPuns     #-}
+{-# LANGUAGE RecordWildCards    #-}
 {- HLINT ignore "Reduce duplication" -}
 {-|
   Module      : Auth.Biscuit.Token
@@ -34,6 +35,7 @@ module Auth.Biscuit.Token
   , addBlockUnchecked
   , parseBiscuit
   , parseBiscuitUnchecked
+  , parseBiscuitWith
   , serializeBiscuit
   , verifyBiscuit
   , verifyBiscuitWithLimits
@@ -42,9 +44,10 @@ module Auth.Biscuit.Token
 
   , getRevocationIds
   , getCheckedBiscuitSignature
+
   ) where
 
-import           Control.Monad                       (when)
+import           Control.Monad                       (join, when)
 import           Data.Bifunctor                      (first)
 import           Data.ByteString                     (ByteString)
 import           Data.List.NonEmpty                  (NonEmpty ((:|)))
@@ -86,6 +89,7 @@ type ParsedSignedBlock = (ExistingBlock, Signature, PublicKey)
 data OpenOrSealed
   = SealedProof Signature
   | OpenProof SecretKey
+  deriving (Eq, Show)
 
 -- | This datatype represents the final proof of a biscuit statically known to be
 -- /open/ (capable of being attenuated further). In that case the proof is a secret
@@ -125,10 +129,12 @@ instance BiscuitProof Open where
 
 -- | Proof that a biscuit had its signatures verified with the carried root 'PublicKey'
 newtype Checked = Checked PublicKey
+  deriving stock (Eq, Show)
 
 -- | Marker that a biscuit was parsed without having its signatures verified. Such a biscuit
 -- cannot be trusted yet.
 data NotChecked = NotChecked
+  deriving stock (Eq, Show)
 
 -- | A parsed biscuit. The @proof@ type param can be one of 'Open', 'Sealed' or 'OpenOrSealed'.
 -- It describes whether a biscuit is open to further attenuation, or sealed and not modifyable
@@ -241,6 +247,8 @@ data ParseError
   -- ^ The signatures were invalid
   | InvalidProof
   -- ^ The biscuit final proof was invalid
+  | RevokedBiscuit
+  -- ^ The biscuit has been revoked
   deriving (Eq, Show)
 
 data BiscuitWrapper
@@ -269,6 +277,17 @@ parseBiscuitWrapper bs = do
     , ..
     }
 
+checkRevocation :: Applicative m
+                => (ByteString -> m Bool)
+                -> BiscuitWrapper
+                -> m (Either ParseError BiscuitWrapper)
+checkRevocation isRevoked bw@BiscuitWrapper{wAuthority,wBlocks} =
+  let getRevocationId (_, sig, _) = convert sig
+      revocationIds = getRevocationId <$> wAuthority :| wBlocks
+      keepIfNotRevoked results | or results = Left RevokedBiscuit
+                               | otherwise  = Right bw
+   in keepIfNotRevoked <$> traverse isRevoked revocationIds
+
 parseBlocks :: BiscuitWrapper -> Either ParseError (Symbols, NonEmpty ParsedSignedBlock)
 parseBlocks BiscuitWrapper{..} = do
   let toRawSignedBlock (payload, sig, pk') = do
@@ -294,9 +313,14 @@ parseBiscuitUnchecked bs = do
                  , .. }
 
 -- | Parse a biscuit from a raw bytestring, first checking its signature.
+-- You can use 'parseBiscuitWith' instead if you need to check revocation ids
 parseBiscuit :: PublicKey -> ByteString -> Either ParseError (Biscuit OpenOrSealed Checked)
 parseBiscuit pk bs = do
-  w@BiscuitWrapper{..} <- parseBiscuitWrapper bs
+  w <- parseBiscuitWrapper bs
+  parseBiscuit' pk w
+
+parseBiscuit' :: PublicKey -> BiscuitWrapper -> Either ParseError (Biscuit OpenOrSealed Checked)
+parseBiscuit' pk w@BiscuitWrapper{..} = do
   let allBlocks = NE.reverse $ wAuthority :| wBlocks
   let blocksResult = verifyBlocks allBlocks pk
   let proofResult = case wProof of
@@ -309,6 +333,19 @@ parseBiscuit pk bs = do
                  , proof = wProof
                  , proofCheck = Checked pk
                  , .. }
+
+-- | Parse a biscuit from a raw bytestring, first checking:
+--   - if it's not revoked;
+--   - its signature
+-- You can use 'parseBiscuit' instead if you don't need to check revocation ids
+parseBiscuitWith :: Applicative m
+                 => (ByteString -> m Bool)
+                 -> PublicKey
+                 -> ByteString
+                 -> m (Either ParseError (Biscuit OpenOrSealed Checked))
+parseBiscuitWith isRevoked pk bs =
+  let ew = parseBiscuitWrapper bs
+   in join <$> traverse (fmap (parseBiscuit' pk =<<) . checkRevocation isRevoked) ew
 
 rawSignedBlockToParsedSignedBlock :: Symbols
                                   -> ((ByteString, PB.Block), Signature, PublicKey)

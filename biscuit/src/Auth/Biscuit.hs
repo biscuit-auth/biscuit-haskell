@@ -50,6 +50,8 @@ module Auth.Biscuit
   , serializeB64
   , parseB64
   , parse
+  , parseB64With
+  , parseWith
   , serialize
 
   -- * Verifying a biscuit
@@ -69,7 +71,7 @@ module Auth.Biscuit
   , getCheckedBiscuitSignature
   ) where
 
-import           Control.Monad                       ((<=<))
+import           Control.Monad                       (join, (<=<))
 import           Data.Bifunctor                      (first)
 import           Data.ByteString                     (ByteString)
 import qualified Data.ByteString.Base16              as Hex
@@ -93,6 +95,7 @@ import           Auth.Biscuit.Token                  (Biscuit,
                                                       getCheckedBiscuitSignature,
                                                       getRevocationIds,
                                                       mkBiscuit, parseBiscuit,
+                                                      parseBiscuitWith,
                                                       serializeBiscuit,
                                                       verifyBiscuit,
                                                       verifyBiscuitWithLimits)
@@ -240,13 +243,43 @@ parsePublicKeyHex = parsePublicKey <=< fromHex
 -- instead.
 -- The biscuit signature is checked with the provided 'PublicKey' before
 -- completely decoding blocks
+-- The revocation ids are /not/ checked before completely decoding blocks.
+-- If you need to check revocation ids before decoding blocks, use 'parseWith'
+-- (or 'parseB64With' instead).
 parse :: PublicKey -> ByteString -> Either ParseError (Biscuit OpenOrSealed Checked)
 parse = parseBiscuit
+
+-- | Parse a biscuit from a raw bytestring. If you want to parse
+-- from a URL-compatible base 64 bytestring, consider using `parseB64`
+-- instead.
+-- The revocation ids are checked with the provided function before decoding
+-- blocks. If you don't need to check revocation ids before decoding blocks,
+-- use 'parse' (or 'parseB64' instead).
+-- The biscuit signature is checked with the provided 'PublicKey' before
+-- completely decoding blocks
+parseWith :: Applicative m
+          => (ByteString -> m Bool)
+          -- ^ A revocation check, returns 'True' if the provided id has been revoked
+          -> PublicKey
+          -> ByteString
+          -- ^ Raw bytes of a serialized biscuit
+          -> m (Either ParseError (Biscuit OpenOrSealed Checked))
+parseWith = parseBiscuitWith
 
 -- | Parse a biscuit from a URL-compatible base 64 encoded bytestring
 parseB64 :: PublicKey -> ByteString -> Either ParseError (Biscuit OpenOrSealed Checked)
 parseB64 pk = parse pk <=< first (const InvalidB64Encoding) . B64.decodeBase64
 
+parseB64With :: Applicative m
+             => (ByteString -> m Bool)
+             -- ^ A revocation check, returns 'True' if the provided id has been revoked
+             -> PublicKey
+             -> ByteString
+             -- ^ Base64-encoded bytes of a serialized biscuit
+             -> m (Either ParseError (Biscuit OpenOrSealed Checked))
+parseB64With isRevoked pk =
+  let rawBytes = first (const InvalidB64Encoding) . B64.decodeBase64
+   in fmap join . traverse (parseWith isRevoked pk) . rawBytes
 
 -- | Serialize a biscuit to a binary format. If you intend to send
 -- the biscuit over a text channel, consider using `serializeB64` instead

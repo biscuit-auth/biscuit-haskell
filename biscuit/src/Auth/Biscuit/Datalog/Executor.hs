@@ -27,7 +27,6 @@ module Auth.Biscuit.Datalog.Executor
 
 import           Control.Monad            (join, mfilter)
 import           Data.Bitraversable       (bitraverse)
-import           Data.ByteString          (ByteString)
 import qualified Data.ByteString          as ByteString
 import           Data.List.NonEmpty       (NonEmpty)
 import qualified Data.List.NonEmpty       as NE
@@ -85,20 +84,17 @@ data ExecutionError
 -- See `defaultLimits` for default values.
 data Limits
   = Limits
-  { maxFacts          :: Int
+  { maxFacts        :: Int
   -- ^ maximum number of facts that can be produced before throwing `TooManyFacts`
-  , maxIterations     :: Int
+  , maxIterations   :: Int
   -- ^ maximum number of iterations before throwing `TooManyIterations`
-  , maxTime           :: Int
+  , maxTime         :: Int
   -- ^ maximum duration the verification can take (in μs)
-  , allowRegexes      :: Bool
+  , allowRegexes    :: Bool
   -- ^ whether or not allowing `.matches()` during verification (untrusted regex computation
   -- can enable DoS attacks). This security risk is mitigated by the 'maxTime' setting.
-  , allowBlockFacts   :: Bool
+  , allowBlockFacts :: Bool
   -- ^ whether or not accept facts and rules in blocks
-  , checkRevocationId :: ByteString -> IO (Either () ())
-  -- ^ how to check for token revocation `Left ()` means that the given id is revoked,
-  -- `Right ()` means it’s not revoked.
   }
 
 -- | Default settings for the executor restrictions.
@@ -114,7 +110,6 @@ defaultLimits = Limits
   , maxTime = 1000
   , allowRegexes = True
   , allowBlockFacts = True
-  , checkRevocationId = const . pure $ Right ()
   }
 
 checkCheck :: Limits -> Set Fact -> Check -> Validation (NonEmpty Check) ()
