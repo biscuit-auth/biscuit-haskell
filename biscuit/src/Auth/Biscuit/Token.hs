@@ -355,7 +355,7 @@ rawSignedBlockToParsedSignedBlock s ((payload, pbBlock), sig, pk) = do
   pure ((payload, block), sig, pk)
 
 -- | Extract the list of revocation ids from a biscuit
-getRevocationIds :: Biscuit OpenOrSealed Checked -> NonEmpty ByteString
+getRevocationIds :: Biscuit proof check -> NonEmpty ByteString
 getRevocationIds Biscuit{authority, blocks} =
   let allBlocks = authority :| blocks
       getRevocationId (_, sig, _) = convert sig
