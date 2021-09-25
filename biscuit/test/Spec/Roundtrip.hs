@@ -30,10 +30,6 @@ specs = testGroup "Serde roundtrips"
       [ singleBlock    (serializeB64, parseB64)
       , multipleBlocks (serializeB64, parseB64)
       ]
-  , testGroup "Hex serde"
-      [ singleBlock    (serializeHex, parseHex)
-      , multipleBlocks (serializeHex, parseHex)
-      ]
   , testGroup "Keys serde"
       [ secret
       , public

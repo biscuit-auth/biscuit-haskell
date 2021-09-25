@@ -51,8 +51,6 @@ module Auth.Biscuit
   , parseB64
   , parse
   , serialize
-  , parseHex
-  , serializeHex
 
   -- * Verifying a biscuit
   -- $verifying
@@ -98,7 +96,6 @@ import           Auth.Biscuit.Token                  (Biscuit,
                                                       serializeBiscuit,
                                                       verifyBiscuit,
                                                       verifyBiscuitWithLimits)
-import           Auth.Biscuit.Utils                  (maybeToRight)
 
 
 -- $biscuitOverview
@@ -250,9 +247,6 @@ parse = parseBiscuit
 parseB64 :: PublicKey -> ByteString -> Either ParseError (Biscuit OpenOrSealed Checked)
 parseB64 pk = parse pk <=< first (const InvalidB64Encoding) . B64.decodeBase64
 
--- | Parse a biscuit from an hex-encoded bytestring
-parseHex :: PublicKey -> ByteString -> Either ParseError (Biscuit OpenOrSealed Checked)
-parseHex pk = parse pk <=< maybeToRight InvalidHexEncoding . fromHex
 
 -- | Serialize a biscuit to a binary format. If you intend to send
 -- the biscuit over a text channel, consider using `serializeB64` instead
@@ -262,11 +256,6 @@ serialize = serializeBiscuit
 -- | Serialize a biscuit to URL-compatible base 64, as recommended by the spec
 serializeB64 :: BiscuitProof p => Biscuit p Checked -> ByteString
 serializeB64 = B64.encodeBase64' . serialize
-
--- | Serialize a biscuit to a hex (base 16) string. Be advised that the specs
--- recommends base 64 instead.
-serializeHex :: BiscuitProof p => Biscuit p Checked -> ByteString
-serializeHex = Hex.encode . serialize
 
 -- $biscuitBlocks
 --
