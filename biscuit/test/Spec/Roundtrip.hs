@@ -12,13 +12,9 @@ import           Test.Tasty
 import           Test.Tasty.HUnit
 
 import           Auth.Biscuit        hiding (Biscuit, ParseError, PublicKey,
-                                      addBlock, mkBiscuit, parse, publicKey,
-                                      serialize)
+                                      addBlock, mkBiscuit, publicKey)
 import           Auth.Biscuit.Crypto
 import           Auth.Biscuit.Token
-
-serialize = serializeBiscuit
-parse  = parseBiscuit
 
 specs :: TestTree
 specs = testGroup "Serde roundtrips"

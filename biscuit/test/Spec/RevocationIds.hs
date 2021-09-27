@@ -8,7 +8,9 @@ import           Data.ByteString        (ByteString)
 import qualified Data.ByteString        as ByteString
 import qualified Data.ByteString.Base16 as Hex
 import           Data.Functor           (void)
+import           Data.List              (intersect)
 import qualified Data.List.NonEmpty     as NE
+import           Data.Maybe             (mapMaybe)
 import           Test.Tasty
 import           Test.Tasty.HUnit
 
@@ -25,11 +27,15 @@ readFromFile path = do
     Left x  -> fail $ show x
     Right b -> pure b
 
-readFromFileCheckRevocation :: (ByteString -> IO Bool)
+readFromFileCheckRevocation :: [ByteString]
                             -> FilePath
                             -> IO (Either ParseError (Biscuit OpenOrSealed Checked))
-readFromFileCheckRevocation isRevoked path =
-  parseWith isRevoked pk =<< ByteString.readFile ("test/samples/v2/" <> path)
+readFromFileCheckRevocation revokedIds path =
+  let parser = parseWith ParserConfig { encoding = RawBytes
+                                      , getPublicKey = const pk
+                                      , isRevoked = fromRevocationList revokedIds
+                                      }
+   in parser =<< ByteString.readFile ("test/samples/v2/" <> path)
 
 getHex :: Biscuit OpenOrSealed Checked -> [ByteString]
 getHex = NE.toList . fmap Hex.encode . getRevocationIds
@@ -63,8 +69,9 @@ token16 = testCase "Token 16" $ do
 
 parseTimeCheck :: TestTree
 parseTimeCheck = testCase "Parse time revocation check" $ do
-  let isRevoked = pure . ((== "02766fa2dbb0bd5a2d4d3fc4e0dd9252ec4dc118fe5bc0eafb67fbce0ddf6a86f4db7ecc0b1da14c210b8dcae53fcfc44565edb32ba18bfc9ca9f97258c4db0d") . Hex.encode)
-  res1 <- readFromFileCheckRevocation isRevoked "test16_caveat_head_name.bc"
+  let revokedIds :: [ByteString]
+      revokedIds = mapMaybe fromHex [ "02766fa2dbb0bd5a2d4d3fc4e0dd9252ec4dc118fe5bc0eafb67fbce0ddf6a86f4db7ecc0b1da14c210b8dcae53fcfc44565edb32ba18bfc9ca9f97258c4db0d" ]
+  res1 <- readFromFileCheckRevocation revokedIds "test16_caveat_head_name.bc"
   res1 @?= Left RevokedBiscuit
-  res2 <- void <$> readFromFileCheckRevocation isRevoked "test1_basic.bc"
+  res2 <- void <$> readFromFileCheckRevocation revokedIds "test1_basic.bc"
   res2 @?= Right ()

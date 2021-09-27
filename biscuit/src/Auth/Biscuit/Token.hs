@@ -33,7 +33,8 @@ module Auth.Biscuit.Token
   , mkBiscuit
   , addBlock
   , addBlockUnchecked
-  , parseBiscuit
+  , BiscuitEncoding (..)
+  , ParserConfig (..)
   , parseBiscuitUnchecked
   , parseBiscuitWith
   , serializeBiscuit
@@ -50,9 +51,12 @@ module Auth.Biscuit.Token
 import           Control.Monad                       (join, when)
 import           Data.Bifunctor                      (first)
 import           Data.ByteString                     (ByteString)
+import qualified Data.ByteString.Base64.URL          as B64
 import           Data.List.NonEmpty                  (NonEmpty ((:|)))
 import qualified Data.List.NonEmpty                  as NE
---
+import           Data.Set                            (Set)
+import qualified Data.Set                            as Set
+
 import           Auth.Biscuit.Crypto
 import           Auth.Biscuit.Datalog.AST            (Block, Verifier)
 import           Auth.Biscuit.Datalog.Executor       (ExecutionError, Limits,
@@ -278,15 +282,15 @@ parseBiscuitWrapper bs = do
     }
 
 checkRevocation :: Applicative m
-                => (ByteString -> m Bool)
+                => (Set ByteString -> m Bool)
                 -> BiscuitWrapper
                 -> m (Either ParseError BiscuitWrapper)
 checkRevocation isRevoked bw@BiscuitWrapper{wAuthority,wBlocks} =
   let getRevocationId (_, sig, _) = convert sig
       revocationIds = getRevocationId <$> wAuthority :| wBlocks
-      keepIfNotRevoked results | or results = Left RevokedBiscuit
-                               | otherwise  = Right bw
-   in keepIfNotRevoked <$> traverse isRevoked revocationIds
+      keepIfNotRevoked True  = Left RevokedBiscuit
+      keepIfNotRevoked False = Right bw
+   in keepIfNotRevoked <$> isRevoked (Set.fromList $ NE.toList revocationIds)
 
 parseBlocks :: BiscuitWrapper -> Either ParseError (Symbols, NonEmpty ParsedSignedBlock)
 parseBlocks BiscuitWrapper{..} = do
@@ -312,13 +316,6 @@ parseBiscuitUnchecked bs = do
                  , proofCheck = NotChecked
                  , .. }
 
--- | Parse a biscuit from a raw bytestring, first checking its signature.
--- You can use 'parseBiscuitWith' instead if you need to check revocation ids
-parseBiscuit :: PublicKey -> ByteString -> Either ParseError (Biscuit OpenOrSealed Checked)
-parseBiscuit pk bs = do
-  w <- parseBiscuitWrapper bs
-  parseBiscuit' pk w
-
 parseBiscuit' :: PublicKey -> BiscuitWrapper -> Either ParseError (Biscuit OpenOrSealed Checked)
 parseBiscuit' pk w@BiscuitWrapper{..} = do
   let allBlocks = NE.reverse $ wAuthority :| wBlocks
@@ -334,18 +331,37 @@ parseBiscuit' pk w@BiscuitWrapper{..} = do
                  , proofCheck = Checked pk
                  , .. }
 
--- | Parse a biscuit from a raw bytestring, first checking:
---   - if it's not revoked;
---   - its signature
--- You can use 'parseBiscuit' instead if you don't need to check revocation ids
+-- | Biscuits can be transmitted as raw bytes, or as base64-encoded text. This datatype
+-- lets the parser know about the expected encoding.
+data BiscuitEncoding
+  = RawBytes
+  | UrlBase64
+
+-- | Parsing a biscuit involves various steps. This data type allows configuring those steps.
+data ParserConfig m
+  = ParserConfig
+  { encoding     :: BiscuitEncoding
+  -- ^ Is the biscuit base64-encoded, or is it raw binary?
+  , isRevoked    :: Set ByteString -> m Bool
+  -- ^ Has one of the token blocks been revoked?
+  -- 'fromRevocationList' lets you build this function from a static revocation list
+  , getPublicKey :: Maybe Int -> PublicKey
+  -- ^ How to select the public key based on the token 'rootKeyId'
+  }
+
 parseBiscuitWith :: Applicative m
-                 => (ByteString -> m Bool)
-                 -> PublicKey
+                 => ParserConfig m
                  -> ByteString
                  -> m (Either ParseError (Biscuit OpenOrSealed Checked))
-parseBiscuitWith isRevoked pk bs =
-  let ew = parseBiscuitWrapper bs
-   in join <$> traverse (fmap (parseBiscuit' pk =<<) . checkRevocation isRevoked) ew
+parseBiscuitWith ParserConfig{..} bs =
+  let input = case encoding of
+        RawBytes  -> Right bs
+        UrlBase64 -> first (const InvalidB64Encoding) . B64.decodeBase64 $ bs
+      parsedWrapper = parseBiscuitWrapper =<< input
+      wrapperToBiscuit w@BiscuitWrapper{wRootKeyId} =
+        let pk = getPublicKey wRootKeyId
+         in (parseBiscuit' pk =<<) <$> checkRevocation isRevoked w
+   in join <$> traverse wrapperToBiscuit parsedWrapper
 
 rawSignedBlockToParsedSignedBlock :: Symbols
                                   -> ((ByteString, PB.Block), Signature, PublicKey)
@@ -354,7 +370,9 @@ rawSignedBlockToParsedSignedBlock s ((payload, pbBlock), sig, pk) = do
   block   <- first (InvalidProtobuf False) $ pbToBlock s pbBlock
   pure ((payload, block), sig, pk)
 
--- | Extract the list of revocation ids from a biscuit
+-- | Extract the list of revocation ids from a biscuit.
+-- To reject revoked biscuits, please use 'parseWith' instead. This function
+-- should only be used for debugging purposes.
 getRevocationIds :: Biscuit proof check -> NonEmpty ByteString
 getRevocationIds Biscuit{authority, blocks} =
   let allBlocks = authority :| blocks
@@ -383,7 +401,7 @@ verifyBiscuitWithLimits l Biscuit{..} verifier =
 --
 -- Specific runtime limits can be specified by using 'verifyBiscuitWithLimits'. 'verifyBiscuit'
 -- uses a set of defaults defined in 'defaultLimits'.
-verifyBiscuit :: Biscuit a Checked -> Verifier -> IO (Either ExecutionError VerificationSuccess)
+verifyBiscuit :: Biscuit proof Checked -> Verifier -> IO (Either ExecutionError VerificationSuccess)
 verifyBiscuit = verifyBiscuitWithLimits defaultLimits
 
 -- | Retrieve the `PublicKey` which was used to verify the `Biscuit` signatures
