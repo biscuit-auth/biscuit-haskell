@@ -36,8 +36,13 @@ module Auth.Biscuit
   , block
   , blockContext
   , addBlock
+  , addBlockUnchecked
+  , seal
+  , sealUnchecked
   , fromOpen
   , fromSealed
+  , asOpen
+  , asSealed
   , Biscuit
   , OpenOrSealed
   , Open
@@ -84,7 +89,12 @@ import           Data.Set                            (Set)
 import qualified Data.Set                            as Set
 import           Data.Text                           (Text)
 
-import           Auth.Biscuit.Crypto
+import           Auth.Biscuit.Crypto                 (PublicKey, SecretKey,
+                                                      convert,
+                                                      generateSecretKey,
+                                                      maybeCryptoError,
+                                                      publicKey, secretKey,
+                                                      toPublic)
 import           Auth.Biscuit.Datalog.AST            (Block, Verifier, bContext)
 import           Auth.Biscuit.Datalog.Executor       (ExecutionError (..),
                                                       Limits (..),
@@ -98,12 +108,15 @@ import           Auth.Biscuit.Token                  (Biscuit,
                                                       OpenOrSealed,
                                                       ParseError (..),
                                                       ParserConfig (..), Sealed,
-                                                      addBlock, fromOpen,
+                                                      addBlock,
+                                                      addBlockUnchecked, asOpen,
+                                                      asSealed, fromOpen,
                                                       fromSealed,
                                                       getCheckedBiscuitSignature,
                                                       getRevocationIds,
                                                       mkBiscuit,
-                                                      parseBiscuitWith,
+                                                      parseBiscuitWith, seal,
+                                                      sealUnchecked,
                                                       serializeBiscuit,
                                                       verifyBiscuit,
                                                       verifyBiscuitWithLimits)

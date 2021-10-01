@@ -44,8 +44,8 @@ module Auth.Biscuit.Token
   , fromSealed
   , asOpen
   , asSealed
-  , sealBiscuit
-  , sealBiscuitUnchecked
+  , seal
+  , sealUnchecked
 
   , getRevocationIds
   , getCheckedBiscuitSignature
@@ -61,7 +61,14 @@ import qualified Data.List.NonEmpty                  as NE
 import           Data.Set                            (Set)
 import qualified Data.Set                            as Set
 
-import           Auth.Biscuit.Crypto
+import           Auth.Biscuit.Crypto                 (PublicKey, SecretKey,
+                                                      Signature, SignedBlock,
+                                                      convert,
+                                                      getSignatureProof,
+                                                      signBlock, toPublic,
+                                                      verifyBlocks,
+                                                      verifySecretProof,
+                                                      verifySignatureProof)
 import           Auth.Biscuit.Datalog.AST            (Block, Verifier)
 import           Auth.Biscuit.Datalog.Executor       (ExecutionError, Limits,
                                                       defaultLimits)
@@ -239,11 +246,11 @@ sealBiscuit' b@Biscuit{..} =
       newProof = Sealed $ getSignatureProof (lastPayload, lastSig, lastPk) sk
    in b { proof = newProof }
 
-sealBiscuit :: Biscuit Open Checked -> Biscuit Sealed Checked
-sealBiscuit = sealBiscuit'
+seal :: Biscuit Open Checked -> Biscuit Sealed Checked
+seal = sealBiscuit'
 
-sealBiscuitUnchecked :: Biscuit Open NotChecked -> Biscuit Sealed NotChecked
-sealBiscuitUnchecked = sealBiscuit'
+sealUnchecked :: Biscuit Open NotChecked -> Biscuit Sealed NotChecked
+sealUnchecked = sealBiscuit'
 
 -- | Serialize a biscuit to a raw bytestring
 serializeBiscuit :: BiscuitProof p => Biscuit p Checked -> ByteString
