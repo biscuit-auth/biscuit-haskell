@@ -39,15 +39,15 @@ module Auth.Biscuit
   , OpenOrSealed
   , Open
   , Sealed
-  , Checked
-  , NotChecked
+  , Verified
+  , Unverified
   , BiscuitProof
   , Block
   -- ** Parsing and serializing biscuits
   , parseB64
   , parse
   , parseWith
-  , parseBiscuitUnchecked
+  , parseBiscuitUnverified
   , checkBiscuitSignatures
   , BiscuitEncoding (..)
   , ParserConfig (..)
@@ -79,7 +79,7 @@ module Auth.Biscuit
 
   -- * Retrieving information from a biscuit
   , getRevocationIds
-  , getCheckedBiscuitPublicKey
+  , getVerifiedBiscuitPublicKey
   ) where
 
 import           Control.Monad                       ((<=<))
@@ -107,19 +107,19 @@ import           Auth.Biscuit.Datalog.Parser         (authorizer, block)
 import           Auth.Biscuit.Datalog.ScopedExecutor (AuthorizationSuccess (..))
 import           Auth.Biscuit.Token                  (Biscuit,
                                                       BiscuitEncoding (..),
-                                                      BiscuitProof (..),
-                                                      Checked, NotChecked, Open,
+                                                      BiscuitProof (..), Open,
                                                       OpenOrSealed,
                                                       ParseError (..),
                                                       ParserConfig (..), Sealed,
+                                                      Unverified, Verified,
                                                       addBlock, asOpen,
                                                       asSealed,
                                                       checkBiscuitSignatures,
                                                       fromOpen, fromSealed,
-                                                      getCheckedBiscuitPublicKey,
                                                       getRevocationIds,
+                                                      getVerifiedBiscuitPublicKey,
                                                       mkBiscuit,
-                                                      parseBiscuitUnchecked,
+                                                      parseBiscuitUnverified,
                                                       parseBiscuitWith, seal,
                                                       serializeBiscuit,
                                                       verifyBiscuit,
@@ -140,14 +140,13 @@ import           Auth.Biscuit.Token                  (Biscuit,
 --
 -- Here's how to create a biscuit token:
 --
--- > -- Biscuit Open Checked means the token has valid signatures
+-- > -- Biscuit Open Verified means the token has valid signatures
 -- > -- and is open to further restriction
--- > buildToken :: Keypair -> IO (Biscuit Open Checked)
+-- > buildToken :: Keypair -> IO (Biscuit Open Verified)
 -- > buildToken keypair =
 -- >   -- the logic language has its own syntax, which can be typed directly in haskell
--- >   -- source code thanks to QuasiQuotes. The datalog snippets are parsed and checked
--- >   -- at compile time, so a datalog error results in a compilation error, not a runtime
--- >   -- error
+-- >   -- source code thanks to QuasiQuotes. The datalog snippets are parsed at compile
+-- >   -- time, so a datalog error results in a compilation error, not a runtime error
 -- >   mkBiscuit keypair [block|
 -- >       // the two first lines describe facts:
 -- >       // the token holder is identified as `user_1234`
@@ -162,7 +161,7 @@ import           Auth.Biscuit.Token                  (Biscuit,
 --
 -- Here's how to attenuate a biscuit token:
 --
--- > restrictToken :: Biscuit Open Checked -> IO Biscuit Open Checked
+-- > restrictToken :: Biscuit Open Verified -> IO Biscuit Open Verified
 -- > restrictToken =
 -- >   addBlock [block|
 -- >       // restrict the token to local use only
@@ -267,12 +266,12 @@ parsePublicKeyHex = parsePublicKey <=< fromHex
 -- | Parse a biscuit from a raw bytestring. If you want to parse
 -- from a URL-compatible base 64 bytestring, consider using `parseB64`
 -- instead.
--- The biscuit signature is checked with the provided 'PublicKey' before
+-- The biscuit signature is verified with the provided 'PublicKey' before
 -- completely decoding blocks
--- The revocation ids are /not/ checked before completely decoding blocks.
+-- The revocation ids are /not/ verified before completely decoding blocks.
 -- If you need to check revocation ids before decoding blocks, use 'parseWith'
 -- (or 'parseB64With' instead).
-parse :: PublicKey -> ByteString -> Either ParseError (Biscuit OpenOrSealed Checked)
+parse :: PublicKey -> ByteString -> Either ParseError (Biscuit OpenOrSealed Verified)
 parse pk = runIdentity . parseBiscuitWith ParserConfig
   { encoding = RawBytes
   , isRevoked = const $ pure False
@@ -280,7 +279,7 @@ parse pk = runIdentity . parseBiscuitWith ParserConfig
   }
 
 -- | Parse a biscuit from a URL-compatible base 64 encoded bytestring
-parseB64 :: PublicKey -> ByteString -> Either ParseError (Biscuit OpenOrSealed Checked)
+parseB64 :: PublicKey -> ByteString -> Either ParseError (Biscuit OpenOrSealed Verified)
 parseB64 pk = runIdentity . parseBiscuitWith ParserConfig
   { encoding = UrlBase64
   , isRevoked = const $ pure False
@@ -296,12 +295,12 @@ parseB64 pk = runIdentity . parseBiscuitWith ParserConfig
 -- If you don't need dynamic public key selection or revocation checks, you can use
 -- 'parse' or 'parseB64' instead.
 --
--- The biscuit signature is checked with the selected 'PublicKey' before
+-- The biscuit signature is verified with the selected 'PublicKey' before
 -- completely decoding blocks
 parseWith :: Applicative m
           => ParserConfig m
           -> ByteString
-          -> m (Either ParseError (Biscuit OpenOrSealed Checked))
+          -> m (Either ParseError (Biscuit OpenOrSealed Verified))
 parseWith = parseBiscuitWith
 
 -- | Helper for building a revocation check from a static list, suitable for use with
@@ -315,11 +314,11 @@ fromRevocationList revokedIds tokenIds =
 
 -- | Serialize a biscuit to a binary format. If you intend to send
 -- the biscuit over a text channel, consider using `serializeB64` instead
-serialize :: BiscuitProof p => Biscuit p Checked -> ByteString
+serialize :: BiscuitProof p => Biscuit p Verified -> ByteString
 serialize = serializeBiscuit
 
 -- | Serialize a biscuit to URL-compatible base 64, as recommended by the spec
-serializeB64 :: BiscuitProof p => Biscuit p Checked -> ByteString
+serializeB64 :: BiscuitProof p => Biscuit p Verified -> ByteString
 serializeB64 = B64.encodeBase64' . serialize
 
 -- $biscuitBlocks
