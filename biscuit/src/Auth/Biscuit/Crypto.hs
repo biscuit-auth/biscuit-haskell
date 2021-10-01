@@ -1,7 +1,6 @@
-{-# LANGUAGE DuplicateRecordFields #-}
-{-# LANGUAGE NamedFieldPuns        #-}
 module Auth.Biscuit.Crypto
   ( SignedBlock
+  , Blocks
   , signBlock
   , verifyBlocks
   , verifySecretProof
@@ -20,16 +19,6 @@ module Auth.Biscuit.Crypto
   , maybeCryptoError
   , generateSecretKey
   , toPublic
-
-  -- High-level helpers used in tests
-  , Token (..)
-  , SealedToken (..)
-  , Blocks
-  , signToken
-  , append
-  , seal
-  , verifyToken
-  , verifySealedToken
   ) where
 
 import           Control.Arrow         ((&&&))
@@ -47,21 +36,18 @@ import qualified Data.Serialize        as PB
 type SignedBlock = (ByteString, Signature, PublicKey)
 type Blocks = NonEmpty SignedBlock
 
-data Token = Token
-  { payload :: Blocks
-  , privKey :: SecretKey
-  }
-
-data SealedToken = SealedToken
-  { payload :: Blocks
-  , sig     :: Signature
-  }
-
+-- | Biscuit 2.0 allows multiple signature algorithms.
+-- For now this lib only supports Ed25519, but the spec mandates flagging
+-- each publicKey with an algorithm identifier when serializing it. The
+-- serializing itself is handled by protobuf, but we still need to manually
+-- serialize keys when we include them in something we want sign (block
+-- signatures, and the final signature for sealed tokens).
 serializePublicKey :: PublicKey -> ByteString
 serializePublicKey pk =
   let keyBytes = convert pk
       algId :: Int32
       algId = fromIntegral $ fromEnum PB.Ed25519
+      -- The spec mandates that we serialize the algorithm id as a little-endian int32
       algBytes = PB.runPut $ PB.putInt32le algId
    in algBytes <> keyBytes
 
@@ -75,22 +61,6 @@ signBlock sk payload = do
       sig = sign sk pk toSign
   pure ((payload, sig, nextPk), nextSk)
 
-signToken :: ByteString -> SecretKey -> IO Token
-signToken p sk = do
-  (signedBlock, privKey) <- signBlock sk p
-  pure Token
-    { payload = pure signedBlock
-    , privKey
-    }
-
-append :: Token -> ByteString -> IO Token
-append t@Token{payload} p = do
-  (signedBlock, privKey) <- signBlock (privKey t) p
-  pure Token
-    { payload = pure signedBlock <> payload
-    , privKey
-    }
-
 getSignatureProof :: SignedBlock -> SecretKey -> Signature
 getSignatureProof (lastPayload, lastSig, lastPk) nextSecret =
   let sk = nextSecret
@@ -98,41 +68,29 @@ getSignatureProof (lastPayload, lastSig, lastPk) nextSecret =
       toSign = lastPayload <> serializePublicKey lastPk <> convert lastSig
    in sign sk pk toSign
 
-seal :: Token -> SealedToken
-seal Token{payload,privKey} =
-  let lastBlock = NE.head payload
-   in SealedToken
-        { sig = getSignatureProof lastBlock privKey
-        , payload
-        }
-
-snocNE :: [a] -> a -> NonEmpty a
-snocNE (h : t) l = h :| (t <> [l])
-snocNE [] l      = l :| []
-
-snd' :: (a,b,c) -> b
-snd' (_, b, _) = b
-trd' :: (a,b,c) -> c
-trd' (_, _, c) = c
-
-uncurry3 :: (a -> b -> c -> d)
-         -> (a, b, c) -> d
-uncurry3 f (a, b, c) = f a b c
-
 getToSig :: (ByteString, a, PublicKey) -> ByteString
 getToSig (p, _, nextPk) =
     p <> serializePublicKey nextPk
+
+getSignature :: SignedBlock -> Signature
+getSignature (_, sig, _) = sig
+
+getPublicKey :: SignedBlock -> PublicKey
+getPublicKey (_, _, pk) = pk
 
 verifyBlocks :: Blocks
              -> PublicKey
              -> Bool
 verifyBlocks blocks rootPk =
-  let sigs = snd' <$> blocks
+  let attachKey pk (payload, sig) = (pk, payload, sig)
+      uncurry3 f (a, b, c) = f a b c
+      sigs = getSignature <$> blocks
       toSigs = getToSig <$> blocks
-      keys = snocNE (NE.tail $ trd' <$> blocks) rootPk
-      to3t a (b, c) = (a, b, c)
-      pkps = NE.zipWith to3t keys (NE.zip toSigs sigs)
-   in all (uncurry3 verify) pkps
+      -- key for block 0 is the root key
+      -- key for block n is the key from block (n - 1)
+      keys = rootPk :| NE.init (getPublicKey <$> blocks)
+      keysPayloadsSigs = NE.zipWith attachKey keys (NE.zip toSigs sigs)
+   in all (uncurry3 verify) keysPayloadsSigs
 
 verifySecretProof :: SecretKey
                   -> SignedBlock
@@ -140,27 +98,9 @@ verifySecretProof :: SecretKey
 verifySecretProof nextSecret (_, _, lastPk) =
   lastPk == toPublic nextSecret
 
-verifyToken :: Token
-            -> PublicKey
-            -> Bool
-verifyToken Token{payload, privKey} rootPk =
-  let blocks = payload
-      sigChecks = verifyBlocks blocks rootPk
-      lastCheck = verifySecretProof privKey (NE.head payload)
-  in sigChecks && lastCheck
-
 verifySignatureProof :: Signature
                      -> SignedBlock
                      -> Bool
 verifySignatureProof extraSig (lastPayload, lastSig, lastPk) =
   let toSign = lastPayload <> serializePublicKey lastPk <> convert lastSig
    in verify lastPk toSign extraSig
-
-verifySealedToken :: SealedToken
-                  -> PublicKey
-                  -> Bool
-verifySealedToken SealedToken{payload, sig} rootPk =
-  let blocks = payload
-      sigChecks = verifyBlocks blocks rootPk
-      lastCheck = verifySignatureProof sig (NE.head payload)
-  in sigChecks && lastCheck

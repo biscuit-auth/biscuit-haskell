@@ -350,11 +350,11 @@ parseBiscuitUnchecked bs = do
 
 parseBiscuit' :: PublicKey -> BiscuitWrapper -> Either ParseError (Biscuit OpenOrSealed Checked)
 parseBiscuit' pk w@BiscuitWrapper{..} = do
-  let allBlocks = NE.reverse $ wAuthority :| wBlocks
+  let allBlocks = wAuthority :| wBlocks
   let blocksResult = verifyBlocks allBlocks pk
   let proofResult = case wProof of
-        SealedProof sig -> verifySignatureProof sig (NE.head allBlocks)
-        OpenProof   sk  -> verifySecretProof sk     (NE.head allBlocks)
+        SealedProof sig -> verifySignatureProof sig (NE.last allBlocks)
+        OpenProof   sk  -> verifySecretProof sk     (NE.last allBlocks)
   when (not blocksResult || not proofResult) $ Left InvalidSignatures
 
   (symbols, authority :| blocks) <- parseBlocks w
