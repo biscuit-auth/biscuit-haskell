@@ -42,6 +42,8 @@ module Auth.Biscuit.Token
   , verifyBiscuitWithLimits
   , fromOpen
   , fromSealed
+  , asOpen
+  , asSealed
 
   , getRevocationIds
   , getCheckedBiscuitSignature
@@ -177,6 +179,16 @@ fromOpen b@Biscuit{proof = Open p } = b { proof = OpenProof p }
 -- (essentially /forgetting/ about the fact it's 'Sealed')
 fromSealed :: Biscuit Sealed Checked -> Biscuit OpenOrSealed Checked
 fromSealed b@Biscuit{proof = Sealed p } = b { proof = SealedProof p }
+
+asSealed :: Biscuit OpenOrSealed Checked -> Maybe (Biscuit Sealed Checked)
+asSealed b@Biscuit{proof} = case proof of
+  SealedProof p -> Just $ b { proof = Sealed p }
+  _             -> Nothing
+
+asOpen :: Biscuit OpenOrSealed Checked -> Maybe (Biscuit Open Checked)
+asOpen b@Biscuit{proof}   = case proof of
+  OpenProof p -> Just $ b { proof = Open p }
+  _           -> Nothing
 
 toParsedSignedBlock :: Block -> SignedBlock -> ParsedSignedBlock
 toParsedSignedBlock block (serializedBlock, sig, pk) = ((serializedBlock, block), sig, pk)
