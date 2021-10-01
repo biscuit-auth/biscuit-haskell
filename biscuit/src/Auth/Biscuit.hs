@@ -47,15 +47,15 @@ module Auth.Biscuit
   , BiscuitProof
   , Block
   -- ** Parsing and serializing biscuits
-  , serializeB64
   , parseB64
   , parse
   , parseWith
-  , fromRevocationList
-  , ParserConfig (..)
   , BiscuitEncoding (..)
-  , fromHex
+  , ParserConfig (..)
+  , fromRevocationList
+  , serializeB64
   , serialize
+  , fromHex
 
   -- * Verifying a biscuit
   -- $verifying
