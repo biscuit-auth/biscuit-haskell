@@ -6,6 +6,7 @@ module Auth.Biscuit.Crypto
   , verifyBlocks
   , verifySecretProof
   , verifySignatureProof
+  , getSignatureProof
 
   -- Ed25519 reexports
   , PublicKey

@@ -44,6 +44,8 @@ module Auth.Biscuit.Token
   , fromSealed
   , asOpen
   , asSealed
+  , sealBiscuit
+  , sealBiscuitUnchecked
 
   , getRevocationIds
   , getCheckedBiscuitSignature
@@ -207,12 +209,10 @@ mkBiscuit sk authority = do
                , proofCheck = Checked $ toPublic sk
                }
 
--- | Add a block to an existing biscuit. Only 'Open' biscuits can be attenuated; the
--- newly created biscuit is 'Open' as well.
-addBlock :: Block
-         -> Biscuit Open Checked
-         -> IO (Biscuit Open Checked)
-addBlock block b@Biscuit{..} = do
+addBlock' :: Block
+          -> Biscuit Open check
+          -> IO (Biscuit Open check)
+addBlock' block b@Biscuit{..} = do
   let (blockSymbols, blockSerialized) = PB.encodeBlock <$> blockToPb symbols block
       Open p = proof
   (signedBlock, nextSk) <- signBlock p blockSerialized
@@ -221,16 +221,29 @@ addBlock block b@Biscuit{..} = do
            , proof = Open nextSk
            }
 
+-- | Add a block to an existing biscuit. Only 'Open' biscuits can be attenuated; the
+-- newly created biscuit is 'Open' as well.
+addBlock :: Block
+         -> Biscuit Open Checked
+         -> IO (Biscuit Open Checked)
+addBlock = addBlock'
+
 -- | Add a block to an existing biscuit, without checking its signatures first
 addBlockUnchecked :: Block -> Biscuit Open NotChecked -> IO (Biscuit Open NotChecked)
-addBlockUnchecked block b@Biscuit{..} = do
-  let (blockSymbols, blockSerialized) = PB.encodeBlock <$> blockToPb symbols block
-      Open p = proof
-  (signedBlock, nextSk) <- signBlock p blockSerialized
-  pure $ b { blocks = blocks <> [toParsedSignedBlock block signedBlock]
-           , symbols = symbols <> blockSymbols
-           , proof = Open nextSk
-           }
+addBlockUnchecked = addBlock'
+
+sealBiscuit' :: Biscuit Open check -> Biscuit Sealed check
+sealBiscuit' b@Biscuit{..} =
+  let Open sk = proof
+      ((lastPayload, _), lastSig, lastPk) = NE.last $ authority :| blocks
+      newProof = Sealed $ getSignatureProof (lastPayload, lastSig, lastPk) sk
+   in b { proof = newProof }
+
+sealBiscuit :: Biscuit Open Checked -> Biscuit Sealed Checked
+sealBiscuit = sealBiscuit'
+
+sealBiscuitUnchecked :: Biscuit Open NotChecked -> Biscuit Sealed NotChecked
+sealBiscuitUnchecked = sealBiscuit'
 
 -- | Serialize a biscuit to a raw bytestring
 serializeBiscuit :: BiscuitProof p => Biscuit p Checked -> ByteString
