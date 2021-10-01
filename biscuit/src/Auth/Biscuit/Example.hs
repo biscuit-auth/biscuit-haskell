@@ -29,8 +29,8 @@ verification :: ByteString -> IO Bool
 verification serialized = do
   now <- getCurrentTime
   biscuit <- either (fail . show) pure $ parseB64 publicKey' serialized
-  let verifier' = [verifier|current_time(${now});|]
-  result <- verifyBiscuit biscuit verifier'
+  let authorizer' = [authorizer|current_time(${now});|]
+  result <- verifyBiscuit biscuit authorizer'
   case result of
     Left e  -> print e $> False
     Right _ -> pure True

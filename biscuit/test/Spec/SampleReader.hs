@@ -34,7 +34,7 @@ import           Test.Tasty.HUnit
 import           Auth.Biscuit
 import           Auth.Biscuit.Datalog.Executor (ExecutionError (..),
                                                 ResultError (..))
-import           Auth.Biscuit.Datalog.Parser   (blockParser, verifierParser)
+import           Auth.Biscuit.Datalog.Parser   (authorizerParser, blockParser)
 import           Auth.Biscuit.Token
 
 getB :: ParsedSignedBlock -> Block
@@ -60,14 +60,14 @@ instance FromJSON PublicKey where
         notPk = typeMismatch "Ed25519 public key" (String t)
     maybe notPk pure res
 
-instance FromJSON Verifier where
-  parseJSON = withText "verifier" $ \t -> do
-    let res = parseVerifier t
-        notVerifier e = typeMismatch e (String t)
-    either notVerifier pure res
+instance FromJSON Authorizer where
+  parseJSON = withText "authorizer" $ \t -> do
+    let res = parseAuthorizer t
+        notAuthorizer e = typeMismatch e (String t)
+    either notAuthorizer pure res
 
-parseVerifier :: Text -> Either String Verifier
-parseVerifier = parseOnly verifierParser
+parseAuthorizer :: Text -> Either String Authorizer
+parseAuthorizer = parseOnly authorizerParser
 
 parseBlock :: Text -> Either String Block
 parseBlock = parseOnly blockParser
@@ -99,7 +99,7 @@ data ValidationR
   = ValidationR
   { world         :: Maybe WorldDesc
   , result        :: RustResult [Text] Int
-  , verifier_code :: Verifier
+  , verifier_code :: Authorizer
   } deriving stock (Eq, Show, Generic)
     deriving anyclass FromJSON
 
@@ -208,8 +208,8 @@ processValidation :: (String -> IO ())
                   -> Assertion
 processValidation step b (name, ValidationR{..}) = do
   when (name /= "") $ step ("Checking " <> name)
-  w    <- maybe (assertFailure "missing verifier contents") pure world
-  pols <- either (assertFailure . show) pure $ parseVerifier $ foldMap (<> ";") (policies w)
+  w    <- maybe (assertFailure "missing authorizer contents") pure world
+  pols <- either (assertFailure . show) pure $ parseAuthorizer $ foldMap (<> ";") (policies w)
   res <- verifyBiscuit b (verifier_code <> pols)
   checkResult result res
 

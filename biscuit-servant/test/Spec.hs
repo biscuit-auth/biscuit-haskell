@@ -13,7 +13,7 @@ import           Data.Text.Encoding (decodeUtf8)
 import           Data.Time          (UTCTime, addUTCTime, getCurrentTime)
 import           Test.Hspec
 
-import           AppWithVerifier    (app, call1, call2, call3)
+import           AppWithAuthorizer    (app, call1, call2, call3)
 import           ClientHelpers      (runC, withApp)
 
 main :: IO ()

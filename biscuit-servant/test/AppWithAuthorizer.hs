@@ -4,7 +4,7 @@
 {-# LANGUAGE TypeApplications  #-}
 {-# LANGUAGE TypeFamilies      #-}
 {-# LANGUAGE TypeOperators     #-}
-module AppWithVerifier where
+module AppWithAuthorizer where
 
 import           Auth.Biscuit
 import           Auth.Biscuit.Servant
@@ -31,7 +31,7 @@ call3 b =
   let (_ :<|> _ :<|> e3) = client @API Proxy (protect b)
    in e3
 
-type H = WithVerifier Handler
+type H = WithAuthorizer Handler
 type API = RequireBiscuit :> ProtectedAPI
 type ProtectedAPI =
        "endpoint1" :> Get '[JSON] Int
@@ -46,21 +46,21 @@ server :: Server API
 server b =
   let nowFact = do
         now <- liftIO getCurrentTime
-        pure [verifier|time(${now});|]
-      handleAuth :: WithVerifier Handler x -> Handler x
+        pure [authorizer|time(${now});|]
+      handleAuth :: WithAuthorizer Handler x -> Handler x
       handleAuth =
           handleBiscuit b
-        . withPriorityVerifierM nowFact
-        . withPriorityVerifier [verifier|allow if right("admin");|]
-        . withFallbackVerifier [verifier|allow if right("anon");|]
+        . withPriorityAuthorizerM nowFact
+        . withPriorityAuthorizer [authorizer|allow if right("admin");|]
+        . withFallbackAuthorizer [authorizer|allow if right("anon");|]
       handlers = handler1 :<|> handler2 :<|> handler3
    in hoistServer @ProtectedAPI Proxy handleAuth handlers
 
 handler1 :: H Int
-handler1 = withVerifier [verifier|allow if right("one");|] $ pure 1
+handler1 = withAuthorizer [authorizer|allow if right("one");|] $ pure 1
 
 handler2 :: Int -> H Int
-handler2 v = withVerifier [verifier|allow if right("two", ${v});|] $ pure 2
+handler2 v = withAuthorizer [authorizer|allow if right("two", ${v});|] $ pure 2
 
 handler3 :: H Int
-handler3 = withVerifier [verifier|deny if true;|] $ pure 3
+handler3 = withAuthorizer [authorizer|deny if true;|] $ pure 3

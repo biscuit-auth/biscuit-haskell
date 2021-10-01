@@ -18,6 +18,6 @@ main = do
     bgroup "biscuit" [ bench "mkBiscuit"  $ whnfIO (buildToken sk)
                      , bench "parse"      $ whnf (parse pk) biscuitBs
                      , bench "serialize"  $ whnf serialize biscuit
-                     , bench "verify"     $ whnfIO (verifyBiscuit biscuit [verifier|allow if user_id("user_1234");|])
+                     , bench "verify"     $ whnfIO (verifyBiscuit biscuit [authorizer|allow if user_id("user_1234");|])
                      ]
     ]

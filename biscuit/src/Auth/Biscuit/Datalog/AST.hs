@@ -54,11 +54,11 @@ module Auth.Biscuit.Datalog.AST
   , Unary (..)
   , Value
   , VariableType
-  , Verifier
-  , Verifier' (..)
-  , VerifierElement' (..)
+  , Authorizer
+  , Authorizer' (..)
+  , AuthorizerElement' (..)
   , elementToBlock
-  , elementToVerifier
+  , elementToAuthorizer
   , fromStack
   , listSymbolsInBlock
   , renderBlock
@@ -540,40 +540,40 @@ listSymbolsInBlock Block {..} = fold
   , foldMap listSymbolsInCheck bChecks
   ]
 
--- | A biscuit verifier, containing, facts, rules, checks and policies
-type Verifier = Verifier' 'RegularString
+-- | A biscuit authorizer, containing, facts, rules, checks and policies
+type Authorizer = Authorizer' 'RegularString
 
 -- | The context in which a biscuit policies and checks are verified.
--- A verifier may add policies (`deny if` / `allow if` conditions), as well as rules, facts, and checks.
--- A verifier may or may not contain slices referencing haskell variables.
-data Verifier' (ctx :: ParsedAs) = Verifier
+-- A authorizer may add policies (`deny if` / `allow if` conditions), as well as rules, facts, and checks.
+-- A authorizer may or may not contain slices referencing haskell variables.
+data Authorizer' (ctx :: ParsedAs) = Authorizer
   { vPolicies :: [Policy' ctx]
   -- ^ the allow / deny policies.
   , vBlock    :: Block' ctx
   -- ^ the facts, rules and checks
   }
 
-instance Semigroup (Verifier' ctx) where
-  v1 <> v2 = Verifier { vPolicies = vPolicies v1 <> vPolicies v2
+instance Semigroup (Authorizer' ctx) where
+  v1 <> v2 = Authorizer { vPolicies = vPolicies v1 <> vPolicies v2
                       , vBlock = vBlock v1 <> vBlock v2
                       }
 
-instance Monoid (Verifier' ctx) where
-  mempty = Verifier { vPolicies = []
+instance Monoid (Authorizer' ctx) where
+  mempty = Authorizer { vPolicies = []
                     , vBlock = mempty
                     }
 
 deriving instance ( Eq (Block' ctx)
                   , Eq (QueryItem' ctx)
-                  ) => Eq (Verifier' ctx)
+                  ) => Eq (Authorizer' ctx)
 
 deriving instance ( Show (Block' ctx)
                   , Show (QueryItem' ctx)
-                  ) => Show (Verifier' ctx)
+                  ) => Show (Authorizer' ctx)
 
 deriving instance ( Lift (Block' ctx)
                   , Lift (QueryItem' ctx)
-                  ) => Lift (Verifier' ctx)
+                  ) => Lift (Authorizer' ctx)
 
 data BlockElement' ctx
   = BlockFact (Predicate' 'InFact ctx)
@@ -593,16 +593,16 @@ elementToBlock = \case
    BlockCheck c -> Block [] [] [c] Nothing
    BlockComment -> mempty
 
-data VerifierElement' ctx
-  = VerifierPolicy (Policy' ctx)
+data AuthorizerElement' ctx
+  = AuthorizerPolicy (Policy' ctx)
   | BlockElement (BlockElement' ctx)
 
 deriving instance ( Show (Predicate' 'InFact ctx)
                   , Show (Rule' ctx)
                   , Show (QueryItem' ctx)
-                  ) => Show (VerifierElement' ctx)
+                  ) => Show (AuthorizerElement' ctx)
 
-elementToVerifier :: VerifierElement' ctx -> Verifier' ctx
-elementToVerifier = \case
-  VerifierPolicy p -> Verifier [p] mempty
-  BlockElement be  -> Verifier [] (elementToBlock be)
+elementToAuthorizer :: AuthorizerElement' ctx -> Authorizer' ctx
+elementToAuthorizer = \case
+  AuthorizerPolicy p -> Authorizer [p] mempty
+  BlockElement be  -> Authorizer [] (elementToBlock be)

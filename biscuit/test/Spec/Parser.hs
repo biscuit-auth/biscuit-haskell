@@ -13,7 +13,7 @@ import           Auth.Biscuit.Datalog.AST
 import           Auth.Biscuit.Datalog.Parser (checkParser, expressionParser,
                                               policyParser, predicateParser,
                                               ruleParser, termParser,
-                                              verifierParser)
+                                              authorizerParser)
 
 parseTerm :: Text -> Either String Term
 parseTerm = parseOnly termParser
@@ -33,8 +33,8 @@ parseExpression = parseOnly expressionParser
 parseCheck :: Text -> Either String Check
 parseCheck = parseOnly checkParser
 
-parseVerifier :: Text -> Either String Verifier
-parseVerifier = parseOnly verifierParser
+parseAuthorizer :: Text -> Either String Authorizer
+parseAuthorizer = parseOnly authorizerParser
 
 parsePolicy :: Text -> Either String Policy
 parsePolicy = parseOnly policyParser
@@ -52,7 +52,7 @@ specs = testGroup "datalog parser"
   , constrainedRuleOrdering
   , checkParsing
   , policyParsing
-  , verifierParsing
+  , authorizerParsing
   ]
 
 termsGroup :: TestTree
@@ -336,21 +336,21 @@ policyParsing = testGroup "policy blocks"
             )
   ]
 
-verifierParsing :: TestTree
-verifierParsing = testGroup "Simple verifiers"
+authorizerParsing :: TestTree
+authorizerParsing = testGroup "Simple authorizers"
   [ testCase "Just a deny" $
-      parseVerifier "deny if true;" @?=
-        Right (Verifier [(Deny, [QueryItem [] [EValue (LBool True)]])] mempty
+      parseAuthorizer "deny if true;" @?=
+        Right (Authorizer [(Deny, [QueryItem [] [EValue (LBool True)]])] mempty
               )
   , testCase "Allow and deny" $
-      parseVerifier "allow if operation(\"read\");\n deny if true;" @?=
-        Right (Verifier
+      parseAuthorizer "allow if operation(\"read\");\n deny if true;" @?=
+        Right (Authorizer
                  [  (Allow, [QueryItem [Predicate "operation" [LString "read"]] []])
                  , (Deny, [QueryItem [] [EValue (LBool True)]])
                  ]
                  mempty
               )
-  , testCase "Complete verifier" $ do
+  , testCase "Complete authorizer" $ do
       let spec :: Text
           spec =
             "// the owner has all rights\n\
@@ -433,5 +433,5 @@ verifierParsing = testGroup "Simple verifiers"
                                  ] []])
             , (Deny, [QueryItem [] [EValue (LBool True)]])
             ]
-      parseVerifier spec @?= Right Verifier{vBlock = Block{..}, ..}
+      parseAuthorizer spec @?= Right Authorizer{vBlock = Block{..}, ..}
   ]

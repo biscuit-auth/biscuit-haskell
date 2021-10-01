@@ -35,14 +35,6 @@ module Auth.Biscuit
   , mkBiscuit
   , block
   , blockContext
-  , addBlock
-  , addBlockUnchecked
-  , seal
-  , sealUnchecked
-  , fromOpen
-  , fromSealed
-  , asOpen
-  , asSealed
   , Biscuit
   , OpenOrSealed
   , Open
@@ -55,28 +47,39 @@ module Auth.Biscuit
   , parseB64
   , parse
   , parseWith
+  , parseBiscuitUnchecked
+  , checkBiscuitSignatures
   , BiscuitEncoding (..)
   , ParserConfig (..)
   , fromRevocationList
   , serializeB64
   , serialize
   , fromHex
+  -- ** Attenuating biscuits
+  -- $attenuatingBiscuits
+  , addBlock
+  -- $sealedBiscuits
+  , seal
+  , fromOpen
+  , fromSealed
+  , asOpen
+  , asSealed
 
   -- * Verifying a biscuit
   -- $verifying
-  , verifier
-  , Verifier
+  , authorizer
+  , Authorizer
   , verifyBiscuit
   , verifyBiscuitWithLimits
   , Limits (..)
   , defaultLimits
   , ParseError (..)
   , ExecutionError (..)
-  , VerificationSuccess (..)
+  , AuthorizationSuccess (..)
 
   -- * Retrieving information from a biscuit
   , getRevocationIds
-  , getCheckedBiscuitSignature
+  , getCheckedBiscuitPublicKey
   ) where
 
 import           Control.Monad                       ((<=<))
@@ -95,12 +98,13 @@ import           Auth.Biscuit.Crypto                 (PublicKey, SecretKey,
                                                       maybeCryptoError,
                                                       publicKey, secretKey,
                                                       toPublic)
-import           Auth.Biscuit.Datalog.AST            (Block, Verifier, bContext)
+import           Auth.Biscuit.Datalog.AST            (Authorizer, Block,
+                                                      bContext)
 import           Auth.Biscuit.Datalog.Executor       (ExecutionError (..),
                                                       Limits (..),
                                                       defaultLimits)
-import           Auth.Biscuit.Datalog.Parser         (block, verifier)
-import           Auth.Biscuit.Datalog.ScopedExecutor (VerificationSuccess (..))
+import           Auth.Biscuit.Datalog.Parser         (authorizer, block)
+import           Auth.Biscuit.Datalog.ScopedExecutor (AuthorizationSuccess (..))
 import           Auth.Biscuit.Token                  (Biscuit,
                                                       BiscuitEncoding (..),
                                                       BiscuitProof (..),
@@ -108,15 +112,15 @@ import           Auth.Biscuit.Token                  (Biscuit,
                                                       OpenOrSealed,
                                                       ParseError (..),
                                                       ParserConfig (..), Sealed,
-                                                      addBlock,
-                                                      addBlockUnchecked, asOpen,
-                                                      asSealed, fromOpen,
-                                                      fromSealed,
-                                                      getCheckedBiscuitSignature,
+                                                      addBlock, asOpen,
+                                                      asSealed,
+                                                      checkBiscuitSignatures,
+                                                      fromOpen, fromSealed,
+                                                      getCheckedBiscuitPublicKey,
                                                       getRevocationIds,
                                                       mkBiscuit,
+                                                      parseBiscuitUnchecked,
                                                       parseBiscuitWith, seal,
-                                                      sealUnchecked,
                                                       serializeBiscuit,
                                                       verifyBiscuit,
                                                       verifyBiscuitWithLimits)
@@ -131,7 +135,7 @@ import           Auth.Biscuit.Token                  (Biscuit,
 -- language, derived from <todo datalog>. Such a language can describe facts (things we know
 -- about the world), rules (describing how to derive new facts from existing ones) and checks
 -- (ensuring that facts hold). Facts and checks let you describe access control rules, while
--- rules make them modular. /Verifier policies/ lets the verifying party ensure that a
+-- rules make them modular. /Authorizer policies/ lets the verifying party ensure that a
 -- provided biscuit grants access to the required operations.
 --
 -- Here's how to create a biscuit token:
@@ -166,9 +170,10 @@ import           Auth.Biscuit.Token                  (Biscuit,
 -- >    |]
 --
 -- To verify a biscuit token, we need two things:
+--
 --  - a public key, that will let us verify the token has been emitted by
 --    a trusted authority
---  - a verifier, that will make sure all the checks declared in the token are fulfilled,
+--  - an authorizer, that will make sure all the checks declared in the token are fulfilled,
 --    as well as providing its own checks, and policies which decide if the token is
 --    verified or not
 --
@@ -183,7 +188,7 @@ import           Auth.Biscuit.Token                  (Biscuit,
 -- >     Left e -> print e $> False
 -- >     Right biscuit -> do
 -- >       now <- getCurrentTime
--- >       let verif = [verifier|
+-- >       let verif = [authorizer|
 -- >                // the datalog snippets can reference haskell variables
 -- >                // with the ${variableName} syntax
 -- >                time(${now});
@@ -195,7 +200,7 @@ import           Auth.Biscuit.Token                  (Biscuit,
 -- >                // catch-all policy if the previous ones did not match
 -- >                deny if true;
 -- >             |]
--- >       result <- verifyBiscuit biscuit [verifier|current_time()|]
+-- >       result <- verifyBiscuit biscuit [authorizer|current_time()|]
 -- >       case result of
 -- >         Left e -> print e $> False
 -- >         Right _ -> pure True
@@ -328,14 +333,31 @@ serializeB64 = B64.encodeBase64' . serialize
 -- Blocks are defined with a logic language (datalog) that can be used directly from haskell
 -- with the `QuasiQuotes` extension.
 
+-- $attenuatingBiscuits
+--
+-- By default, biscuits can be /attenuated/. It means that any party that holds a biscuit can
+-- craft a new biscuit with fewer rights. A common example is taking a long-lived biscuit and
+-- adding a short TTL right before sending it over the wire.
+
+-- $sealedBiscuits
+--
+-- An 'Open' biscuit can be turned into a 'Sealed' one, meaning it won't be possible
+-- to attenuate it further.
+--
+-- 'mkBiscuit' creates 'Open' biscuits, while 'parse' returns an 'OpenOrSealed' biscuit (since
+-- when you're verifying a biscuit, you're not caring about whether it can be extended further
+-- or not). 'verifyBiscuit' does not care whether a biscuit is 'Open' or 'Sealed' and can be
+-- used with both. 'addBlock' and 'seal' only work with 'Open' biscuits.
+
 -- $verifying
 --
 -- Verifying a biscuit requires providing a list of policies (/allow/ or /deny/), which will
 -- decide if the biscuit is accepted. Policies are tried in order, and the first one to match
 -- decides whether the biscuit is accepted.
 --
--- In addition to policies, a verifier typically provides facts (such as the current time) so
+-- In addition to policies, an authorizer typically provides facts (such as the current time) so
 -- that checks and policies can be verified.
 --
--- The verifier checks and policies only see the content of the authority (first) block. Extra
+-- The authorizer checks and policies only see the content of the authority (first) block. Extra
 -- blocks can only carry restrictions and cannot interfere with the authority facts.
+

@@ -15,23 +15,23 @@ import           Auth.Biscuit.Datalog.Executor       (ExecutionError (..),
                                                       Limits (..),
                                                       ResultError (..),
                                                       defaultLimits)
-import           Auth.Biscuit.Datalog.Parser         (block, check, verifier)
+import           Auth.Biscuit.Datalog.Parser         (block, check, authorizer)
 import           Auth.Biscuit.Datalog.ScopedExecutor
 
 specs :: TestTree
 specs = testGroup "Block-scoped Datalog Evaluation"
-  [ verifierOnlySeesAuthority
-  , authorityOnlySeesItselfAndVerifier
-  , block1OnlySeesAuthorityAndVerifier
-  , block1SeesAuthorityAndVerifier
+  [ authorizerOnlySeesAuthority
+  , authorityOnlySeesItselfAndAuthorizer
+  , block1OnlySeesAuthorityAndAuthorizer
+  , block1SeesAuthorityAndAuthorizer
   , iterationCountWorks
   , maxFactsCountWorks
   , allChecksAreCollected
   , revocationIdsAreInjected
   ]
 
-verifierOnlySeesAuthority :: TestTree
-verifierOnlySeesAuthority = testCase "Verifier only accesses facts from authority" $ do
+authorizerOnlySeesAuthority :: TestTree
+authorizerOnlySeesAuthority = testCase "Authorizer only accesses facts from authority" $ do
   let authority =
        [block|
          user(1234);
@@ -41,13 +41,13 @@ verifierOnlySeesAuthority = testCase "Verifier only accesses facts from authorit
          is_allowed(1234, "file1", "write");
        |]
       verif =
-       [verifier|
+       [authorizer|
          allow if is_allowed(1234, "file1", "write");
        |]
-  runVerifierNoTimeout defaultLimits (authority, "") [(block1, "")] verif @?= Left (ResultError (NoPoliciesMatched []))
+  runAuthorizerNoTimeout defaultLimits (authority, "") [(block1, "")] verif @?= Left (ResultError (NoPoliciesMatched []))
 
-authorityOnlySeesItselfAndVerifier :: TestTree
-authorityOnlySeesItselfAndVerifier = testCase "Authority rules only see authority and verifier facts" $ do
+authorityOnlySeesItselfAndAuthorizer :: TestTree
+authorityOnlySeesItselfAndAuthorizer = testCase "Authority rules only see authority and authorizer facts" $ do
   let authority =
        [block|
          user(1234);
@@ -58,13 +58,13 @@ authorityOnlySeesItselfAndVerifier = testCase "Authority rules only see authorit
          right(1234, "file1", "read");
        |]
       verif =
-       [verifier|
+       [authorizer|
          allow if is_allowed(1234, "file1");
        |]
-  runVerifierNoTimeout defaultLimits (authority, "") [(block1, "")] verif @?= Left (ResultError (NoPoliciesMatched []))
+  runAuthorizerNoTimeout defaultLimits (authority, "") [(block1, "")] verif @?= Left (ResultError (NoPoliciesMatched []))
 
-block1OnlySeesAuthorityAndVerifier :: TestTree
-block1OnlySeesAuthorityAndVerifier = testCase "Arbitrary blocks only see previous blocks" $ do
+block1OnlySeesAuthorityAndAuthorizer :: TestTree
+block1OnlySeesAuthorityAndAuthorizer = testCase "Arbitrary blocks only see previous blocks" $ do
   let authority =
        [block|
          user(1234);
@@ -79,13 +79,13 @@ block1OnlySeesAuthorityAndVerifier = testCase "Arbitrary blocks only see previou
          right(1234, "file1", "read");
        |]
       verif =
-       [verifier|
+       [authorizer|
          allow if true;
        |]
-  runVerifierNoTimeout defaultLimits (authority, "") [(block1, ""), (block2, "")] verif @?= Left (ResultError (FailedChecks $ pure [check|check if is_allowed(1234, "file1") |]))
+  runAuthorizerNoTimeout defaultLimits (authority, "") [(block1, ""), (block2, "")] verif @?= Left (ResultError (FailedChecks $ pure [check|check if is_allowed(1234, "file1") |]))
 
-block1SeesAuthorityAndVerifier :: TestTree
-block1SeesAuthorityAndVerifier = testCase "Arbitrary blocks see previous blocks" $ do
+block1SeesAuthorityAndAuthorizer :: TestTree
+block1SeesAuthorityAndAuthorizer = testCase "Arbitrary blocks see previous blocks" $ do
   let authority =
        [block|
          user(1234);
@@ -97,9 +97,9 @@ block1SeesAuthorityAndVerifier = testCase "Arbitrary blocks see previous blocks"
          check if is_allowed(1234, "file1");
        |]
       verif =
-       [verifier| allow if false;
+       [authorizer| allow if false;
        |]
-  runVerifierNoTimeout defaultLimits (authority, "") [(block1, "")] verif @?= Left (ResultError $ NoPoliciesMatched [])
+  runAuthorizerNoTimeout defaultLimits (authority, "") [(block1, "")] verif @?= Left (ResultError $ NoPoliciesMatched [])
 
 
 iterationCountWorks :: TestTree
@@ -125,10 +125,10 @@ iterationCountWorks = testCase "ScopedExecutions stops when hitting the iteratio
          m($l) <- l($l);
        |]
       verif =
-       [verifier|
+       [authorizer|
          allow if true;
        |]
-  runVerifierNoTimeout limits (authority, "") [(block1, "")] verif @?= Left TooManyIterations
+  runAuthorizerNoTimeout limits (authority, "") [(block1, "")] verif @?= Left TooManyIterations
 
 maxFactsCountWorks :: TestTree
 maxFactsCountWorks = testCase "ScopedExecutions stops when hitting the facts threshold" $ do
@@ -153,10 +153,10 @@ maxFactsCountWorks = testCase "ScopedExecutions stops when hitting the facts thr
          m($l) <- l($l);
        |]
       verif =
-       [verifier|
+       [authorizer|
          allow if true;
        |]
-  runVerifierNoTimeout limits (authority, "") [(block1, "")] verif @?= Left TooManyFacts
+  runAuthorizerNoTimeout limits (authority, "") [(block1, "")] verif @?= Left TooManyFacts
 
 allChecksAreCollected :: TestTree
 allChecksAreCollected = testCase "ScopedExecutions collects all facts results even after a failure" $ do
@@ -173,10 +173,10 @@ allChecksAreCollected = testCase "ScopedExecutions collects all facts results ev
          check if false;
        |]
       verif =
-       [verifier|
+       [authorizer|
          allow if user(4567);
        |]
-  runVerifierNoTimeout defaultLimits (authority, "") [(block1, ""), (block2, "")] verif @?= Left (ResultError $ NoPoliciesMatched [[check|check if false|], [check|check if false|]])
+  runAuthorizerNoTimeout defaultLimits (authority, "") [(block1, ""), (block2, "")] verif @?= Left (ResultError $ NoPoliciesMatched [[check|check if false|], [check|check if false|]])
 
 revocationIdsAreInjected :: TestTree
 revocationIdsAreInjected = testCase "ScopedExecutions injects revocation ids" $ do
@@ -189,9 +189,9 @@ revocationIdsAreInjected = testCase "ScopedExecutions injects revocation ids" $ 
       block2 =
        [block|yolo("block2");|]
       verif =
-       [verifier|
+       [authorizer|
          check if revocation_id(0, hex:61),
                   revocation_id(1, hex:62),
                   revocation_id(2, hex:63);
        |]
-  runVerifierNoTimeout defaultLimits (authority, "a") [(block1, "b"), (block2, "c")] verif @?= Left (ResultError $ NoPoliciesMatched [])
+  runAuthorizerNoTimeout defaultLimits (authority, "a") [(block1, "b"), (block2, "c")] verif @?= Left (ResultError $ NoPoliciesMatched [])

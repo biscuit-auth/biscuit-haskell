@@ -45,7 +45,7 @@ test-suite biscuit-servant-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
-      AppWithVerifier
+      AppWithAuthorizer
       ClientHelpers
   hs-source-dirs:
       test
