@@ -30,7 +30,7 @@ verification serialized = do
   now <- getCurrentTime
   biscuit <- either (fail . show) pure $ parseB64 publicKey' serialized
   let authorizer' = [authorizer|current_time(${now});|]
-  result <- verifyBiscuit biscuit authorizer'
+  result <- authorizeBiscuit biscuit authorizer'
   case result of
     Left e  -> print e $> False
     Right _ -> pure True

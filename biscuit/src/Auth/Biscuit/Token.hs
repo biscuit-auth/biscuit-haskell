@@ -38,8 +38,8 @@ module Auth.Biscuit.Token
   , parseBiscuitUnverified
   , checkBiscuitSignatures
   , serializeBiscuit
-  , verifyBiscuit
-  , verifyBiscuitWithLimits
+  , authorizeBiscuit
+  , authorizeBiscuitWithLimits
   , fromOpen
   , fromSealed
   , asOpen
@@ -426,9 +426,9 @@ getRevocationIds Biscuit{authority, blocks} =
       getRevocationId (_, sig, _) = convert sig
    in getRevocationId <$> allBlocks
 
--- | Generic version of 'verifyBiscuitWithLimits' which takes custom 'Limits'.
-verifyBiscuitWithLimits :: Limits -> Biscuit a Verified -> Authorizer -> IO (Either ExecutionError AuthorizationSuccess)
-verifyBiscuitWithLimits l Biscuit{..} authorizer =
+-- | Generic version of 'authorizeBiscuitWithLimits' which takes custom 'Limits'.
+authorizeBiscuitWithLimits :: Limits -> Biscuit a Verified -> Authorizer -> IO (Either ExecutionError AuthorizationSuccess)
+authorizeBiscuitWithLimits l Biscuit{..} authorizer =
   let toBlockWithRevocationId ((_, block), sig, _) = (block, convert sig)
    in runAuthorizerWithLimits l
         (toBlockWithRevocationId authority)
@@ -446,10 +446,10 @@ verifyBiscuitWithLimits l Biscuit{..} authorizer =
 -- checks and policies declared in the authorizer only operate on the authority block. Facts
 -- declared by extra blocks cannot interfere with previous blocks.
 --
--- Specific runtime limits can be specified by using 'verifyBiscuitWithLimits'. 'verifyBiscuit'
+-- Specific runtime limits can be specified by using 'authorizeBiscuitWithLimits'. 'authorizeBiscuit'
 -- uses a set of defaults defined in 'defaultLimits'.
-verifyBiscuit :: Biscuit proof Verified -> Authorizer -> IO (Either ExecutionError AuthorizationSuccess)
-verifyBiscuit = verifyBiscuitWithLimits defaultLimits
+authorizeBiscuit :: Biscuit proof Verified -> Authorizer -> IO (Either ExecutionError AuthorizationSuccess)
+authorizeBiscuit = authorizeBiscuitWithLimits defaultLimits
 
 -- | Retrieve the `PublicKey` which was used to verify the `Biscuit` signatures
 getVerifiedBiscuitPublicKey :: Biscuit a Verified -> PublicKey

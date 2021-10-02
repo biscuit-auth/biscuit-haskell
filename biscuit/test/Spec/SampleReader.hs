@@ -210,7 +210,7 @@ processValidation step b (name, ValidationR{..}) = do
   when (name /= "") $ step ("Checking " <> name)
   w    <- maybe (assertFailure "missing authorizer contents") pure world
   pols <- either (assertFailure . show) pure $ parseAuthorizer $ foldMap (<> ";") (policies w)
-  res <- verifyBiscuit b (verifier_code <> pols)
+  res <- authorizeBiscuit b (verifier_code <> pols)
   checkResult result res
 
 runTests :: (String -> IO ())

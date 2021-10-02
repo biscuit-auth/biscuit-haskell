@@ -69,8 +69,8 @@ module Auth.Biscuit
   -- $verifying
   , authorizer
   , Authorizer
-  , verifyBiscuit
-  , verifyBiscuitWithLimits
+  , authorizeBiscuit
+  , authorizeBiscuitWithLimits
   , Limits (..)
   , defaultLimits
   , ParseError (..)
@@ -122,8 +122,8 @@ import           Auth.Biscuit.Token                  (Biscuit,
                                                       parseBiscuitUnverified,
                                                       parseBiscuitWith, seal,
                                                       serializeBiscuit,
-                                                      verifyBiscuit,
-                                                      verifyBiscuitWithLimits)
+                                                      authorizeBiscuit,
+                                                      authorizeBiscuitWithLimits)
 
 
 -- $biscuitOverview
@@ -199,7 +199,7 @@ import           Auth.Biscuit.Token                  (Biscuit,
 -- >                // catch-all policy if the previous ones did not match
 -- >                deny if true;
 -- >             |]
--- >       result <- verifyBiscuit biscuit [authorizer|current_time()|]
+-- >       result <- authorizeBiscuit biscuit [authorizer|current_time()|]
 -- >       case result of
 -- >         Left e -> print e $> False
 -- >         Right _ -> pure True
@@ -345,7 +345,7 @@ serializeB64 = B64.encodeBase64' . serialize
 --
 -- 'mkBiscuit' creates 'Open' biscuits, while 'parse' returns an 'OpenOrSealed' biscuit (since
 -- when you're verifying a biscuit, you're not caring about whether it can be extended further
--- or not). 'verifyBiscuit' does not care whether a biscuit is 'Open' or 'Sealed' and can be
+-- or not). 'authorizeBiscuit' does not care whether a biscuit is 'Open' or 'Sealed' and can be
 -- used with both. 'addBlock' and 'seal' only work with 'Open' biscuits.
 
 -- $verifying

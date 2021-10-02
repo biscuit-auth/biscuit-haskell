@@ -36,7 +36,7 @@ singleBlock :: TestTree
 singleBlock = testCase "Single block" $ do
   secret <- newSecret
   biscuit <- mkBiscuit secret [block|right("file1", "read");|]
-  res <- verifyBiscuit biscuit [authorizer|check if right("file1", "read");allow if true;|]
+  res <- authorizeBiscuit biscuit [authorizer|check if right("file1", "read");allow if true;|]
   matchedAllowQuery <$> res @?= Right ifTrue
 
 errorAccumulation :: TestTree
@@ -44,17 +44,17 @@ errorAccumulation = testGroup "Error accumulation"
   [ testCase "Only checks" $ do
       secret <- newSecret
       biscuit <- mkBiscuit secret[block|check if false; check if false;|]
-      res <- verifyBiscuit biscuit [authorizer|allow if true;|]
+      res <- authorizeBiscuit biscuit [authorizer|allow if true;|]
       res @?= Left (ResultError $ FailedChecks $ ifFalse :| [ifFalse])
   , testCase "Checks and deny policies" $ do
       secret <- newSecret
       biscuit <- mkBiscuit secret [block|check if false; check if false;|]
-      res <- verifyBiscuit biscuit [authorizer|deny if true;|]
+      res <- authorizeBiscuit biscuit [authorizer|deny if true;|]
       res @?= Left(ResultError $ DenyRuleMatched [ifFalse, ifFalse] ifTrue)
   , testCase "Checks and no policies matched" $ do
       secret <- newSecret
       biscuit <- mkBiscuit secret [block|check if false; check if false;|]
-      res <- verifyBiscuit biscuit [authorizer|allow if false;|]
+      res <- authorizeBiscuit biscuit [authorizer|allow if false;|]
       res @?= Left (ResultError $ NoPoliciesMatched [ifFalse, ifFalse])
   ]
 
@@ -63,7 +63,7 @@ unboundVarRule = testCase "Rule with unbound variable" $ do
   secret <- newSecret
   b1 <- mkBiscuit secret [block|check if operation("read");|]
   b2 <- addBlock [block|operation($unbound, "read") <- operation($any1, $any2);|] b1
-  res <- verifyBiscuit b2 [authorizer|operation("write");allow if true;|]
+  res <- authorizeBiscuit b2 [authorizer|operation("write");allow if true;|]
   res @?= Left (Executor.ResultError $ Executor.FailedChecks $ pure [check|check if operation("read")|])
 
 symbolRestrictions :: TestTree
@@ -72,13 +72,13 @@ symbolRestrictions = testGroup "Restricted symbols in blocks"
       secret <- newSecret
       b1 <- mkBiscuit secret [block|check if operation("read");|]
       b2 <- addBlock [block|operation("read");|] b1
-      res <- verifyBiscuit b2 [authorizer|allow if true;|]
+      res <- authorizeBiscuit b2 [authorizer|allow if true;|]
       res @?= Left (Executor.ResultError $ Executor.FailedChecks $ pure [check|check if operation("read")|])
   , testCase "In rules" $ do
       secret <- newSecret
       b1 <- mkBiscuit secret [block|check if operation("read");|]
       b2 <- addBlock [block|operation($ambient, "read") <- operation($ambient, $any);|] b1
-      res <- verifyBiscuit b2 [authorizer|operation("write");allow if true;|]
+      res <- authorizeBiscuit b2 [authorizer|operation("write");allow if true;|]
       res @?= Left (Executor.ResultError $ Executor.FailedChecks $ pure [check|check if operation("read")|])
   ]
 
@@ -90,12 +90,12 @@ factsRestrictions =
             secret <- newSecret
             b1 <- mkBiscuit secret [block|right("read");|]
             b2 <- addBlock [block|right("write");|] b1
-            res <- verifyBiscuitWithLimits limits b2 [authorizer|allow if right("write");|]
+            res <- authorizeBiscuitWithLimits limits b2 [authorizer|allow if right("write");|]
             res @?= Left (Executor.ResultError $ Executor.NoPoliciesMatched [])
         , testCase "No rules" $ do
             secret <- newSecret
             b1 <- mkBiscuit secret [block|right("read");|]
             b2 <- addBlock [block|right("write") <- right("read");|] b1
-            res <- verifyBiscuitWithLimits limits b2 [authorizer|allow if right("write");|]
+            res <- authorizeBiscuitWithLimits limits b2 [authorizer|allow if right("write");|]
             res @?= Left (Executor.ResultError $ Executor.NoPoliciesMatched [])
         ]

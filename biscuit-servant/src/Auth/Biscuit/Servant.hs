@@ -411,7 +411,7 @@ checkBiscuit :: (MonadIO m, MonadError ServerError m)
              -> m a
              -> m a
 checkBiscuit vb v h = do
-  res <- liftIO $ verifyBiscuit vb v
+  res <- liftIO $ authorizeBiscuit vb v
   case res of
     Left e  -> do liftIO $ print e
                   throwError $ err401 { errBody = "Biscuit failed checks" }
@@ -434,7 +434,7 @@ checkBiscuitM :: (MonadIO m, MonadError ServerError m)
               -> m a
 checkBiscuitM vb mv h = do
   v   <- mv
-  res <- liftIO $ verifyBiscuit vb v
+  res <- liftIO $ authorizeBiscuit vb v
   case res of
     Left e  -> do liftIO $ print e
                   throwError $ err401 { errBody = "Biscuit failed checks" }
