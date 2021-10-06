@@ -97,9 +97,9 @@ instance (FromJSON e, FromJSON a) => FromJSON (RustResult e a) where
 
 data ValidationR
   = ValidationR
-  { world         :: Maybe WorldDesc
-  , result        :: RustResult [Text] Int
-  , verifier_code :: Authorizer
+  { world           :: Maybe WorldDesc
+  , result          :: RustResult [Text] Int
+  , authorizer_code :: Authorizer
   } deriving stock (Eq, Show, Generic)
     deriving anyclass FromJSON
 
@@ -210,7 +210,7 @@ processValidation step b (name, ValidationR{..}) = do
   when (name /= "") $ step ("Checking " <> name)
   w    <- maybe (assertFailure "missing authorizer contents") pure world
   pols <- either (assertFailure . show) pure $ parseAuthorizer $ foldMap (<> ";") (policies w)
-  res <- authorizeBiscuit b (verifier_code <> pols)
+  res <- authorizeBiscuit b (authorizer_code <> pols)
   checkResult result res
 
 runTests :: (String -> IO ())
