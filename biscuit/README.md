@@ -2,7 +2,7 @@
 
 <img src="https://raw.githubusercontent.com/divarvel/biscuit-haskell/main/assets/biscuit-logo.png" align=right>
 
-Main library for biscuit tokens support, providing minting and signature checking of biscuit tokens, as well as a datalog engine allowing to compute the validity of a token in a given context.
+Main library for biscuit tokens support, providing minting and signature verification of biscuit tokens, as well as a datalog engine allowing to compute the validity of a token in a given context.
 
 ## Supported biscuit versions
 

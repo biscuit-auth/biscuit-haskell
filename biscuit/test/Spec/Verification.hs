@@ -6,15 +6,16 @@ module Spec.Verification
   ) where
 
 import           Data.List.NonEmpty            (NonEmpty ((:|)))
+import qualified Data.Set                      as Set
 import           Test.Tasty
 import           Test.Tasty.HUnit
 
 import           Auth.Biscuit
-import           Auth.Biscuit.Datalog.AST      (Expression' (..), ID' (..),
-                                                Query, QueryItem' (..))
+import           Auth.Biscuit.Datalog.AST      (Expression' (..), Query,
+                                                QueryItem' (..), Term' (..))
 import           Auth.Biscuit.Datalog.Executor (ResultError (..))
 import qualified Auth.Biscuit.Datalog.Executor as Executor
-import           Auth.Biscuit.Datalog.Parser   (check)
+import           Auth.Biscuit.Datalog.Parser   (check, fact)
 
 specs :: TestTree
 specs = testGroup "Datalog checks"
@@ -33,56 +34,52 @@ ifFalse = [QueryItem [] [EValue $ LBool False]]
 
 singleBlock :: TestTree
 singleBlock = testCase "Single block" $ do
-  keypair <- newKeypair
-  biscuit <- mkBiscuit keypair [block|right(#authority, "file1", #read);|]
-  res <- verifyBiscuit biscuit [verifier|check if right(#authority, "file1", #read);allow if true;|] (publicKey keypair)
-  res @?= Right ifTrue
-
-resultError :: Executor.ResultError
-            -> Either VerificationError a
-resultError = Left . DatalogError . Executor.ResultError
+  secret <- newSecret
+  biscuit <- mkBiscuit secret [block|right("file1", "read");|]
+  res <- authorizeBiscuit biscuit [authorizer|check if right("file1", "read");allow if true;|]
+  matchedAllowQuery <$> res @?= Right ifTrue
 
 errorAccumulation :: TestTree
 errorAccumulation = testGroup "Error accumulation"
   [ testCase "Only checks" $ do
-      keypair <- newKeypair
-      biscuit <- mkBiscuit keypair [block|check if false; check if false;|]
-      res <- verifyBiscuit biscuit [verifier|allow if true;|] (publicKey keypair)
-      res @?= resultError (FailedChecks $ ifFalse :| [ifFalse])
+      secret <- newSecret
+      biscuit <- mkBiscuit secret[block|check if false; check if false;|]
+      res <- authorizeBiscuit biscuit [authorizer|allow if true;|]
+      res @?= Left (ResultError $ FailedChecks $ ifFalse :| [ifFalse])
   , testCase "Checks and deny policies" $ do
-      keypair <- newKeypair
-      biscuit <- mkBiscuit keypair [block|check if false; check if false;|]
-      res <- verifyBiscuit biscuit [verifier|deny if true;|] (publicKey keypair)
-      res @?= resultError (DenyRuleMatched [ifFalse, ifFalse] ifTrue)
+      secret <- newSecret
+      biscuit <- mkBiscuit secret [block|check if false; check if false;|]
+      res <- authorizeBiscuit biscuit [authorizer|deny if true;|]
+      res @?= Left(ResultError $ DenyRuleMatched [ifFalse, ifFalse] ifTrue)
   , testCase "Checks and no policies matched" $ do
-      keypair <- newKeypair
-      biscuit <- mkBiscuit keypair [block|check if false; check if false;|]
-      res <- verifyBiscuit biscuit [verifier|allow if false;|] (publicKey keypair)
-      res @?= resultError (NoPoliciesMatched [ifFalse, ifFalse])
+      secret <- newSecret
+      biscuit <- mkBiscuit secret [block|check if false; check if false;|]
+      res <- authorizeBiscuit biscuit [authorizer|allow if false;|]
+      res @?= Left (ResultError $ NoPoliciesMatched [ifFalse, ifFalse])
   ]
 
 unboundVarRule :: TestTree
 unboundVarRule = testCase "Rule with unbound variable" $ do
-  keypair <- newKeypair
-  b1 <- mkBiscuit keypair [block|check if operation(#ambient, #read);|]
-  b2 <- addBlock [block|operation($unbound, #read) <- operation($any1, $any2);|] b1
-  res <- verifyBiscuit b2 [verifier|operation(#ambient,#write);allow if true;|] (publicKey keypair)
-  res @?= Left (DatalogError $ Executor.ResultError $ Executor.FailedChecks $ pure [check|check if operation(#ambient, #read)|])
+  secret <- newSecret
+  b1 <- mkBiscuit secret [block|check if operation("read");|]
+  b2 <- addBlock [block|operation($unbound, "read") <- operation($any1, $any2);|] b1
+  res <- authorizeBiscuit b2 [authorizer|operation("write");allow if true;|]
+  res @?= Left (Executor.ResultError $ Executor.FailedChecks $ pure [check|check if operation("read")|])
 
 symbolRestrictions :: TestTree
 symbolRestrictions = testGroup "Restricted symbols in blocks"
   [ testCase "In facts" $ do
-      keypair <- newKeypair
-      b1 <- mkBiscuit keypair [block|check if operation(#ambient, #read);|]
-      b2 <- addBlock [block|operation(#ambient, #read);|] b1
-      res <- verifyBiscuit b2 [verifier|allow if true;|] (publicKey keypair)
-      res @?= Left (DatalogError $ Executor.ResultError $ Executor.FailedChecks $ pure [check|check if operation(#ambient, #read)|])
+      secret <- newSecret
+      b1 <- mkBiscuit secret [block|check if operation("read");|]
+      b2 <- addBlock [block|operation("read");|] b1
+      res <- authorizeBiscuit b2 [authorizer|allow if true;|]
+      res @?= Left (Executor.ResultError $ Executor.FailedChecks $ pure [check|check if operation("read")|])
   , testCase "In rules" $ do
-      keypair <- newKeypair
-      b1 <- mkBiscuit keypair [block|check if operation(#ambient, #read);|]
-      b2 <- addBlock [block|operation($ambient, #read) <- operation($ambient, $any);|] b1
-      res <- verifyBiscuit b2 [verifier|operation(#ambient,#write);allow if true;|] (publicKey keypair)
-      res @?= Left (DatalogError $ Executor.ResultError $ Executor.FailedChecks $ pure [check|check if operation(#ambient, #read)|])
+      secret <- newSecret
+      b1 <- mkBiscuit secret [block|check if operation("read");|]
+      b2 <- addBlock [block|operation($ambient, "read") <- operation($ambient, $any);|] b1
+      res <- authorizeBiscuit b2 [authorizer|operation("write");allow if true;|]
+      res @?= Left (Executor.ResultError $ Executor.FailedChecks $ pure [check|check if operation("read")|])
   ]
 
 factsRestrictions :: TestTree
@@ -90,15 +87,15 @@ factsRestrictions =
   let limits = defaultLimits { allowBlockFacts = False }
    in testGroup "No facts or rules in blocks"
         [ testCase "No facts" $ do
-            keypair <- newKeypair
-            b1 <- mkBiscuit keypair [block|right(#read);|]
-            b2 <- addBlock [block|right(#write);|] b1
-            res <- verifyBiscuitWithLimits limits b2 [verifier|allow if right(#write);|] (publicKey keypair)
-            res @?= Left (DatalogError $ Executor.ResultError $ Executor.NoPoliciesMatched [])
+            secret <- newSecret
+            b1 <- mkBiscuit secret [block|right("read");|]
+            b2 <- addBlock [block|right("write");|] b1
+            res <- authorizeBiscuitWithLimits limits b2 [authorizer|allow if right("write");|]
+            res @?= Left (Executor.ResultError $ Executor.NoPoliciesMatched [])
         , testCase "No rules" $ do
-            keypair <- newKeypair
-            b1 <- mkBiscuit keypair [block|right(#read);|]
-            b2 <- addBlock [block|right(#write) <- right(#read);|] b1
-            res <- verifyBiscuitWithLimits limits b2 [verifier|allow if right(#write);|] (publicKey keypair)
-            res @?= Left (DatalogError $ Executor.ResultError $ Executor.NoPoliciesMatched [])
+            secret <- newSecret
+            b1 <- mkBiscuit secret [block|right("read");|]
+            b2 <- addBlock [block|right("write") <- right("read");|] b1
+            res <- authorizeBiscuitWithLimits limits b2 [authorizer|allow if right("write");|]
+            res @?= Left (Executor.ResultError $ Executor.NoPoliciesMatched [])
         ]

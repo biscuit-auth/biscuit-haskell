@@ -6,7 +6,7 @@ This is the repository for a collection of haskell libraries providing support f
 
 You will find below the main lib and its companions:
 
-* [biscuit](./biscuit/) — Main library, providing minting and signature checking of biscuit tokens, as well as a datalog engine allowing to compute the validity of a token in a given context
+* [biscuit](./biscuit/) — Main library, providing minting and signature verification of biscuit tokens, as well as a datalog engine allowing to compute the validity of a token in a given context
 * [biscuit-servant](./biscuit-servant) — Servant combinators, for a smooth integration in your API
 
 ## Supported biscuit versions

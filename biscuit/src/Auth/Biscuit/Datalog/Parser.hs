@@ -21,7 +21,7 @@ module Auth.Biscuit.Datalog.Parser
   , fact
   , predicate
   , rule
-  , verifier
+  , authorizer
   -- these are only exported for testing purposes
   , checkParser
   , expressionParser
@@ -29,7 +29,8 @@ module Auth.Biscuit.Datalog.Parser
   , predicateParser
   , ruleParser
   , termParser
-  , verifierParser
+  , blockParser
+  , authorizerParser
   , HasParsers
   , HasTermParsers
   ) where
@@ -84,7 +85,7 @@ type HasTermParsers inSet pof ctx =
   )
 type HasParsers pof ctx = HasTermParsers 'NotWithinSet pof ctx
 
--- | Parser for an identifier (predicate name, variable name, symbol name, …)
+-- | Parser for an identifier (predicate name, variable name, …)
 nameParser :: Parser Text
 nameParser = takeWhile1 $ inClass "a-zA-Z0-9_"
 
@@ -236,12 +237,11 @@ rfc3339DateParser =
 termParser :: forall inSet pof ctx
             . ( HasTermParsers inSet pof ctx
               )
-           => Parser (ID' inSet pof ctx)
+           => Parser (Term' inSet pof ctx)
 termParser = skipSpace *> choice
   [ Antiquote <$> ifPresent "slice" (Slice <$> (string "${" *> many1 letter <* char '}'))
   , Variable <$> ifPresent "var" (char '$' *> nameParser)
   , TermSet <$> parseSet @inSet @ctx
-  , Symbol <$> (char '#' *> nameParser)
   , LBytes <$> hexBsParser
   , LDate <$> rfc3339DateParser
   , LInteger <$> signed decimal
@@ -304,20 +304,20 @@ blockElementParser = choice
   , BlockComment <$  commentParser
   ]
 
-verifierElementParser :: HasParsers 'InPredicate ctx => Parser (VerifierElement' ctx)
-verifierElementParser = choice
-  [ VerifierPolicy  <$> policyParser <* skipSpace <* char ';'
+authorizerElementParser :: HasParsers 'InPredicate ctx => Parser (AuthorizerElement' ctx)
+authorizerElementParser = choice
+  [ AuthorizerPolicy  <$> policyParser <* skipSpace <* char ';'
   , BlockElement    <$> blockElementParser
   ]
 
-verifierParser :: ( HasParsers 'InPredicate ctx
+authorizerParser :: ( HasParsers 'InPredicate ctx
                   , HasParsers 'InFact ctx
-                  , Show (VerifierElement' ctx)
+                  , Show (AuthorizerElement' ctx)
                   )
-               => Parser (Verifier' ctx)
-verifierParser = do
-  elems <- many1 (skipSpace *> verifierElementParser)
-  pure $ foldMap elementToVerifier elems
+               => Parser (Authorizer' ctx)
+authorizerParser = do
+  elems <- many' (skipSpace *> authorizerElementParser)
+  pure $ foldMap elementToAuthorizer elems
 
 blockParser :: ( HasParsers 'InPredicate ctx
                , HasParsers 'InFact ctx
@@ -325,7 +325,7 @@ blockParser :: ( HasParsers 'InPredicate ctx
                )
             => Parser (Block' ctx)
 blockParser = do
-  elems <- many1 (skipSpace *> blockElementParser)
+  elems <- many' (skipSpace *> blockElementParser)
   pure $ foldMap elementToBlock elems
 
 policyParser :: HasParsers 'InPredicate ctx => Parser (Policy' ctx)
@@ -344,7 +344,7 @@ compileParser p str = case parseOnly p (pack str) of
 -- | Quasiquoter for a rule expression. You can reference haskell variables
 -- like this: @${variableName}@.
 --
--- You most likely want to directly use 'block' or 'verifier' instead.
+-- You most likely want to directly use 'block' or 'authorizer' instead.
 rule :: QuasiQuoter
 rule = QuasiQuoter
   { quoteExp = compileParser (ruleParser @'QuasiQuote)
@@ -356,7 +356,7 @@ rule = QuasiQuoter
 -- | Quasiquoter for a predicate expression. You can reference haskell variables
 -- like this: @${variableName}@.
 --
--- You most likely want to directly use 'block' or 'verifier' instead.
+-- You most likely want to directly use 'block' or 'authorizer' instead.
 predicate :: QuasiQuoter
 predicate = QuasiQuoter
   { quoteExp = compileParser (predicateParser @'InPredicate @'QuasiQuote)
@@ -368,7 +368,7 @@ predicate = QuasiQuoter
 -- | Quasiquoter for a fact expression. You can reference haskell variables
 -- like this: @${variableName}@.
 --
--- You most likely want to directly use 'block' or 'verifier' instead.
+-- You most likely want to directly use 'block' or 'authorizer' instead.
 fact :: QuasiQuoter
 fact = QuasiQuoter
   { quoteExp = compileParser (predicateParser @'InFact @'QuasiQuote)
@@ -380,7 +380,7 @@ fact = QuasiQuoter
 -- | Quasiquoter for a check expression. You can reference haskell variables
 -- like this: @${variableName}@.
 --
--- You most likely want to directly use 'block' or 'verifier' instead.
+-- You most likely want to directly use 'block' or 'authorizer' instead.
 check :: QuasiQuoter
 check = QuasiQuoter
   { quoteExp = compileParser (checkParser @'QuasiQuote)
@@ -389,16 +389,18 @@ check = QuasiQuoter
   , quoteDec = error "not supported"
   }
 
--- | Quasiquoter for a block expression. You can reference haskell variables
--- like this: @${variableName}@.
+-- | Compile-time parser for a block expression, intended to be used with the
+-- @QuasiQuotes@ extension.
 --
 -- A typical use of 'block' looks like this:
 --
--- > [block|
--- >   resource(#authority, ${fileName});
--- >   rule($variable) <- fact($value), other_fact($value);
--- >   check if operation(#ambient, #read);
--- > |]
+-- > let fileName = "data.pdf"
+-- >  in [block|
+-- >       // datalog can reference haskell variables with ${variableName}
+-- >       resource(${fileName});
+-- >       rule($variable) <- fact($value), other_fact($value);
+-- >       check if operation("read");
+-- >     |]
 block :: QuasiQuoter
 block = QuasiQuoter
   { quoteExp = compileParser (blockParser @'QuasiQuote)
@@ -407,19 +409,26 @@ block = QuasiQuoter
   , quoteDec = error "not supported"
   }
 
--- | Quasiquoter for a verifier expression. You can reference haskell variables
--- like this: @${variableName}@.
+-- | Compile-time parser for an authorizer expression, intended to be used with the
+-- @QuasiQuotes@ extension.
 --
--- A typical use of 'block' looks like this:
+-- A typical use of 'authorizer' looks like this:
 --
--- > [verifier|
--- >   current_time(#ambient, ${now});
--- >   allow if resource(#authority, "file1");
--- >   deny if true;
--- > |]
-verifier :: QuasiQuoter
-verifier = QuasiQuoter
-  { quoteExp = compileParser (verifierParser @'QuasiQuote)
+-- > do
+-- >   now <- getCurrentTime
+-- >   pure [authorizer|
+-- >          // datalog can reference haskell variables with ${variableName}
+-- >          current_time(${now});
+-- >          // authorizers can contain facts, rules and checks like blocks, but
+-- >          // also declare policies. While every check has to pass for a biscuit to
+-- >          // be valid, policies are tried in order. The first one to match decides
+-- >          // if the token is valid or not
+-- >          allow if resource("file1");
+-- >          deny if true;
+-- >        |]
+authorizer :: QuasiQuoter
+authorizer = QuasiQuoter
+  { quoteExp = compileParser (authorizerParser @'QuasiQuote)
   , quotePat = error "not supported"
   , quoteType = error "not supported"
   , quoteDec = error "not supported"

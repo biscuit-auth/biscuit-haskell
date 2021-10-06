@@ -13,31 +13,29 @@ module Auth.Biscuit.Servant
     RequireBiscuit
   , authHandler
   , genBiscuitCtx
-  -- ** Supplying a verifier for a single endpoint
-  -- $singleEndpointVerifier
+  -- ** Supplying a authorizer for a single endpoint
+  -- $singleEndpointAuthorizer
   , checkBiscuit
   , checkBiscuitM
-  -- ** Decorate regular handlers with composable verifiers
-  -- $composableVerifiers
-  , WithVerifier (..)
+  -- ** Decorate regular handlers with composable authorizers
+  -- $composableAuthorizers
+  , WithAuthorizer (..)
   , handleBiscuit
-  , withVerifier
-  , withVerifier_
-  , withVerifierM
-  , withVerifierM_
-  , noVerifier
-  , noVerifier_
-  , withFallbackVerifier
-  , withPriorityVerifier
-  , withFallbackVerifierM
-  , withPriorityVerifierM
+  , withAuthorizer
+  , withAuthorizer_
+  , withAuthorizerM
+  , withAuthorizerM_
+  , noAuthorizer
+  , noAuthorizer_
+  , withFallbackAuthorizer
+  , withPriorityAuthorizer
+  , withFallbackAuthorizerM
+  , withPriorityAuthorizerM
+
+  , module Biscuit
   ) where
 
-import           Auth.Biscuit                     (Biscuit, PublicKey,
-                                                   ValidBiscuit, Verifier,
-                                                   checkBiscuitSignature,
-                                                   parseB64, validBiscuit,
-                                                   verifyValidBiscuit)
+import           Auth.Biscuit                     as Biscuit
 import           Control.Applicative              (liftA2)
 import           Control.Monad.Except             (MonadError, throwError)
 import           Control.Monad.IO.Class           (MonadIO, liftIO)
@@ -72,104 +70,122 @@ import           Servant.Server.Experimental.Auth
 -- >   :<|> "endpoint2" :> Capture "int" Int :> Get '[JSON] Int
 -- >   :<|> "endpoint3" :> Get '[JSON] Int
 -- >
--- > app :: Application
--- > app = serveWithContext (Proxy :: Proxy API)
--- >         (genBiscuitCtx publicKey) -- servant needs access to the biscuit /public/
--- >                                   -- key to be able to check biscuit signatures.
--- >                                   -- The public key can be read from the environment
--- >                                   -- and parsed using 'parsePublicKeyHex' for instance.
--- >         server
+-- > app :: PublicKey -> Application
+-- > app publicKey =
+-- >   -- servant needs access to the biscuit /public/
+-- >   -- key to be able to check biscuit signatures.
+-- >   -- The public key can be read from the environment
+-- >   -- and parsed using 'parsePublicKeyHex' for instance.
+-- >   serveWithContext
+-- >     (Proxy :: Proxy API)
+-- >     (genBiscuitCtx publicKey)
+-- >     server
 -- >
--- > server :: Server API -- ValidBiscuit -> Server ProtectedAPI
+-- > -- server :: Biscuit OpenOrSealed Verified -> Server ProtectedAPI
+-- > server :: Server API
 -- > server biscuit = … -- this will be detailed later
 --
 -- This will instruct servant to extract the biscuit from the requests and
--- check its signature. *It will not*, however, run any datalog check (as
+-- check its signature. /It will not/, however, run any datalog check (as
 -- the checks typically depend on the request contents).
 --
--- $singleEndpointVerifier
+-- $singleEndpointAuthorizer
 --
--- The corresponding @Server API@ value will be a @ValidBiscuit -> Server ProtectedAPI@.
--- The next step is to provide a 'Verifier' so that the biscuit datalog can be
--- verified. For that, you can use 'checkBiscuit' (or 'checkBiscuitM').
+-- The corresponding @Server API@ value will be a @Biscuit OpenOrSealed Verified -> Server ProtectedAPI@.
+-- The next step is to provide a 'Authorizer' so that the biscuit datalog can be
+-- verified. For that, you can use 'checkBiscuit' (or 'checkBiscuitM' for effectful checks).
 --
 -- > server :: Server API
 -- > server biscuit = h1 biscuit
 -- >             :<|> h2 biscuit
 -- >             :<|> h3 biscuit
 -- >
--- > h1 :: ValidBiscuit -> Handler Int
+-- > h1 :: Biscuit OpenOrSealed Verified -> Handler Int
 -- > h1 biscuit =
 -- >   checkBiscuit biscuit
--- >     [verifier|allow if right(#authority,#one);|]
--- >     -- ^ only allow biscuits granting access to the endpoint tagged `#one`
+-- >     [authorizer|allow if right("one");|]
+-- >     -- ^ only allow biscuits granting access to the endpoint tagged "one"
 -- >     (pure 1)
 -- >
--- > h2 :: ValidBiscuit -> Int -> Handler Int
+-- > h2 :: Biscuit OpenOrSealed Verified -> Int -> Handler Int
 -- > h2 biscuit value =
--- >   checkBiscuit biscuit
--- >     [verifier|allow if right(#authority,#two, ${value});|]
--- >     -- ^ only allow biscuits granting access to the endpoint tagged `#two`
--- >     -- AND for the provided int value.
+-- >   let authorizer' = do
+-- >         now <- liftIO getCurrentTime
+-- >         pure [authorizer|
+-- >                // provide the current time so that TTL checks embedded in
+-- >                // the biscuit can decide if it's still valid
+-- >                // this show how to run an effectful check with
+-- >                // checkBiscuitM (getting the current time is an effect)
+-- >                time(${now});
+-- >                // only allow biscuits granting access to the endpoint tagged "two"
+-- >                // AND for the provided int value. This show how the checks can depend
+-- >                // on the http request contents.
+-- >                allow if right("two", ${value});
+-- >              |]
+-- >   checkBiscuitM biscuit authorizer
 -- >     (pure 2)
 -- >
--- > h3 :: ValidBiscuit -> Handler Int
+-- > h3 :: Biscuit OpenOrSealed Verified -> Handler Int
 -- > h3 biscuit =
 -- >   checkBiscuit biscuit
--- >     [verifier|deny if true;|]
+-- >     [authorizer|deny if true;|]
 -- >     -- ^ reject every biscuit
 -- >     (pure 3)
 --
--- $composableVerifiers
+-- $composableAuthorizers
 --
--- 'checkBiscuit' allows you to describe validation rules endpoint by endpoint. Since 'Verifier'
--- has a 'Monoid' instance, you can avoid duplication by extracting common rules, but that still
--- requires some boilerplate (and it won't prevent you from forgetting to add them on some endpoints).
+-- 'checkBiscuit' allows you to describe validation rules endpoint by endpoint. If your
+-- application has a lot of endpoints with the same policies, it can become tedious to
+-- maintain.
 --
--- 'biscuit-servant' provides a way to apply verifiers on whole API trees, in a composable way, thanks
--- to 'hoistServer':
+-- 'biscuit-servant' provides a way to apply authorizers on whole API trees,
+-- in a composable way, thanks to 'hoistServer'. 'hoistServer' is a mechanism
+-- provided by servant-server that lets apply a transformation function to whole
+-- API trees.
 --
--- > -- 'withVerifier' wraps a 'Handler' and lets you attach a verifier
--- > handler1 :: WithVerifier Handler Int
--- > handler1 = withVerifier
--- >   [verifier|allow if right(#authority, #one);|]
+-- > -- 'withAuthorizer' wraps a 'Handler' and lets you attach a authorizer to a
+-- > -- specific endoint. This authorizer may be combined with other authorizers
+-- > -- attached to the whole API tree
+-- > handler1 :: WithAuthorizer Handler Int
+-- > handler1 = withAuthorizer
+-- >   [authorizer|allow if right("one");|]
 -- >   (pure 1)
 -- >
--- > handler2 :: Int -> WithVerifier Handler Int
--- > handler2 value = withVerifier
--- >   [verifier|allow if right(#authority, #two, ${value});|]
+-- > handler2 :: Int -> WithAuthorizer Handler Int
+-- > handler2 value = withAuthorizer
+-- >   [authorizer|allow if right("two", ${value});|]
 -- >   (pure 2)
 -- >
--- > handler3 :: WithVerifier Handler Int
--- > handler3 = withVerifier
--- >   [verifier|allow if right(#authority, #three);|]
+-- > handler3 :: WithAuthorizer Handler Int
+-- > handler3 = withAuthorizer
+-- >   [authorizer|allow if right("three");|]
 -- >   (pure 3)
 -- >
--- > server :: Server API
--- > server =
+-- > server :: Biscuit OpenOrSealed Verified -> Server ProtectedAPI
+-- > server biscuit =
 -- >  let nowFact = do
 -- >        now <- liftIO getCurrentTime
--- >        pure [verifier|now(#ambient, ${now});|]
--- >      handleAuth :: WithVerifier Handler x -> Handler x
+-- >        pure [authorizer|time(${now});|]
+-- >      handleAuth :: WithAuthorizer Handler x -> Handler x
 -- >      handleAuth =
--- >          handleBiscuit b
--- >          -- ^ this runs datalog checks on the biscuit, based on verifiers attached to
+-- >          handleBiscuit biscuit
+-- >          -- ^ this runs datalog checks on the biscuit, based on authorizers attached to
 -- >          -- the handlers
--- >        . withPriorityVerifierM nowFact
+-- >        . withPriorityAuthorizerM nowFact
 -- >          -- ^ this provides the current time to the verification context so that biscuits with
--- >          -- a TTL can verify if they are still valid.
--- >          -- Verifiers can be provided in a monadic context (it just has to be the same as
+-- >          -- a TTL can check if they are still valid.
+-- >          -- Authorizers can be provided in a monadic context (it has to be the same monad as
 -- >          -- the handlers themselves, so here it's 'Handler').
--- >        . withPriorityVerifier [verifier|allow if right(#authority, #admin);|]
+-- >        . withPriorityAuthorizer [authorizer|allow if right("admin");|]
 -- >          -- ^ this policy will be tried /before/ any endpoint policy, so `endpoint3` will be
 -- >          -- reachable with an admin biscuit
--- >        . withFallbackVerifier [verifier|allow if right(#authority, #anon);|]
+-- >        . withFallbackAuthorizer [authorizer|allow if right("anon");|]
 -- >          -- ^ this policy will be tried /after/ the endpoints policies, so `endpoint3` will
 -- >          -- *not* be reachable with an anon macaroon.
 -- >      handlers = handler1 :<|> handler2 :<|> handler3
 -- >   in hoistServer @ProtectedAPI Proxy handleAuth handlers
 -- >        -- ^ this will apply `handleAuth` on all 'ProtectedAPI' endpoints.
---
+
 -- | Type used to protect and API tree, requiring a biscuit token
 -- to be attached to requests. The associated auth handler will
 -- only check the biscuit signature. Checking the datalog part
@@ -177,246 +193,262 @@ import           Servant.Server.Experimental.Auth
 -- be performed separately with either 'checkBiscuit' (for simple
 -- use-cases) or 'handleBiscuit' (for more complex use-cases).
 type RequireBiscuit = AuthProtect "biscuit"
-type instance AuthServerData RequireBiscuit = ValidBiscuit
+type instance AuthServerData RequireBiscuit = Biscuit OpenOrSealed Verified
 
--- | Wrapper for a servant handler, equipped with a biscuit 'Verifier'
+-- | Wrapper for a servant handler, equipped with a biscuit 'Authorizer'
 -- that will be used to authorize the request. If the authorization
 -- succeeds, the handler is ran.
 -- The handler itself is given access to the verified biscuit through
--- a 'ReaderT' 'Biscuit'.
-data WithVerifier m a
-  = WithVerifier
-  { handler_  :: ReaderT Biscuit m a
+-- a @ReaderT (Biscuit OpenOrSealed Verified)@.
+data WithAuthorizer m a
+  = WithAuthorizer
+  { handler_    :: ReaderT (Biscuit OpenOrSealed Verified) m a
   -- ^ the wrapped handler, in a 'ReaderT' to give easy access to the biscuit
-  , verifier_ :: m Verifier
-  -- ^ the 'Verifier' associated to the handler
+  , authorizer_ :: m Authorizer
+  -- ^ the 'Authorizer' associated to the handler
   }
 
--- | Combines the provided 'Verifier' to the 'Verifier' attached to the wrapped
+-- | Combines the provided 'Authorizer' to the 'Authorizer' attached to the wrapped
 -- handler. /facts/, /rules/ and /checks/ are unordered, but /policies/ have a
--- specific order. 'withFallbackVerifier' puts the provided policies at the /bottom/
--- of the list (ie as /fallback/ policies).
+-- specific order. 'withFallbackAuthorizer' puts the provided policies at the /bottom/
+-- of the list (ie as /fallback/ policies): these policies will be tried /after/
+-- the policies declared through 'withPriorityAuthorizer' and after the policies
+-- declared by the endpoints.
 --
 -- If you want the policies to be tried before the ones of the wrapped handler, you
--- can use 'withPriorityVerifier'.
+-- can use 'withPriorityAuthorizer'.
 --
--- If you need to perform effects to compute the verifier (eg. to get the current date,
--- or to query a database), you can use 'withFallbackVerifierM' instead.
-withFallbackVerifier :: Functor m
-                     => Verifier
-                     -> WithVerifier m a
-                     -> WithVerifier m a
-withFallbackVerifier newV h@WithVerifier{verifier_} =
-  h { verifier_ = (<> newV) <$> verifier_ }
+-- If you need to perform effects to compute the authorizer (eg. to get the current date,
+-- or to query a database), you can use 'withFallbackAuthorizerM' instead.
+withFallbackAuthorizer :: Functor m
+                     => Authorizer
+                     -> WithAuthorizer m a
+                     -> WithAuthorizer m a
+withFallbackAuthorizer newV h@WithAuthorizer{authorizer_} =
+  h { authorizer_ = (<> newV) <$> authorizer_ }
 
--- | Combines the provided 'Verifier' to the 'Verifier' attached to the wrapped
+-- | Combines the provided 'Authorizer' to the 'Authorizer' attached to the wrapped
 -- handler. /facts/, /rules/ and /checks/ are unordered, but /policies/ have a
--- specific order. 'withFallbackVerifier' puts the provided policies at the /bottom/
--- of the list (ie as /fallback/ policies).
+-- specific order. 'withFallbackAuthorizer' puts the provided policies at the /bottom/
+-- of the list (ie as /fallback/ policies): these policies will be tried /after/
+-- the policies declared through 'withPriorityAuthorizer' and after the policies
+-- declared by the endpoints.
 --
 -- If you want the policies to be tried before the ones of the wrapped handler, you
--- can use 'withPriorityVerifier'.
+-- can use 'withPriorityAuthorizer'.
 --
--- Here, the 'Verifier' can be computed effectfully. If you don't need to perform effects,
--- you can use 'withFallbackVerifier' instead.
-withFallbackVerifierM :: Applicative m
-                      => m Verifier
-                      -> WithVerifier m a
-                      -> WithVerifier m a
-withFallbackVerifierM newV h@WithVerifier{verifier_} =
-  h { verifier_ = liftA2 (<>) verifier_ newV }
+-- Here, the 'Authorizer' can be computed effectfully. If you don't need to perform effects,
+-- you can use 'withFallbackAuthorizer' instead.
+withFallbackAuthorizerM :: Applicative m
+                      => m Authorizer
+                      -> WithAuthorizer m a
+                      -> WithAuthorizer m a
+withFallbackAuthorizerM newV h@WithAuthorizer{authorizer_} =
+  h { authorizer_ = liftA2 (<>) authorizer_ newV }
 
--- | Combines the provided 'Verifier' to the 'Verifier' attached to the wrapped
+-- | Combines the provided 'Authorizer' to the 'Authorizer' attached to the wrapped
 -- handler. /facts/, /rules/ and /checks/ are unordered, but /policies/ have a
--- specific order. 'withFallbackVerifier' puts the provided policies at the /top/
--- of the list (ie as /priority/ policies).
+-- specific order. 'withFallbackAuthorizer' puts the provided policies at the /top/
+-- of the list (ie as /priority/ policies): these policies will be tried /after/
+-- the policies declared through 'withPriorityAuthorizer' and after the policies
+-- declared by the endpoints.
 --
 -- If you want the policies to be tried after the ones of the wrapped handler, you
--- can use 'withFallbackVerifier'.
+-- can use 'withFallbackAuthorizer'.
 --
--- If you need to perform effects to compute the verifier (eg. to get the current date,
--- or to query a database), you can use 'withPriorityVerifierM' instead.
-withPriorityVerifier :: Functor m
-                     => Verifier
-                     -> WithVerifier m a
-                     -> WithVerifier m a
-withPriorityVerifier newV h@WithVerifier{verifier_} =
-     h { verifier_ = (newV <>) <$> verifier_ }
+-- If you need to perform effects to compute the authorizer (eg. to get the current date,
+-- or to query a database), you can use 'withPriorityAuthorizerM' instead.
+withPriorityAuthorizer :: Functor m
+                     => Authorizer
+                     -> WithAuthorizer m a
+                     -> WithAuthorizer m a
+withPriorityAuthorizer newV h@WithAuthorizer{authorizer_} =
+     h { authorizer_ = (newV <>) <$> authorizer_ }
 
--- | Combines the provided 'Verifier' to the 'Verifier' attached to the wrapped
+-- | Combines the provided 'Authorizer' to the 'Authorizer' attached to the wrapped
 -- handler. /facts/, /rules/ and /checks/ are unordered, but /policies/ have a
--- specific order. 'withFallbackVerifier' puts the provided policies at the /top/
--- of the list (ie as /priority/ policies).
+-- specific order. 'withFallbackAuthorizer' puts the provided policies at the /top/
+-- of the list (ie as /priority/ policies): these policies will be tried /after/
+-- the policies declared through 'withPriorityAuthorizer' and after the policies
+-- declared by the endpoints.
 --
 -- If you want the policies to be tried after the ones of the wrapped handler, you
--- can use 'withFallbackVerifier'.
+-- can use 'withFallbackAuthorizer'.
 --
--- Here, the 'Verifier' can be computed effectfully. If you don't need to perform effects,
--- you can use 'withFallbackVerifier' instead.
-withPriorityVerifierM :: Applicative m
-                      => m Verifier
-                      -> WithVerifier m a
-                      -> WithVerifier m a
-withPriorityVerifierM newV h@WithVerifier{verifier_} =
-     h { verifier_ = liftA2 (<>) newV verifier_ }
+-- Here, the 'Authorizer' can be computed effectfully. If you don't need to perform effects,
+-- you can use 'withFallbackAuthorizer' instead.
+withPriorityAuthorizerM :: Applicative m
+                      => m Authorizer
+                      -> WithAuthorizer m a
+                      -> WithAuthorizer m a
+withPriorityAuthorizerM newV h@WithAuthorizer{authorizer_} =
+     h { authorizer_ = liftA2 (<>) newV authorizer_ }
 
--- | Wraps an existing handler block, attaching a 'Verifier'. The handler has
--- to be a 'ReaderT' 'Biscuit' to be able to access the token.
---
+-- | Wraps an existing handler block, attaching a 'Authorizer'. The handler has
+-- to be a @ReaderT (Biscuit OpenOrSealed Verified)' to be able to access the token.
 -- If you don't need to access the token from the handler block, you can use
--- 'withVerifier_' instead.
+-- 'withAuthorizer_' instead.
 --
--- If you need to perform effects to compute the verifier (eg. to get the current date,
--- or to query a database), you can use 'withVerifierM' instead.
-withVerifier :: Applicative m => Verifier -> ReaderT Biscuit m a -> WithVerifier m a
-withVerifier v handler_ =
-  WithVerifier
+-- If you need to perform effects to compute the authorizer (eg. to get the current date,
+-- or to query a database), you can use 'withAuthorizerM' instead.
+withAuthorizer :: Applicative m
+             => Authorizer
+             -> ReaderT (Biscuit OpenOrSealed Verified) m a
+             -> WithAuthorizer m a
+withAuthorizer v handler_ =
+  WithAuthorizer
     { handler_
-    , verifier_ = pure v
+    , authorizer_ = pure v
     }
 
--- | Wraps an existing handler block, attaching a 'Verifier'. The handler has
--- to be a 'ReaderT' 'Biscuit' to be able to access the token.
---
+-- | Wraps an existing handler block, attaching a 'Authorizer'. The handler has
+-- to be a @ReaderT (Biscuit OpenOrSealed Verified)@ to be able to access the token.
 -- If you don't need to access the token from the handler block, you can use
--- 'withVerifier_' instead.
+-- 'withAuthorizer_' instead.
 --
--- Here, the 'Verifier' can be computed effectfully. If you don't need to perform effects,
--- you can use 'withVerifier' instead.
-withVerifierM :: m Verifier -> ReaderT Biscuit m a -> WithVerifier m a
-withVerifierM verifier_ handler_ =
-  WithVerifier
+-- Here, the 'Authorizer' can be computed effectfully. If you don't need to perform effects,
+-- you can use 'withAuthorizer' instead.
+withAuthorizerM :: m Authorizer
+              -> ReaderT (Biscuit OpenOrSealed Verified) m a
+              -> WithAuthorizer m a
+withAuthorizerM authorizer_ handler_ =
+  WithAuthorizer
     { handler_
-    , verifier_
+    , authorizer_
     }
 
--- | Wraps an existing handler block, attaching a 'Verifier'. The handler can be
+-- | Wraps an existing handler block, attaching a 'Authorizer'. The handler can be
+-- any monad, but won't be able to access the biscuit. If you want to read the biscuit
+-- token from the handler block, you can use 'withAuthorizer' instead.
+--
+-- If you need to perform effects to compute the authorizer (eg. to get the current date,
+-- or to query a database), you can use 'withAuthorizerM_' instead.
+withAuthorizer_ :: Monad m => Authorizer -> m a -> WithAuthorizer m a
+withAuthorizer_ v = withAuthorizer v . lift
+
+-- | Wraps an existing handler block, attaching a 'Authorizer'. The handler can be
 -- any monad, but won't be able to access the 'Biscuit'.
 --
--- If you want to read the biscuit token from the handler block, you can use 'withVerifier'
+-- If you want to read the biscuit token from the handler block, you can use 'withAuthorizer'
 -- instead.
 --
--- If you need to perform effects to compute the verifier (eg. to get the current date,
--- or to query a database), you can use 'withVerifierM_' instead.
-withVerifier_ :: Monad m => Verifier -> m a -> WithVerifier m a
-withVerifier_ v = withVerifier v . lift
+-- Here, the 'Authorizer' can be computed effectfully. If you don't need to perform effects,
+-- you can use 'withAuthorizer_' instead.
+withAuthorizerM_ :: Monad m => m Authorizer -> m a -> WithAuthorizer m a
+withAuthorizerM_ v = withAuthorizerM v . lift
 
--- | Wraps an existing handler block, attaching a 'Verifier'. The handler can be
--- any monad, but won't be able to access the 'Biscuit'.
---
--- If you want to read the biscuit token from the handler block, you can use 'withVerifier'
+-- | Wraps an existing handler block, attaching an empty 'Authorizer'. The handler has
+-- to be a @ReaderT (Biscuit OpenOrSealed Verified)@ to be able to access the token. If you don't need
+-- to access the token from the handler block, you can use 'noAuthorizer_'
 -- instead.
 --
--- Here, the 'Verifier' can be computed effectfully. If you don't need to perform effects,
--- you can use 'withVerifier_' instead.
-withVerifierM_ :: Monad m => m Verifier -> m a -> WithVerifier m a
-withVerifierM_ v = withVerifierM v . lift
+-- This function is useful when the endpoint does not have any specific authorizer
+-- context, and the authorizer context is applied on the whole API tree through
+-- 'withFallbackAuthorizer' or 'withPriorityAuthorizer' to apply policies on several
+-- handlers at the same time (with 'hoistServer' for instance).
+noAuthorizer :: Applicative m
+           => ReaderT (Biscuit OpenOrSealed Verified) m a
+           -> WithAuthorizer m a
+noAuthorizer = withAuthorizer mempty
 
--- | Wraps an existing handler block, attaching an empty 'Verifier'. The handler has
--- to be a 'ReaderT' 'Biscuit' to be able to access the token. If you don't need
--- to access the token from the handler block, you can use 'noVerifier_'
--- instead.
+-- | Wraps an existing handler block, attaching an empty 'Authorizer'. The handler can be
+-- any monad, but won't be able to access the biscuit. If you want to read the
+-- biscuit token from the handler block, you can use 'noAuthorizer' instead.
 --
--- This function can be used together with 'withFallbackVerifier' or 'withPriorityVerifier'
--- to apply policies on several handlers at the same time (with 'hoistServer' for instance).
-noVerifier :: Applicative m => ReaderT Biscuit m a -> WithVerifier m a
-noVerifier = withVerifier mempty
-
--- | Wraps an existing handler block, attaching an empty 'Verifier'. The handler can be
--- any monad, but won't be able to access the 'Biscuit'. If you want to read the
--- biscuit token from the handler block, you can use 'noVerifier' instead.
---
--- This function can be used together with 'withFallbackVerifier' or 'withPriorityVerifier'
--- to apply policies on several handlers at the same time (with 'hoistServer' for instance).
-noVerifier_ :: Monad m => m a -> WithVerifier m a
-noVerifier_ = noVerifier . lift
+-- This function is useful when the endpoint does not have any specific authorizer
+-- context, and the authorizer context is applied on the whole API tree through
+-- 'withFallbackAuthorizer' or 'withPriorityAuthorizer' to apply policies on several
+-- handlers at the same time (with 'hoistServer' for instance).
+noAuthorizer_ :: Monad m => m a -> WithAuthorizer m a
+noAuthorizer_ = noAuthorizer . lift
 
 -- | Extracts a biscuit from an http request, assuming:
 --
 -- - the biscuit is b64-encoded
 -- - prefixed with the @Bearer @ string
 -- - in the @Authorization@ header
-extractBiscuit :: Request -> Either String Biscuit
-extractBiscuit req = do
+extractBiscuit :: PublicKey
+               -> Request
+               -> Either String (Biscuit OpenOrSealed Verified)
+extractBiscuit pk req = do
   let note e = maybe (Left e) Right
   authHeader <- note "Missing Authorization header" . lookup "Authorization" $ requestHeaders req
   b64Token   <- note "Not a Bearer token" $ BS.stripPrefix "Bearer " authHeader
-  first (const "Not a B64-encoded biscuit") $ parseB64 b64Token
+  first (const "Not a B64-encoded biscuit") $ parseB64 pk b64Token
 
 -- | Servant authorization handler. This extracts the biscuit from the request,
--- checks its signature (but not the datalog part) and returns a 'ValidBiscuit'
+-- checks its signature (but not the datalog part) and returns a 'Biscuit'
 -- upon success.
-authHandler :: PublicKey -> AuthHandler Request ValidBiscuit
+authHandler :: PublicKey
+            -> AuthHandler Request (Biscuit OpenOrSealed Verified)
 authHandler publicKey = mkAuthHandler handler
   where
     authError s = err401 { errBody = LBS.fromStrict (C8.pack s) }
     orError = either (throwError . authError) pure
-    handler req = do
-      biscuit <- orError $ extractBiscuit req
-      result  <- liftIO $ checkBiscuitSignature biscuit publicKey
-      case result of
-        Nothing -> throwError $ authError "Invalid signature"
-        Just vb -> pure vb
+    handler req =
+      orError $ extractBiscuit publicKey req
 
 -- | Helper function generating a servant context containing the authorization
 -- handler.
-genBiscuitCtx :: PublicKey -> Context '[AuthHandler Request ValidBiscuit]
+genBiscuitCtx :: PublicKey
+              -> Context '[AuthHandler Request (Biscuit OpenOrSealed Verified)]
 genBiscuitCtx pk = authHandler pk :. EmptyContext
 
--- | Given a 'ValidBiscuit' (provided by the servant authorization mechanism),
--- verify its validity (with the provided 'Verifier').
+-- | Given a biscuit (provided by the servant authorization mechanism),
+-- verify its validity (with the provided 'Authorizer').
 --
 -- If you need to perform effects in the verification phase (eg to get the current time,
--- or if you need to issue a DB query to get context), you can use 'checkBiscuitM' instead.
+-- or if you need to issue a DB query to retrieve extra information needed to check the token),
+-- you can use 'checkBiscuitM' instead.
 --
 -- If you don't want to pass the biscuit manually to all the endpoints or want to
--- blanket apply verifiers on whole API trees, you can consider using 'withVerifier'
--- (on endpoints), 'withFallbackVerifier' and 'withPriorityVerifier' (on API sub-trees)
+-- blanket apply authorizers on whole API trees, you can consider using 'withAuthorizer'
+-- (on endpoints), 'withFallbackAuthorizer' and 'withPriorityAuthorizer' (on API sub-trees)
 -- and 'handleBiscuit' (on the whole API).
 checkBiscuit :: (MonadIO m, MonadError ServerError m)
-             => ValidBiscuit
-             -> Verifier
+             => Biscuit OpenOrSealed Verified
+             -> Authorizer
              -> m a
              -> m a
 checkBiscuit vb v h = do
-  res <- liftIO $ verifyValidBiscuit vb v
+  res <- liftIO $ authorizeBiscuit vb v
   case res of
     Left e  -> do liftIO $ print e
                   throwError $ err401 { errBody = "Biscuit failed checks" }
     Right _ -> h
 
--- | Given a 'ValidBiscuit' (provided by the servant authorization mechanism),
--- verify its validity (with the provided 'Verifier', which can be effectful).
+-- | Given a 'Biscuit' (provided by the servant authorization mechanism),
+-- verify its validity (with the provided 'Authorizer', which can be effectful).
 --
 -- If you don't need to run any effects in the verifying phase, you can use 'checkBiscuit'
 -- instead.
 --
 -- If you don't want to pass the biscuit manually to all the endpoints or want to blanket apply
--- verifiers on whole API trees, you can consider using 'withVerifier' (on endpoints),
--- 'withFallbackVerifier' and 'withPriorityVerifier' (on API sub-trees) and 'handleBiscuit'
+-- authorizers on whole API trees, you can consider using 'withAuthorizer' (on endpoints),
+-- 'withFallbackAuthorizer' and 'withPriorityAuthorizer' (on API sub-trees) and 'handleBiscuit'
 -- (on the whole API).
 checkBiscuitM :: (MonadIO m, MonadError ServerError m)
-              => ValidBiscuit
-              -> m Verifier
+              => Biscuit OpenOrSealed Verified
+              -> m Authorizer
               -> m a
               -> m a
 checkBiscuitM vb mv h = do
   v   <- mv
-  res <- liftIO $ verifyValidBiscuit vb v
+  res <- liftIO $ authorizeBiscuit vb v
   case res of
     Left e  -> do liftIO $ print e
                   throwError $ err401 { errBody = "Biscuit failed checks" }
     Right _ -> h
 
--- | Given a handler wrapped in a 'WithVerifier', use the attached 'Verifier' to
+-- | Given a handler wrapped in a 'WithAuthorizer', use the attached 'Authorizer' to
 -- verify the provided biscuit and return an error as needed.
 --
 -- For simpler use cases, consider using 'checkBiscuit' instead, which works on regular
 -- servant handlers.
 handleBiscuit :: (MonadIO m, MonadError ServerError m)
-              => ValidBiscuit
-              -> WithVerifier m a
+              => Biscuit OpenOrSealed Verified
+              -> WithAuthorizer m a
               -> m a
-handleBiscuit vb WithVerifier{verifier_, handler_} =
-  let h = runReaderT handler_ (validBiscuit vb)
-  in checkBiscuitM vb verifier_ h
+handleBiscuit b WithAuthorizer{authorizer_, handler_} =
+  let h = runReaderT handler_ b
+  in checkBiscuitM b authorizer_ h

@@ -2,16 +2,21 @@
 {-# LANGUAGE QuasiQuotes       #-}
 module Spec.Executor (specs) where
 
-import           Data.Attoparsec.Text          (parseOnly)
-import           Data.Map.Strict               as Map
-import           Data.Set                      as Set
-import           Data.Text                     (Text, unpack)
+import           Data.Attoparsec.Text                (parseOnly)
+import           Data.Map.Strict                     as Map
+import           Data.Set                            as Set
+import           Data.Text                           (Text, unpack)
 import           Test.Tasty
 import           Test.Tasty.HUnit
 
 import           Auth.Biscuit.Datalog.AST
-import           Auth.Biscuit.Datalog.Executor
-import           Auth.Biscuit.Datalog.Parser   (expressionParser, fact, rule)
+import           Auth.Biscuit.Datalog.Executor       (ExecutionError (..),
+                                                      Limits (..),
+                                                      defaultLimits,
+                                                      evaluateExpression)
+import           Auth.Biscuit.Datalog.Parser         (expressionParser, fact,
+                                                      rule)
+import           Auth.Biscuit.Datalog.ScopedExecutor
 
 specs :: TestTree
 specs = testGroup "Datalog evaluation"
@@ -29,14 +34,13 @@ grandparent = testCase "Basic grandparent rule" $
         { rules = Set.fromList
                    [ [rule|grandparent($a,$b) <- parent($a,$c), parent($c,$b)|]
                    ]
-        , blockRules = mempty
         , facts = Set.fromList
                    [ [fact|parent("alice", "bob")|]
                    , [fact|parent("bob", "jean-pierre")|]
                    , [fact|parent("alice", "toto")|]
                    ]
         }
-   in computeAllFacts defaultLimits world @?= Right (Set.fromList
+   in runFactGeneration defaultLimits world @?= Right (Set.fromList
         [ [fact|parent("alice", "bob")|]
         , [fact|parent("bob", "jean-pierre")|]
         , [fact|parent("alice", "toto")|]
@@ -66,9 +70,7 @@ exprEval = do
     , ("\"test\".length()", LInteger 4)
     , ("hex:ababab.length()", LInteger 3)
     , ("[].length()", LInteger 0)
-    , ("[#test, #test].length()", LInteger 1)
-    , ("#toto == #toto", LBool True)
-    , ("#toto == #truc", LBool False)
+    , ("[\"test\", \"test\"].length()", LInteger 1)
     , ("1 == 1", LBool True)
     , ("2 == 1", LBool False)
     , ("\"toto\" == \"toto\"", LBool True)
@@ -119,14 +121,14 @@ exprEval = do
     , ("true || false", LBool True)
     , ("false || true", LBool True)
     , ("false || false", LBool False)
-    , ("[#test].contains([#test])", LBool True)
-    , ("[#test].contains(#test)", LBool True)
-    , ("[].contains(#test)", LBool False)
-    , ("[\"test\"].contains(#test)", LBool False)
-    , ("[#test].intersection([#test])", TermSet (Set.fromList [Symbol "test"]))
-    , ("[#test].intersection([\"test\"])", TermSet (Set.fromList []))
-    , ("[#test].union([#test])", TermSet (Set.fromList [Symbol "test"]))
-    , ("[#test].union([\"test\"])", TermSet (Set.fromList [Symbol "test", LString "test"]))
+    , ("[1].contains([1])", LBool True)
+    , ("[1].contains(1)", LBool True)
+    , ("[].contains(1)", LBool False)
+    , ("[\"test\"].contains(2)", LBool False)
+    , ("[1].intersection([1])", TermSet (Set.fromList [LInteger 1]))
+    , ("[1].intersection([\"test\"])", TermSet (Set.fromList []))
+    , ("[1].union([1])", TermSet (Set.fromList [LInteger 1]))
+    , ("[1].union([\"test\"])", TermSet (Set.fromList [LInteger 1, LString "test"]))
     ]
 
 exprEvalError :: TestTree
@@ -147,20 +149,19 @@ rulesWithConstraints :: TestTree
 rulesWithConstraints = testCase "Rule with constraints" $
   let world = World
         { rules = Set.fromList
-                   [ [rule|valid_date("file1") <- time(#ambient, $0), resource(#ambient, "file1"), $0 <= 2019-12-04T09:46:41+00:00|]
-                   , [rule|valid_date("file2") <- time(#ambient, $0), resource(#ambient, "file2"), $0 <= 2010-12-04T09:46:41+00:00|]
+                   [ [rule|valid_date("file1") <- time($0), resource("file1"), $0 <= 2019-12-04T09:46:41+00:00|]
+                   , [rule|valid_date("file2") <- time($0), resource("file2"), $0 <= 2010-12-04T09:46:41+00:00|]
                    ]
-        , blockRules = mempty
         , facts = Set.fromList
-                   [ [fact|time(#ambient, 2019-12-04T01:00:00Z)|]
-                   , [fact|resource(#ambient, "file1")|]
-                   , [fact|resource(#ambient, "file2")|]
+                   [ [fact|time(2019-12-04T01:00:00Z)|]
+                   , [fact|resource("file1")|]
+                   , [fact|resource("file2")|]
                    ]
         }
-   in computeAllFacts defaultLimits world @?= Right (Set.fromList
-        [ [fact|time(#ambient, 2019-12-04T01:00:00Z)|]
-        , [fact|resource(#ambient, "file1")|]
-        , [fact|resource(#ambient, "file2")|]
+   in runFactGeneration defaultLimits world @?= Right (Set.fromList
+        [ [fact|time(2019-12-04T01:00:00Z)|]
+        , [fact|resource("file1")|]
+        , [fact|resource("file2")|]
         , [fact|valid_date("file1")|]
         ])
 
@@ -168,15 +169,14 @@ ruleHeadWithNoVars :: TestTree
 ruleHeadWithNoVars = testCase "Rule head with no variables" $
   let world = World
         { rules = Set.fromList
-                   [ [rule|operation(#authority,#read) <- test($yolo, #nothing)|]
+                   [ [rule|operation("authority", "read") <- test($yolo, "nothing")|]
                    ]
-        , blockRules = mempty
         , facts = Set.fromList
-                   [ [fact|test(#whatever, #notNothing)|]
+                   [ [fact|test("whatever", "notNothing")|]
                    ]
         }
-   in computeAllFacts defaultLimits world @?= Right (Set.fromList
-        [ [fact|test(#whatever, #notNothing)|]
+   in runFactGeneration defaultLimits world @?= Right (Set.fromList
+        [ [fact|test("whatever", "notNothing")|]
         ])
 
 limits :: TestTree
@@ -186,7 +186,6 @@ limits =
                    [ [rule|ancestor($a,$b) <- parent($a,$c), ancestor($c,$b)|]
                    , [rule|ancestor($a,$b) <- parent($a,$b)|]
                    ]
-        , blockRules = mempty
         , facts = Set.fromList
                    [ [fact|parent("alice", "bob")|]
                    , [fact|parent("bob", "jean-pierre")|]
@@ -198,7 +197,7 @@ limits =
       iterLimits = defaultLimits { maxIterations = 2 }
    in testGroup "Facts generation limits"
         [ testCase "max facts" $
-            computeAllFacts factLimits world @?= Left TooManyFacts
+            runFactGeneration factLimits world @?= Left Facts
         , testCase "max iterations" $
-            computeAllFacts iterLimits world @?= Left TooManyIterations
+            runFactGeneration iterLimits world @?= Left Iterations
         ]

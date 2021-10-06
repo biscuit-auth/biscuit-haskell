@@ -20,21 +20,20 @@ specs = testGroup "Datalog quasiquoter"
 basicFact :: TestTree
 basicFact = testCase "Basic fact" $
   let actual :: Fact
-      actual = [fact|right(#authority, "file1", #read)|]
+      actual = [fact|right("file1", "read")|]
    in actual @?=
-    Predicate "right" [ Symbol "authority"
-                      , LString "file1"
-                      , Symbol "read"
+    Predicate "right" [ LString "file1"
+                      , LString "read"
                       ]
 
 basicRule :: TestTree
 basicRule = testCase "Basic rule" $
   let actual :: Rule
-      actual = [rule|right(#authority, $0, #read) <- resource( #ambient, $0), operation(#ambient, #read)|]
+      actual = [rule|right($0, "read") <- resource( $0), operation("read")|]
    in actual @?=
-    Rule (Predicate "right" [Symbol "authority", Variable "0", Symbol "read"])
-         [ Predicate "resource" [Symbol "ambient", Variable "0"]
-         , Predicate "operation" [Symbol "ambient", Symbol "read"]
+    Rule (Predicate "right" [Variable "0", LString "read"])
+         [ Predicate "resource" [Variable "0"]
+         , Predicate "operation" [LString "read"]
          ] []
 
 antiquotedFact :: TestTree
@@ -42,11 +41,10 @@ antiquotedFact = testCase "Sliced fact" $
   let toto :: Text
       toto = "test"
       actual :: Fact
-      actual = [fact|right(#authority, ${toto}, #read)|]
+      actual = [fact|right(${toto}, "read")|]
    in actual @?=
-    Predicate "right" [ Symbol "authority"
-                      , LString "test"
-                      , Symbol "read"
+    Predicate "right" [ LString "test"
+                      , LString "read"
                       ]
 
 antiquotedRule :: TestTree
@@ -54,9 +52,9 @@ antiquotedRule = testCase "Sliced rule" $
   let toto :: Text
       toto = "test"
       actual :: Rule
-      actual = [rule|right(#authority, $0, #read) <- resource( #ambient, $0), operation(#ambient, #read, ${toto})|]
+      actual = [rule|right($0, "read") <- resource( $0), operation("read", ${toto})|]
    in actual @?=
-    Rule (Predicate "right" [Symbol "authority", Variable "0", Symbol "read"])
-         [ Predicate "resource" [Symbol "ambient", Variable "0"]
-         , Predicate "operation" [Symbol "ambient", Symbol "read", LString "test"]
+    Rule (Predicate "right" [Variable "0", LString "read"])
+         [ Predicate "resource" [Variable "0"]
+         , Predicate "operation" [LString "read", LString "test"]
          ] []
