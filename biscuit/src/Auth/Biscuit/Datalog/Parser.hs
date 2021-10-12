@@ -87,7 +87,7 @@ type HasParsers pof ctx = HasTermParsers 'NotWithinSet pof ctx
 
 -- | Parser for an identifier (predicate name, variable name, …)
 nameParser :: Parser Text
-nameParser = takeWhile1 $ inClass "a-zA-Z0-9_"
+nameParser = takeWhile1 $ inClass "a-zA-Z0-9_:"
 
 delimited :: Parser x
           -> Parser y
