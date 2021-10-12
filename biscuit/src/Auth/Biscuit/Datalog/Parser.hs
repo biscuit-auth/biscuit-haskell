@@ -40,7 +40,7 @@ import qualified Control.Monad.Combinators.Expr as Expr
 import           Data.Attoparsec.Text
 import           Data.ByteString                (ByteString)
 import           Data.ByteString.Base16         as Hex
-import           Data.Char                      (isSpace)
+import           Data.Char                      (isAlphaNum, isSpace)
 import           Data.Either                    (partitionEithers)
 import           Data.Foldable                  (fold)
 import           Data.Functor                   (void, ($>))
@@ -87,7 +87,7 @@ type HasParsers pof ctx = HasTermParsers 'NotWithinSet pof ctx
 
 -- | Parser for an identifier (predicate name, variable name, …)
 nameParser :: Parser Text
-nameParser = takeWhile1 $ inClass "a-zA-Z0-9_:"
+nameParser = takeWhile1 $ \c -> c == '_' || c == ':' || isAlphaNum c
 
 delimited :: Parser x
           -> Parser y
