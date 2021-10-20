@@ -38,14 +38,15 @@ module Auth.Biscuit.Datalog.Parser
 import           Control.Applicative            (liftA2, optional, (<|>))
 import qualified Control.Monad.Combinators.Expr as Expr
 import           Data.Attoparsec.Text
+import qualified Data.Attoparsec.Text           as A
 import           Data.ByteString                (ByteString)
 import           Data.ByteString.Base16         as Hex
-import           Data.Char                      (isAlphaNum, isSpace)
+import           Data.Char                      (isAlphaNum, isLetter, isSpace)
 import           Data.Either                    (partitionEithers)
 import           Data.Foldable                  (fold)
 import           Data.Functor                   (void, ($>))
 import qualified Data.Set                       as Set
-import           Data.Text                      (Text, pack, unpack)
+import           Data.Text                      (Text, pack, singleton, unpack)
 import           Data.Text.Encoding             (encodeUtf8)
 import           Data.Time                      (UTCTime, defaultTimeLocale,
                                                  parseTimeM)
@@ -85,9 +86,15 @@ type HasTermParsers inSet pof ctx =
   )
 type HasParsers pof ctx = HasTermParsers 'NotWithinSet pof ctx
 
--- | Parser for an identifier (predicate name, variable name, …)
-nameParser :: Parser Text
-nameParser = takeWhile1 $ \c -> c == '_' || c == ':' || isAlphaNum c
+-- | Parser for a datalog predicate name
+predicateNameParser :: Parser Text
+predicateNameParser = do
+  first <- satisfy isLetter
+  rest  <- A.takeWhile $ \c -> c == '_' || c == ':' || isAlphaNum c
+  pure $ singleton first <> rest
+
+variableNameParser :: Parser Text
+variableNameParser = char '$' *> takeWhile1 (\c -> c == '_' || c == ':' || isAlphaNum c)
 
 delimited :: Parser x
           -> Parser y
@@ -109,7 +116,7 @@ commaList0 p =
 predicateParser :: HasParsers pof ctx => Parser (Predicate' pof ctx)
 predicateParser = do
   skipSpace
-  name <- nameParser
+  name <- predicateNameParser
   skipSpace
   terms <- parens (commaList termParser)
   pure Predicate{name,terms}
@@ -240,7 +247,7 @@ termParser :: forall inSet pof ctx
            => Parser (Term' inSet pof ctx)
 termParser = skipSpace *> choice
   [ Antiquote <$> ifPresent "slice" (Slice <$> (string "${" *> many1 letter <* char '}'))
-  , Variable <$> ifPresent "var" (char '$' *> nameParser)
+  , Variable <$> ifPresent "var" variableNameParser
   , TermSet <$> parseSet @inSet @ctx
   , LBytes <$> hexBsParser
   , LDate <$> rfc3339DateParser
@@ -256,7 +263,7 @@ termParser = skipSpace *> choice
 ruleHeadParser :: HasParsers 'InPredicate ctx => Parser (Predicate' 'InPredicate ctx)
 ruleHeadParser = do
   skipSpace
-  name <- nameParser
+  name <- predicateNameParser
   skipSpace
   terms <- parens (commaList0 termParser)
   pure Predicate{name,terms}
