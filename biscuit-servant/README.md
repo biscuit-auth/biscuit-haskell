@@ -7,7 +7,7 @@
 ## Usage
 
 ```Haskell
-type AppM = WithVerifier Handler
+type AppM = WithAuthorizer Handler
 type API = RequireBiscuit :> ProtectedAPI
 
 -- /users
@@ -17,20 +17,20 @@ type ProtectedAPI =
              :<|> Capture "userId" Int :> Get '[JSON] User
              )
 app :: PublicKey -> Application
-app pk = serveWithContext @API Proxy (genBiscuitCxt pk) server
+app pk = serveWithContext @API Proxy (genBiscuitCtx pk) server
 
 server :: Server API
 server biscuit =
   let handlers = userListHandler :<|> singleUserHandler
       handleAuth =
         handleBiscuit biscuit
-        -- `allow if right(#authority, #admin);` will be the first policy
-        -- for every endpoint policies added by endpoints (or sub-apis) will
-        -- be appended.
-        . withPriorityVerifier [verifier|allow if right(#authority, #admin);|]
-        -- `deny if true;` will be the last policy for every endpoint
-        -- policies added by endpoints (or sub-apis) will be prepended.
-        . withFallbackVerifier [verifier|deny if true;|]
+        -- `allow if right("admin");` will be the first policy
+        -- for every endpoint.
+        -- Policies added by endpoints (or sub-apis) will tried after this one.
+        . withPriorityAuthorizer [authorizer|allow if right("admin");|]
+        -- `deny if true;` will be the last policy for every endpoint.
+        -- Policies added by endpoints (or sub-apis) will tried before this one.
+        . withFallbackAuthorizer [authorizer|deny if true;|]
   in hoistServer @ProtectedAPI Proxy handleAuth handlers
 
 allUsers :: [User]
@@ -39,12 +39,12 @@ allUsers = [ User 1 "Danielle" "George"
            ]
 
 userListHandler :: AppM [User]
-userListHandler = withVerifier [verifier|allow if right(#authority, #userList)|]
+userListHandler = withAuthorizer [authorizer|allow if right("userList")|]
   $ pure allUsers
 
 singleUserHandler :: Int -> AppM User
 singleUserHandler uid =
-  withVerifier [verifier|allow if right(#authority, #getUser, ${uid})|] $
+  withAuthorizer [authorizer|allow if right("getUser", ${uid})|] $
   let user = find (\user -> userId user == uid) allUsers
    in maybe (throwError error404) (\user -> pure user) user
 ```
