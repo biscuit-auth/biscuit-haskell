@@ -43,6 +43,7 @@ specs :: TestTree
 specs = testGroup "datalog parser"
   [ factWithDate
   , simpleFact
+  , oneLetterFact
   , simpleRule
   , multilineRule
   , termsGroup
@@ -81,6 +82,11 @@ simpleFact :: TestTree
 simpleFact = testCase "Parse simple fact" $
   parsePredicate "right(\"file1\", \"read\")" @?=
     Right (Predicate "right" [LString "file1", LString "read"])
+
+oneLetterFact :: TestTree
+oneLetterFact = testCase "Parse one-letter fact" $
+  parsePredicate "a(12)" @?=
+    Right (Predicate "a" [LInteger 12])
 
 factWithDate :: TestTree
 factWithDate = testCase "Parse fact containing a date" $
