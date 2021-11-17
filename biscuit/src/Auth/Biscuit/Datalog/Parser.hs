@@ -344,7 +344,7 @@ policyParser = do
   (policy, ) <$> queryParser
 
 compileParser :: Lift a => Parser a -> String -> Q Exp
-compileParser p str = case parseOnly p (pack str) of
+compileParser p str = case parseOnly (p <* skipSpace <* endOfInput) (pack str) of
   Right result -> [| result |]
   Left e       -> fail e
 
