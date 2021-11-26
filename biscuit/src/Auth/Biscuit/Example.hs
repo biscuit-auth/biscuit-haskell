@@ -4,15 +4,16 @@ module Auth.Biscuit.Example where
 
 import           Data.ByteString (ByteString)
 import           Data.Functor    (($>))
+import           Data.Maybe      (fromMaybe)
 import           Data.Time       (getCurrentTime)
 
 import           Auth.Biscuit
 
 privateKey' :: SecretKey
-privateKey' = maybe (error "Error parsing private key") id $ parseSecretKeyHex "todo"
+privateKey' = fromMaybe (error "Error parsing private key") $ parseSecretKeyHex "todo"
 
 publicKey' :: PublicKey
-publicKey' = maybe (error "Error parsing public key") id $ parsePublicKeyHex "todo"
+publicKey' = fromMaybe (error "Error parsing public key") $ parsePublicKeyHex "todo"
 
 creation :: IO ByteString
 creation = do
