@@ -23,6 +23,7 @@ module Auth.Biscuit.Datalog.Executor
   , getFactsForRule
   , checkCheck
   , checkPolicy
+  , getBindingsForRuleBody
   ) where
 
 import           Control.Monad            (join, mfilter, zipWithM)
@@ -96,6 +97,7 @@ data Limits
   , allowBlockFacts :: Bool
   -- ^ whether or not accept facts and rules in blocks
   }
+  deriving (Eq, Show)
 
 -- | Default settings for the executor restrictions.
 --   - 1000 facts
