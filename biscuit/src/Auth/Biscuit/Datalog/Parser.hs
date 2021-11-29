@@ -22,6 +22,7 @@ module Auth.Biscuit.Datalog.Parser
   , predicate
   , rule
   , authorizer
+  , query
   -- these are only exported for testing purposes
   , checkParser
   , expressionParser
@@ -429,6 +430,20 @@ block = QuasiQuoter
 authorizer :: QuasiQuoter
 authorizer = QuasiQuoter
   { quoteExp = compileParser (authorizerParser @'QuasiQuote)
+  , quotePat = error "not supported"
+  , quoteType = error "not supported"
+  , quoteDec = error "not supported"
+  }
+
+-- | Compile-time parser for a query expression, intended to be used with the
+-- @QuasiQuotes@ extension.
+--
+-- A typical use of 'query' looks like this:
+--
+-- > [query|user($user_id) or group($group_id)|]
+query :: QuasiQuoter
+query = QuasiQuoter
+  { quoteExp = compileParser (queryParser @'QuasiQuote)
   , quotePat = error "not supported"
   , quoteType = error "not supported"
   , quoteDec = error "not supported"

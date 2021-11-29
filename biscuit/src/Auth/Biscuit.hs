@@ -76,6 +76,7 @@ module Auth.Biscuit
   , ParseError (..)
   , ExecutionError (..)
   , AuthorizationSuccess (..)
+  , query
 
   -- * Retrieving information from a biscuit
   , getRevocationIds
@@ -103,7 +104,7 @@ import           Auth.Biscuit.Datalog.AST            (Authorizer, Block,
 import           Auth.Biscuit.Datalog.Executor       (ExecutionError (..),
                                                       Limits (..),
                                                       defaultLimits)
-import           Auth.Biscuit.Datalog.Parser         (authorizer, block)
+import           Auth.Biscuit.Datalog.Parser         (authorizer, block, query)
 import           Auth.Biscuit.Datalog.ScopedExecutor (AuthorizationSuccess (..))
 import           Auth.Biscuit.Token                  (Biscuit,
                                                       BiscuitEncoding (..),
