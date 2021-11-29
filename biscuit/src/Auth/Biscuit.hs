@@ -78,6 +78,8 @@ module Auth.Biscuit
   , AuthorizationSuccess (..)
   , query
   , queryAuthorizerFacts
+  , Term
+  , Term' (..)
 
   -- * Retrieving information from a biscuit
   , getRevocationIds
@@ -100,8 +102,8 @@ import           Auth.Biscuit.Crypto                 (PublicKey, SecretKey,
                                                       maybeCryptoError,
                                                       publicKey, secretKey,
                                                       toPublic)
-import           Auth.Biscuit.Datalog.AST            (Authorizer, Block,
-                                                      bContext)
+import           Auth.Biscuit.Datalog.AST            (Authorizer, Block, Term,
+                                                      Term' (..), bContext)
 import           Auth.Biscuit.Datalog.Executor       (ExecutionError (..),
                                                       Limits (..),
                                                       defaultLimits)
