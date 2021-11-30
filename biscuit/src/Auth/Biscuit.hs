@@ -76,6 +76,7 @@ module Auth.Biscuit
   , ParseError (..)
   , ExecutionError (..)
   , AuthorizationSuccess (..)
+  , MatchedQuery (..)
   , query
   , queryAuthorizerFacts
   , Term
@@ -106,6 +107,7 @@ import           Auth.Biscuit.Datalog.AST            (Authorizer, Block, Term,
                                                       Term' (..), bContext)
 import           Auth.Biscuit.Datalog.Executor       (ExecutionError (..),
                                                       Limits (..),
+                                                      MatchedQuery (..),
                                                       defaultLimits)
 import           Auth.Biscuit.Datalog.Parser         (authorizer, block, query)
 import           Auth.Biscuit.Datalog.ScopedExecutor (AuthorizationSuccess (..),

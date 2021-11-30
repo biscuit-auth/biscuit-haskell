@@ -13,9 +13,10 @@ import           Test.Tasty.HUnit
 import           Auth.Biscuit
 import           Auth.Biscuit.Datalog.AST      (Expression' (..), Query,
                                                 QueryItem' (..), Term' (..))
-import           Auth.Biscuit.Datalog.Executor (ResultError (..))
+import           Auth.Biscuit.Datalog.Executor (MatchedQuery (..),
+                                                ResultError (..))
 import qualified Auth.Biscuit.Datalog.Executor as Executor
-import           Auth.Biscuit.Datalog.Parser   (check, fact)
+import           Auth.Biscuit.Datalog.Parser   (check, fact, query)
 
 specs :: TestTree
 specs = testGroup "Datalog checks"
@@ -26,11 +27,20 @@ specs = testGroup "Datalog checks"
   , factsRestrictions
   ]
 
-ifTrue :: Query
-ifTrue = [QueryItem [] [EValue $ LBool True]]
+ifTrue :: MatchedQuery
+ifTrue = MatchedQuery
+  { matchedQuery = [query|true|]
+  , bindings = Set.singleton mempty
+  }
 
-ifFalse :: Query
-ifFalse = [QueryItem [] [EValue $ LBool False]]
+ifFalse :: MatchedQuery
+ifFalse = MatchedQuery
+  { matchedQuery = [query|false|]
+  , bindings = Set.singleton mempty
+  }
+
+ifFalse' :: Query
+ifFalse' = matchedQuery ifFalse
 
 singleBlock :: TestTree
 singleBlock = testCase "Single block" $ do
@@ -45,17 +55,17 @@ errorAccumulation = testGroup "Error accumulation"
       secret <- newSecret
       biscuit <- mkBiscuit secret[block|check if false; check if false;|]
       res <- authorizeBiscuit biscuit [authorizer|allow if true;|]
-      res @?= Left (ResultError $ FailedChecks $ ifFalse :| [ifFalse])
+      res @?= Left (ResultError $ FailedChecks $ ifFalse' :| [ifFalse'])
   , testCase "Checks and deny policies" $ do
       secret <- newSecret
       biscuit <- mkBiscuit secret [block|check if false; check if false;|]
       res <- authorizeBiscuit biscuit [authorizer|deny if true;|]
-      res @?= Left(ResultError $ DenyRuleMatched [ifFalse, ifFalse] ifTrue)
+      res @?= Left(ResultError $ DenyRuleMatched [ifFalse', ifFalse'] ifTrue)
   , testCase "Checks and no policies matched" $ do
       secret <- newSecret
       biscuit <- mkBiscuit secret [block|check if false; check if false;|]
       res <- authorizeBiscuit biscuit [authorizer|allow if false;|]
-      res @?= Left (ResultError $ NoPoliciesMatched [ifFalse, ifFalse])
+      res @?= Left (ResultError $ NoPoliciesMatched [ifFalse', ifFalse'])
   ]
 
 unboundVarRule :: TestTree
