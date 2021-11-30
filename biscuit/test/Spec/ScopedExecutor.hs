@@ -15,7 +15,8 @@ import           Auth.Biscuit.Datalog.Executor       (ExecutionError (..),
                                                       Limits (..),
                                                       ResultError (..),
                                                       defaultLimits)
-import           Auth.Biscuit.Datalog.Parser         (block, check, authorizer)
+import           Auth.Biscuit.Datalog.Parser         (authorizer, block, check,
+                                                      query)
 import           Auth.Biscuit.Datalog.ScopedExecutor
 
 specs :: TestTree
@@ -28,6 +29,7 @@ specs = testGroup "Block-scoped Datalog Evaluation"
   , maxFactsCountWorks
   , allChecksAreCollected
   , revocationIdsAreInjected
+  , factsAreQueried
   ]
 
 authorizerOnlySeesAuthority :: TestTree
@@ -195,3 +197,15 @@ revocationIdsAreInjected = testCase "ScopedExecutions injects revocation ids" $ 
                   revocation_id(2, hex:63);
        |]
   runAuthorizerNoTimeout defaultLimits (authority, "a") [(block1, "b"), (block2, "c")] verif @?= Left (ResultError $ NoPoliciesMatched [])
+
+factsAreQueried :: TestTree
+factsAreQueried = testCase "AuthorizationSuccess can be queried" $ do
+  let authority = [block|user(1234);|]
+      block1 = [block|user("tampered value");|]
+      verif = [authorizer|allow if true;|]
+      result = runAuthorizerNoTimeout defaultLimits (authority, "a") [(block1, "b")] verif
+      getUser s = queryAuthorizerFacts s [query|user($user)|]
+      expected = Set.singleton $ Map.fromList
+        [ ("user", LInteger 1234)
+        ]
+  getUser <$> result @?= Right expected

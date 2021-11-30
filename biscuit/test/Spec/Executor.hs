@@ -16,7 +16,7 @@ import           Auth.Biscuit.Datalog.Executor       (ExecutionError (..),
                                                       evaluateExpression)
 import           Auth.Biscuit.Datalog.Parser         (expressionParser, fact,
                                                       rule)
-import           Auth.Biscuit.Datalog.ScopedExecutor
+import           Auth.Biscuit.Datalog.ScopedExecutor hiding (limits)
 
 specs :: TestTree
 specs = testGroup "Datalog evaluation"

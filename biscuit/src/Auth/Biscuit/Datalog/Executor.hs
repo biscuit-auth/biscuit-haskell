@@ -23,9 +23,10 @@ module Auth.Biscuit.Datalog.Executor
   , getFactsForRule
   , checkCheck
   , checkPolicy
+  , getBindingsForRuleBody
   ) where
 
-import           Control.Monad            (join, mfilter)
+import           Control.Monad            (join, mfilter, zipWithM)
 import           Data.Bitraversable       (bitraverse)
 import qualified Data.ByteString          as ByteString
 import           Data.List.NonEmpty       (NonEmpty)
@@ -96,6 +97,7 @@ data Limits
   , allowBlockFacts :: Bool
   -- ^ whether or not accept facts and rules in blocks
   }
+  deriving (Eq, Show)
 
 -- | Default settings for the executor restrictions.
 --   - 1000 facts
@@ -220,7 +222,7 @@ factMatchesPredicate Predicate{name = predicateName, terms = predicateTerms }
                      Predicate{name = factName, terms = factTerms } =
   let namesMatch = predicateName == factName
       lengthsMatch = length predicateTerms == length factTerms
-      allMatches = sequenceA $ zipWith yolo predicateTerms factTerms
+      allMatches = zipWithM yolo predicateTerms factTerms
       yolo :: Term -> Value -> Maybe Bindings
       yolo (Variable vname) value = Just (Map.singleton vname value)
       yolo t t' | isSame t t' = Just mempty

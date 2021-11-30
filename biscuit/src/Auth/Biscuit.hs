@@ -76,6 +76,10 @@ module Auth.Biscuit
   , ParseError (..)
   , ExecutionError (..)
   , AuthorizationSuccess (..)
+  , query
+  , queryAuthorizerFacts
+  , Term
+  , Term' (..)
 
   -- * Retrieving information from a biscuit
   , getRevocationIds
@@ -98,13 +102,14 @@ import           Auth.Biscuit.Crypto                 (PublicKey, SecretKey,
                                                       maybeCryptoError,
                                                       publicKey, secretKey,
                                                       toPublic)
-import           Auth.Biscuit.Datalog.AST            (Authorizer, Block,
-                                                      bContext)
+import           Auth.Biscuit.Datalog.AST            (Authorizer, Block, Term,
+                                                      Term' (..), bContext)
 import           Auth.Biscuit.Datalog.Executor       (ExecutionError (..),
                                                       Limits (..),
                                                       defaultLimits)
-import           Auth.Biscuit.Datalog.Parser         (authorizer, block)
-import           Auth.Biscuit.Datalog.ScopedExecutor (AuthorizationSuccess (..))
+import           Auth.Biscuit.Datalog.Parser         (authorizer, block, query)
+import           Auth.Biscuit.Datalog.ScopedExecutor (AuthorizationSuccess (..),
+                                                      queryAuthorizerFacts)
 import           Auth.Biscuit.Token                  (Biscuit,
                                                       BiscuitEncoding (..),
                                                       BiscuitProof (..), Open,
@@ -114,6 +119,8 @@ import           Auth.Biscuit.Token                  (Biscuit,
                                                       Unverified, Verified,
                                                       addBlock, asOpen,
                                                       asSealed,
+                                                      authorizeBiscuit,
+                                                      authorizeBiscuitWithLimits,
                                                       checkBiscuitSignatures,
                                                       fromOpen, fromSealed,
                                                       getRevocationIds,
@@ -121,9 +128,7 @@ import           Auth.Biscuit.Token                  (Biscuit,
                                                       mkBiscuit,
                                                       parseBiscuitUnverified,
                                                       parseBiscuitWith, seal,
-                                                      serializeBiscuit,
-                                                      authorizeBiscuit,
-                                                      authorizeBiscuitWithLimits)
+                                                      serializeBiscuit)
 
 
 -- $biscuitOverview
