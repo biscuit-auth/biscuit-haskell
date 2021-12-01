@@ -16,6 +16,7 @@ module Auth.Biscuit.Datalog.Executor
   , ResultError (..)
   , Bindings
   , Name
+  , MatchedQuery (..)
   , defaultLimits
   , evaluateExpression
 
@@ -29,6 +30,7 @@ module Auth.Biscuit.Datalog.Executor
 import           Control.Monad            (join, mfilter, zipWithM)
 import           Data.Bitraversable       (bitraverse)
 import qualified Data.ByteString          as ByteString
+import           Data.Foldable            (fold)
 import           Data.List.NonEmpty       (NonEmpty)
 import qualified Data.List.NonEmpty       as NE
 import           Data.Map.Strict          (Map, (!?))
@@ -52,6 +54,15 @@ type Name = Text
 -- | A list of bound variables, with the associated value
 type Bindings  = Map Name Value
 
+-- | A datalog query that was matched, along with the values
+-- that matched
+data MatchedQuery
+  = MatchedQuery
+  { matchedQuery :: Query
+  , bindings     :: Set Bindings
+  }
+  deriving (Eq, Show)
+
 -- | The result of matching the checks and policies against all the available
 -- facts.
 data ResultError
@@ -59,7 +70,7 @@ data ResultError
   -- ^ No policy matched. additionally some checks may have failed
   | FailedChecks      (NonEmpty Check)
   -- ^ An allow rule matched, but at least one check failed
-  | DenyRuleMatched   [Check] Query
+  | DenyRuleMatched   [Check] MatchedQuery
   -- ^ A deny rule matched. additionally some checks may have failed
   deriving (Eq, Show)
 
@@ -116,22 +127,25 @@ defaultLimits = Limits
 
 checkCheck :: Limits -> Set Fact -> Check -> Validation (NonEmpty Check) ()
 checkCheck l facts items =
-  if any (isQueryItemSatisfied l facts) items
+  if any (isJust . isQueryItemSatisfied l facts) items
   then Success ()
   else failure items
 
-checkPolicy :: Limits -> Set Fact -> Policy -> Maybe (Either Query Query)
-checkPolicy l facts (pType, items) =
-  if any (isQueryItemSatisfied l facts) items
-  then Just $ case pType of
-    Allow -> Right items
-    Deny  -> Left items
-  else Nothing
+checkPolicy :: Limits -> Set Fact -> Policy -> Maybe (Either MatchedQuery MatchedQuery)
+checkPolicy l facts (pType, query) =
+  let bindings = fold $ mapMaybe (isQueryItemSatisfied l facts) query
+   in if length bindings > 0
+      then Just $ case pType of
+        Allow -> Right $ MatchedQuery{matchedQuery = query, bindings}
+        Deny  -> Left $ MatchedQuery{matchedQuery = query, bindings}
+      else Nothing
 
-isQueryItemSatisfied :: Limits -> Set Fact -> QueryItem' 'RegularString -> Bool
+isQueryItemSatisfied :: Limits -> Set Fact -> QueryItem' 'RegularString -> Maybe (Set Bindings)
 isQueryItemSatisfied l facts QueryItem{qBody, qExpressions} =
   let bindings = getBindingsForRuleBody l facts qBody qExpressions
-   in Set.size bindings > 0
+   in if Set.size bindings > 0
+      then Just bindings
+      else Nothing
 
 getFactsForRule :: Limits -> Set Fact -> Rule -> Set Fact
 getFactsForRule l facts Rule{rhead, body, expressions} =
