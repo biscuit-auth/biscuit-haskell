@@ -2,11 +2,11 @@
 
 mkShell {
   buildInputs = [
-    haskell.compiler.ghc8104
-    haskellPackages.c2hs
-    haskellPackages.stylish-haskell
+    haskell.compiler.ghc8107
     pkg-config
     libsodium
     zlib
+    haskellPackages.hlint
+    haskellPackages.stylish-haskell
   ];
 }
