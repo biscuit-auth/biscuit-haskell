@@ -79,6 +79,11 @@ module Auth.Biscuit
   , MatchedQuery (..)
   , query
   , queryAuthorizerFacts
+  , getBindings
+  , getVariableValues
+  , getSingleVariableValue
+  , ToTerm (..)
+  , FromValue (..)
   , Term
   , Term' (..)
 
@@ -103,14 +108,19 @@ import           Auth.Biscuit.Crypto                 (PublicKey, SecretKey,
                                                       maybeCryptoError,
                                                       publicKey, secretKey,
                                                       toPublic)
-import           Auth.Biscuit.Datalog.AST            (Authorizer, Block, Term,
-                                                      Term' (..), bContext)
+import           Auth.Biscuit.Datalog.AST            (Authorizer, Block,
+                                                      FromValue (..), Term,
+                                                      Term' (..), ToTerm (..),
+                                                      bContext)
 import           Auth.Biscuit.Datalog.Executor       (ExecutionError (..),
                                                       Limits (..),
                                                       MatchedQuery (..),
                                                       defaultLimits)
 import           Auth.Biscuit.Datalog.Parser         (authorizer, block, query)
 import           Auth.Biscuit.Datalog.ScopedExecutor (AuthorizationSuccess (..),
+                                                      getBindings,
+                                                      getSingleVariableValue,
+                                                      getVariableValues,
                                                       queryAuthorizerFacts)
 import           Auth.Biscuit.Token                  (Biscuit,
                                                       BiscuitEncoding (..),

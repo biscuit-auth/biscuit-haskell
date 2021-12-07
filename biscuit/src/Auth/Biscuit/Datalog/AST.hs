@@ -31,6 +31,8 @@ module Auth.Biscuit.Datalog.AST
   , Expression
   , Expression' (..)
   , Fact
+  , ToTerm (..)
+  , FromValue (..)
   , Term
   , Term' (..)
   , IsWithinSet (..)
@@ -96,7 +98,7 @@ newtype Slice = Slice String
   deriving newtype (Eq, Show, Ord, IsString)
 
 instance Lift Slice where
-  lift (Slice name) = [| toLiteralId $(varE $ mkName name) |]
+  lift (Slice name) = [| toTerm $(varE $ mkName name) |]
   liftTyped = unsafeTExpCoerce . lift
 
 type family SliceType (ctx :: ParsedAs) where
@@ -170,27 +172,58 @@ instance  ( Lift (VariableType inSet pof)
 
 -- | This class describes how to turn a haskell value into a datalog value.
 -- | This is used when slicing a haskell variable in a datalog expression
-class ToLiteralId t where
+class ToTerm t where
   -- | How to turn a value into a datalog item
-  toLiteralId :: t -> Term' inSet pof 'RegularString
+  toTerm :: t -> Term' inSet pof 'RegularString
 
-instance ToLiteralId Int where
-  toLiteralId = LInteger
+-- | This class describes how to turn a datalog value into a regular haskell value.
+class FromValue t where
+  fromValue :: Value -> Maybe t
 
-instance ToLiteralId Integer where
-  toLiteralId = LInteger . fromIntegral
+instance ToTerm Int where
+  toTerm = LInteger
 
-instance ToLiteralId Text where
-  toLiteralId = LString
+instance FromValue Int where
+  fromValue (LInteger v) = Just v
+  fromValue _            = Nothing
 
-instance ToLiteralId Bool where
-  toLiteralId = LBool
+instance ToTerm Integer where
+  toTerm = LInteger . fromIntegral
 
-instance ToLiteralId ByteString where
-  toLiteralId = LBytes
+instance FromValue Integer where
+  fromValue (LInteger v) = Just (fromIntegral v)
+  fromValue _            = Nothing
 
-instance ToLiteralId UTCTime where
-  toLiteralId = LDate
+instance ToTerm Text where
+  toTerm = LString
+
+instance FromValue Text where
+  fromValue (LString t) = Just t
+  fromValue _           = Nothing
+
+instance ToTerm Bool where
+  toTerm = LBool
+
+instance FromValue Bool where
+  fromValue (LBool b) = Just b
+  fromValue _         = Nothing
+
+instance ToTerm ByteString where
+  toTerm = LBytes
+
+instance FromValue ByteString where
+  fromValue (LBytes bs) = Just bs
+  fromValue _           = Nothing
+
+instance ToTerm UTCTime where
+  toTerm = LDate
+
+instance FromValue UTCTime where
+  fromValue (LDate t) = Just t
+  fromValue _         = Nothing
+
+instance FromValue Value where
+  fromValue = Just
 
 toSetTerm :: Value
           -> Maybe (Term' 'WithinSet 'InFact 'RegularString)
@@ -605,4 +638,4 @@ deriving instance ( Show (Predicate' 'InFact ctx)
 elementToAuthorizer :: AuthorizerElement' ctx -> Authorizer' ctx
 elementToAuthorizer = \case
   AuthorizerPolicy p -> Authorizer [p] mempty
-  BlockElement be  -> Authorizer [] (elementToBlock be)
+  BlockElement be    -> Authorizer [] (elementToBlock be)

@@ -134,7 +134,7 @@ checkCheck l facts items =
 checkPolicy :: Limits -> Set Fact -> Policy -> Maybe (Either MatchedQuery MatchedQuery)
 checkPolicy l facts (pType, query) =
   let bindings = fold $ mapMaybe (isQueryItemSatisfied l facts) query
-   in if length bindings > 0
+   in if not (null bindings)
       then Just $ case pType of
         Allow -> Right $ MatchedQuery{matchedQuery = query, bindings}
         Deny  -> Left $ MatchedQuery{matchedQuery = query, bindings}
