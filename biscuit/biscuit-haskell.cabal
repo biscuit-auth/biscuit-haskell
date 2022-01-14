@@ -65,34 +65,6 @@ library
     validation-selective ^>= 0.1
   default-language: Haskell2010
 
-executable biscuit-haskell-exe
-  main-is: Main.hs
-  other-modules:
-      Paths_biscuit_haskell
-  hs-source-dirs:
-      app
-  ghc-options: -threaded -rtsopts -with-rtsopts=-N -Wall
-  build-depends:
-      async
-    , attoparsec
-    , base >=4.7 && <5
-    , base16-bytestring ^>=1.0
-    , base64
-    , biscuit-haskell
-    , bytestring
-    , cereal
-    , containers
-    , mtl
-    , parser-combinators
-    , protobuf
-    , random
-    , template-haskell
-    , text
-    , th-lift-instances
-    , time
-    , validation-selective
-  default-language: Haskell2010
-
 test-suite biscuit-haskell-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
