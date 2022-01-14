@@ -232,9 +232,7 @@ blockContext c = mempty { bContext = Just c }
 
 -- | Decode a base16-encoded bytestring, reporting errors via `MonadFail`
 fromHex :: MonadFail m => ByteString -> m ByteString
-fromHex input = do
-  (decoded, "") <- pure $ Hex.decode input
-  pure decoded
+fromHex = either fail pure . Hex.decode
 
 -- $keypairs
 --
