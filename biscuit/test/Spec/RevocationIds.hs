@@ -10,7 +10,7 @@ import qualified Data.ByteString.Base16 as Hex
 import           Data.Functor           (void)
 import           Data.List              (intersect)
 import qualified Data.List.NonEmpty     as NE
-import           Data.Maybe             (mapMaybe)
+import           Data.Maybe             (fromJust, mapMaybe)
 import           Test.Tasty
 import           Test.Tasty.HUnit
 
@@ -18,7 +18,7 @@ import           Auth.Biscuit
 import           Auth.Biscuit.Token     (getRevocationIds)
 
 pk :: PublicKey
-pk = maybe undefined id $ parsePublicKeyHex "acdd6d5b53bfee478bf689f8e012fe7988bf755e3d7c5152947abc149bc20189"
+pk = fromJust $ parsePublicKeyHex "acdd6d5b53bfee478bf689f8e012fe7988bf755e3d7c5152947abc149bc20189"
 
 readFromFile :: FilePath -> IO (Biscuit OpenOrSealed Verified)
 readFromFile path = do

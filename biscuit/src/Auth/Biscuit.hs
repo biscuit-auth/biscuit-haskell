@@ -1,6 +1,5 @@
 {-# LANGUAGE DataKinds         #-}
 {-# LANGUAGE EmptyDataDeriving #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-|
   Module      : Auth.Biscuit
   Copyright   : © Clément Delafargue, 2021
