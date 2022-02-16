@@ -298,7 +298,8 @@ evalBinary Limits{allowRegexes} Regex  (LString t) (LString r) | allowRegexes = 
 evalBinary _ Regex _ _                       = Left "Only strings support `.matches()`"
 -- num operations
 evalBinary _ Add (LInteger i) (LInteger i') = pure $ LInteger (i + i')
-evalBinary _ Add _ _ = Left "Only integers support addition"
+evalBinary _ Add (LString t) (LString t') = pure $ LString (t <> t')
+evalBinary _ Add _ _ = Left "Only integers and strings support addition"
 evalBinary _ Sub (LInteger i) (LInteger i') = pure $ LInteger (i - i')
 evalBinary _ Sub _ _ = Left "Only integers support subtraction"
 evalBinary _ Mul (LInteger i) (LInteger i') = pure $ LInteger (i * i')
