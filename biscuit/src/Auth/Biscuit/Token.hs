@@ -31,6 +31,7 @@ module Auth.Biscuit.Token
   , Verified
   , Unverified
   , mkBiscuit
+  , mkBiscuitWith
   , addBlock
   , BiscuitEncoding (..)
   , ParserConfig (..)
@@ -208,10 +209,15 @@ toParsedSignedBlock block (serializedBlock, sig, pk) = ((serializedBlock, block)
 -- | Create a new biscuit with the provided authority block. Such a biscuit is 'Open' to
 -- further attenuation.
 mkBiscuit :: SecretKey -> Block -> IO (Biscuit Open Verified)
-mkBiscuit sk authority = do
+mkBiscuit = mkBiscuitWith Nothing
+
+-- | Create a new biscuit with the provided authority block and root key id. Such a biscuit is 'Open' to
+-- further attenuation.
+mkBiscuitWith :: Maybe Int -> SecretKey -> Block -> IO (Biscuit Open Verified)
+mkBiscuitWith rootKeyId sk authority = do
   let (authoritySymbols, authoritySerialized) = PB.encodeBlock <$> blockToPb commonSymbols authority
   (signedBlock, nextSk) <- signBlock sk authoritySerialized
-  pure Biscuit { rootKeyId = Nothing
+  pure Biscuit { rootKeyId
                , authority = toParsedSignedBlock authority signedBlock
                , blocks = []
                , symbols = commonSymbols <> authoritySymbols
@@ -249,7 +255,7 @@ serializeBiscuit Biscuit{..} =
           SealedProof sig -> PB.ProofSignature $ PB.putField (convert sig)
           OpenProof   sk  -> PB.ProofSecret $ PB.putField (convert sk)
    in PB.encodeBlockList PB.Biscuit
-        { rootKeyId = PB.putField Nothing -- TODO
+        { rootKeyId = PB.putField $ fromIntegral <$> rootKeyId
         , authority = PB.putField $ toPBSignedBlock authority
         , blocks    = PB.putField $ toPBSignedBlock <$> blocks
         , proof     = PB.putField proofField

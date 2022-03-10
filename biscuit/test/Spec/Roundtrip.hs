@@ -45,13 +45,14 @@ roundtrip (s,p) i@(authority' :| blocks') = do
         []       -> pure biscuit
   sk <- generateSecretKey
   let pk = toPublic sk
-  init' <- mkBiscuit sk authority'
+  init' <- mkBiscuitWith (Just 1) sk authority'
   final <- addBlocks blocks' init'
   let serialized = s final
       parsed = p pk serialized
       getBlock ((_, b), _, _) = b
       getBlocks b = getBlock <$> authority b :| blocks b
   getBlocks <$> parsed @?= Right i
+  rootKeyId <$> parsed @?= Right (Just 1)
 
 singleBlock :: Roundtrip -> TestTree
 singleBlock r = testCase "Single block" $ roundtrip r $ pure

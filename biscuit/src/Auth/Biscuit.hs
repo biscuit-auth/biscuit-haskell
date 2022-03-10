@@ -32,6 +32,7 @@ module Auth.Biscuit
   -- * Creating a biscuit
   -- $biscuitBlocks
   , mkBiscuit
+  , mkBiscuitWith
   , block
   , blockContext
   , Biscuit
@@ -136,7 +137,7 @@ import           Auth.Biscuit.Token                  (Biscuit,
                                                       fromOpen, fromSealed,
                                                       getRevocationIds,
                                                       getVerifiedBiscuitPublicKey,
-                                                      mkBiscuit,
+                                                      mkBiscuit, mkBiscuitWith,
                                                       parseBiscuitUnverified,
                                                       parseBiscuitWith, seal,
                                                       serializeBiscuit)
