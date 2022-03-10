@@ -54,6 +54,8 @@ exprEval :: TestTree
 exprEval = do
   let bindings = Map.fromList
         [ ("var1", LInteger 0)
+        , ("topDomain", LString "example.com")
+        , ("domain", LString "test.example.com")
         ]
       eval (e, r) = testCase (unpack e) $
         evaluateExpression defaultLimits bindings (expr e) @?= Right r
@@ -109,6 +111,7 @@ exprEval = do
     , ("\"my string\".starts_with(\"string\")", LBool False)
     , ("\"my string\".ends_with(\"string\")", LBool True)
     , ("\"my string\".ends_with(\"my\")", LBool False)
+    , ("$domain.ends_with(\".\" + $topDomain)", LBool True)
     , ("2 + 1", LInteger 3)
     , ("2 - 1", LInteger 1)
     , ("5 / 2", LInteger 2)
