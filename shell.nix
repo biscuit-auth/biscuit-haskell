@@ -8,5 +8,7 @@ mkShell {
     zlib
     haskellPackages.hlint
     haskellPackages.stylish-haskell
+    cabal-install
+    ghcid
   ];
 }
