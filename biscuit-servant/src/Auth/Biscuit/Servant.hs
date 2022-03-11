@@ -36,6 +36,7 @@ module Auth.Biscuit.Servant
   ) where
 
 import           Auth.Biscuit                     as Biscuit
+import           Data.Kind (Type)
 import           Control.Applicative              (liftA2)
 import           Control.Monad.Except             (MonadError, throwError)
 import           Control.Monad.IO.Class           (MonadIO, liftIO)
@@ -200,7 +201,7 @@ type instance AuthServerData RequireBiscuit = Biscuit OpenOrSealed Verified
 -- succeeds, the handler is ran.
 -- The handler itself is given access to the verified biscuit through
 -- a @ReaderT (Biscuit OpenOrSealed Verified)@.
-data WithAuthorizer m a
+data WithAuthorizer (m :: Type -> Type) (a :: Type)
   = WithAuthorizer
   { handler_    :: ReaderT (Biscuit OpenOrSealed Verified) m a
   -- ^ the wrapped handler, in a 'ReaderT' to give easy access to the biscuit
