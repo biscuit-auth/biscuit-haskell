@@ -88,7 +88,7 @@ verifyBlocks blocks rootPk =
       toSigs = getToSig <$> blocks
       -- key for block 0 is the root key
       -- key for block n is the key from block (n - 1)
-      keys = rootPk :| NE.init (getPublicKey <$> blocks)
+      keys = pure rootPk <> (getPublicKey <$> blocks)
       keysPayloadsSigs = NE.zipWith attachKey keys (NE.zip toSigs sigs)
    in all (uncurry3 verify) keysPayloadsSigs
 

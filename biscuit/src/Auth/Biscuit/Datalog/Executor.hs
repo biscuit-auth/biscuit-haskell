@@ -3,6 +3,7 @@
 {-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE NamedFieldPuns    #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TupleSections     #-}
 {-|
   Module      : Auth.Biscuit.Datalog.Executor
   Copyright   : © Clément Delafargue, 2021
@@ -17,6 +18,7 @@ module Auth.Biscuit.Datalog.Executor
   , Bindings
   , Name
   , MatchedQuery (..)
+  , Scoped
   , defaultLimits
   , evaluateExpression
 
@@ -25,12 +27,14 @@ module Auth.Biscuit.Datalog.Executor
   , checkCheck
   , checkPolicy
   , getBindingsForRuleBody
+  , getCombinations
   ) where
 
 import           Control.Monad            (join, mfilter, zipWithM)
 import           Data.Bitraversable       (bitraverse)
 import qualified Data.ByteString          as ByteString
 import           Data.Foldable            (fold)
+import           Data.Functor.Compose     (Compose (..))
 import           Data.List.NonEmpty       (NonEmpty)
 import qualified Data.List.NonEmpty       as NE
 import           Data.Map.Strict          (Map, (!?))
@@ -41,6 +45,7 @@ import qualified Data.Set                 as Set
 import           Data.Text                (Text, isInfixOf)
 import qualified Data.Text                as Text
 import           Data.Void                (absurd)
+import           Numeric.Natural          (Natural)
 import qualified Text.Regex.TDFA          as Regex
 import qualified Text.Regex.TDFA.Text     as Regex
 import           Validation               (Validation (..), failure)
@@ -125,6 +130,8 @@ defaultLimits = Limits
   , allowBlockFacts = True
   }
 
+type Scoped a = (Set Natural, a)
+
 checkCheck :: Limits -> Set Fact -> Check -> Validation (NonEmpty Check) ()
 checkCheck l facts items =
   if any (isJust . isQueryItemSatisfied l facts) items
@@ -142,29 +149,44 @@ checkPolicy l facts (pType, query) =
 
 isQueryItemSatisfied :: Limits -> Set Fact -> QueryItem' 'RegularString -> Maybe (Set Bindings)
 isQueryItemSatisfied l facts QueryItem{qBody, qExpressions} =
-  let bindings = getBindingsForRuleBody l facts qBody qExpressions
+  let -- in this context, we're not generating new facts, just checking if the rules match,
+      -- so we don't need to keep track of the bindings scope. We just add and remove a
+      -- dummy scope to align with more general use
+      addDummyScope = Set.map (mempty, )
+      removeDummyScope = Set.map snd
+      bindings = removeDummyScope $ getBindingsForRuleBody l (addDummyScope facts) qBody qExpressions
    in if Set.size bindings > 0
       then Just bindings
       else Nothing
 
-getFactsForRule :: Limits -> Set Fact -> Rule -> Set Fact
+-- | Given a rule and a set of available (scoped) facts, we find all fact
+-- combinations that match the rule body, and generate new facts by applying
+-- the bindings to the rule head (while keeping track of the facts origins)
+getFactsForRule :: Limits -> Set (Scoped Fact) -> Rule -> Set (Scoped Fact)
 getFactsForRule l facts Rule{rhead, body, expressions} =
-  let legalBindings = getBindingsForRuleBody l facts body expressions
+  let legalBindings :: Set (Scoped Bindings)
+      legalBindings = getBindingsForRuleBody l facts body expressions
       newFacts = mapMaybe (applyBindings rhead) $ Set.toList legalBindings
    in Set.fromList newFacts
 
-getBindingsForRuleBody :: Limits -> Set Fact -> [Predicate] -> [Expression] -> Set Bindings
+-- | Given a set of scoped facts and a rule body, we generate a set of variable
+-- bindings that satisfy the rule clauses (predicates match, and expression constraints
+-- are fulfilled)
+getBindingsForRuleBody :: Limits -> Set (Scoped Fact) -> [Predicate] -> [Expression] -> Set (Scoped Bindings)
 getBindingsForRuleBody l facts body expressions =
-  let candidateBindings = getCandidateBindings facts body
+  let -- gather bindings from all the facts that match the query's predicates
+      candidateBindings = getCandidateBindings facts body
       allVariables = extractVariables body
+      -- only keep bindings combinations where each variable has a single possible match
       legalBindingsForFacts = reduceCandidateBindings allVariables candidateBindings
+      -- only keep bindings that satisfy the query expressions
    in Set.filter (\b -> all (satisfies l b) expressions) legalBindingsForFacts
 
 satisfies :: Limits
-          -> Bindings
+          -> Scoped Bindings
           -> Expression
           -> Bool
-satisfies l b e = evaluateExpression l b e == Right (LBool True)
+satisfies l b e = evaluateExpression l (snd b) e == Right (LBool True)
 
 extractVariables :: [Predicate] -> Set Name
 extractVariables predicates =
@@ -175,8 +197,8 @@ extractVariables predicates =
    in Set.fromList $ extractVariables' =<< predicates
 
 
-applyBindings :: Predicate -> Bindings -> Maybe Fact
-applyBindings p@Predicate{terms} bindings =
+applyBindings :: Predicate -> Scoped Bindings -> Maybe (Scoped Fact)
+applyBindings p@Predicate{terms} (origins, bindings) =
   let newTerms = traverse replaceTerm terms
       replaceTerm :: Term -> Maybe Value
       replaceTerm (Variable n)  = Map.lookup n bindings
@@ -187,38 +209,49 @@ applyBindings p@Predicate{terms} bindings =
       replaceTerm (LBool t)     = Just $ LBool t
       replaceTerm (TermSet t)   = Just $ TermSet t
       replaceTerm (Antiquote t) = absurd t
-   in (\nt -> p { terms = nt}) <$> newTerms
+   in (\nt -> (origins, p { terms = nt})) <$> newTerms
 
-getCombinations :: [[a]] -> [[a]]
-getCombinations (x:xs) = do
-  y <- x
-  (y:) <$> getCombinations xs
-getCombinations []     = [[]]
+-- | Given a list of possible matches for each predicate,
+-- give all the combinations of one match per predicate,
+-- keeping track of the origin of each match
+getCombinations :: [[Scoped Bindings]] -> [Scoped [Bindings]]
+getCombinations = getCompose . traverse Compose
 
+-- | merge a list of bindings, only keeping variables where
+-- bindings are consistent
 mergeBindings :: [Bindings] -> Bindings
 mergeBindings =
   -- group all the values unified with each variable
-  let combinations = Map.unionsWith (<>) . fmap (fmap pure)
+  let combinations :: [Bindings] -> Map Name (NonEmpty Value)
+      combinations = Map.unionsWith (<>) . fmap (fmap pure)
       sameValues = fmap NE.head . mfilter ((== 1) . length) . Just . NE.nub
-  -- only keep
+  -- only keep consistent matches, where each variable takes a single value
       keepConsistent = Map.mapMaybe sameValues
    in keepConsistent . combinations
 
+-- | given a set of bindings for each predicate of a query,
+-- only keep combinations where every variable matches exactly
+-- one value. This rejects both inconsitent bindings (where the
+-- same variable
 reduceCandidateBindings :: Set Name
-                        -> [Set Bindings]
-                        -> Set Bindings
+                        -> [Set (Scoped Bindings)]
+                        -> Set (Scoped Bindings)
 reduceCandidateBindings allVariables matches =
-  let allCombinations :: [[Bindings]]
+  let allCombinations :: [(Set Natural, [Bindings])]
       allCombinations = getCombinations $ Set.toList <$> matches
-      isComplete :: Bindings -> Bool
-      isComplete = (== allVariables) . Set.fromList . Map.keys
-   in Set.fromList $ filter isComplete $ mergeBindings <$> allCombinations
+      isComplete :: Scoped Bindings -> Bool
+      isComplete = (== allVariables) . Set.fromList . Map.keys . snd
+   in Set.fromList $ filter isComplete $ fmap mergeBindings <$> allCombinations
 
-getCandidateBindings :: Set Fact
+-- | Given a set of facts and a series of predicates, return, for each fact,
+-- a set of bindings corresponding to matched facts
+getCandidateBindings :: Set (Scoped Fact)
                      -> [Predicate]
-                     -> [Set Bindings]
+                     -> [Set (Scoped Bindings)]
 getCandidateBindings facts predicates =
-   let mapMaybeS f = foldMap (foldMap Set.singleton . f)
+   let mapMaybeS :: (Ord a, Ord b) => (a -> Maybe b) -> Set a -> Set b
+       mapMaybeS f = foldMap (foldMap Set.singleton . f)
+       keepFacts :: Predicate -> Set (Scoped Bindings)
        keepFacts p = mapMaybeS (factMatchesPredicate p) facts
     in keepFacts <$> predicates
 
@@ -231,18 +264,29 @@ isSame (LBool t)    (LBool t')    = t == t'
 isSame (TermSet t)  (TermSet t')  = t == t'
 isSame _ _                        = False
 
-factMatchesPredicate :: Predicate -> Fact -> Maybe Bindings
+-- | Given a predicate and a fact, try to match the fact to the predicate,
+-- and, in case of success, return the corresponding bindings
+factMatchesPredicate :: Predicate -> Scoped Fact -> Maybe (Scoped Bindings)
 factMatchesPredicate Predicate{name = predicateName, terms = predicateTerms }
-                     Predicate{name = factName, terms = factTerms } =
+                     ( factOrigins
+                     , Predicate{name = factName, terms = factTerms }
+                     ) =
   let namesMatch = predicateName == factName
       lengthsMatch = length predicateTerms == length factTerms
-      allMatches = zipWithM yolo predicateTerms factTerms
-      yolo :: Term -> Value -> Maybe Bindings
-      yolo (Variable vname) value = Just (Map.singleton vname value)
-      yolo t t' | isSame t t' = Just mempty
+      allMatches = zipWithM compatibleMatch predicateTerms factTerms
+      -- given a term and a value, generate (possibly empty) bindings if
+      -- they can be unified:
+      --   - if the term is a variable, then it can be unified with the value,
+      --     generating a new binding pair
+      --   - if the term is equal to the value then it can be unified, but no bindings
+      --     are generated
+      --   - if the term is a different value, then they can't be unified
+      compatibleMatch :: Term -> Value -> Maybe Bindings
+      compatibleMatch (Variable vname) value = Just (Map.singleton vname value)
+      compatibleMatch t t' | isSame t t' = Just mempty
                 | otherwise   = Nothing
    in if namesMatch && lengthsMatch
-      then mergeBindings <$> allMatches
+      then (factOrigins,) . mergeBindings <$> allMatches
       else Nothing
 
 applyVariable :: Bindings
