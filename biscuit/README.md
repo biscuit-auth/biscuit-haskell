@@ -1,6 +1,6 @@
 # biscuit-haskell [![CI-badge][CI-badge]][CI-url] [![Hackage][hackage]][hackage-url]
 
-<img src="https://raw.githubusercontent.com/divarvel/biscuit-haskell/main/assets/biscuit-logo.png" align=right>
+<img src="https://raw.githubusercontent.com/biscuit-auth/biscuit-haskell/main/assets/biscuit-logo.png" align=right>
 
 Main library for biscuit tokens support, providing minting and signature verification of biscuit tokens, as well as a datalog engine allowing to compute the validity of a token in a given context.
 
@@ -105,5 +105,5 @@ creation = do
 [biscuittutorial]: https://www.clever-cloud.com/blog/engineering/2021/04/15/biscuit-tutorial/
 [v2spec]: https://github.com/CleverCloud/biscuit/blob/2.0/SPECIFICATIONS.md
 [quasiquotes]: https://wiki.haskell.org/Quasiquotation
-[biscuitexample]: https://github.com/divarvel/biscuit-haskell/blob/main/biscuit/src/Auth/Biscuit/Example.hs
+[biscuitexample]: https://github.com/biscuit-auth/biscuit-haskell/blob/main/biscuit/src/Auth/Biscuit/Example.hs
 [packagedoc]: https://hackage.haskell.org/package/biscuit-haskell-0.1.0.0/docs/Auth-Biscuit.html
