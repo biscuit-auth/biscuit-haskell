@@ -1,6 +1,5 @@
 {-# LANGUAGE DataKinds         #-}
 {-# LANGUAGE EmptyDataDeriving #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-|
   Module      : Auth.Biscuit
   Copyright   : © Clément Delafargue, 2021
@@ -33,6 +32,7 @@ module Auth.Biscuit
   -- * Creating a biscuit
   -- $biscuitBlocks
   , mkBiscuit
+  , mkBiscuitWith
   , block
   , blockContext
   , Biscuit
@@ -137,7 +137,7 @@ import           Auth.Biscuit.Token                  (Biscuit,
                                                       fromOpen, fromSealed,
                                                       getRevocationIds,
                                                       getVerifiedBiscuitPublicKey,
-                                                      mkBiscuit,
+                                                      mkBiscuit, mkBiscuitWith,
                                                       parseBiscuitUnverified,
                                                       parseBiscuitWith, seal,
                                                       serializeBiscuit)

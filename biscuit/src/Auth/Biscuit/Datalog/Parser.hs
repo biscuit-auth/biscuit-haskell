@@ -213,7 +213,7 @@ binary name op = Expr.InfixL  (EBinary op <$ (skipSpace *> string name))
 hexBsParser :: Parser ByteString
 hexBsParser = do
   void $ string "hex:"
-  either fail pure =<< Hex.decode . encodeUtf8 <$> takeWhile1 (inClass "0-9a-fA-F")
+  either fail pure . Hex.decode . encodeUtf8 =<< takeWhile1 (inClass "0-9a-fA-F")
 
 litStringParser :: Parser Text
 litStringParser =
