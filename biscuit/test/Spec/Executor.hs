@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedLists   #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes       #-}
 module Spec.Executor (specs) where
@@ -23,6 +24,7 @@ specs :: TestTree
 specs = testGroup "Datalog evaluation"
   [ grandparent
   , ancestor
+  , scopedRules
   , exprEval
   , exprEvalError
   , rulesWithConstraints
@@ -225,3 +227,32 @@ limits =
         , testCase "max iterations" $
             runFactGeneration iterLimits rules facts @?= Left Iterations
         ]
+
+scopedRules :: TestTree
+scopedRules = testCase "Rules and facts in different scopes, with default scoping for rules" $
+  let rules :: Map Natural (Set Rule)
+      rules = [ (0, [ [rule|ancestor($a,$b) <- parent($a,$b)|] ])
+              , (1, [ [rule|ancestor($a,$b) <- parent($a,$c), ancestor($c,$b)|] ])
+              ]
+      facts :: FactGroup
+      facts = FactGroup
+                [ ([0], [ [fact|parent("alice", "bob")|]
+                        , [fact|parent("bob", "trudy")|]
+                        ])
+                , ([1], [ [fact|parent("bob", "jean-pierre")|]
+                        ])
+                , ([2], [ [fact|parent("toto", "toto")|]
+                        ])
+                ]
+   in runFactGeneration defaultLimits rules facts @?= Right (FactGroup
+        [ ([0],   [ [fact|parent("alice", "bob")|]
+                  , [fact|ancestor("alice", "bob")|]
+                  , [fact|parent("bob", "trudy")|]
+                  , [fact|ancestor("bob", "trudy")|]
+                  ])
+        , ([1],   [ [fact|parent("bob", "jean-pierre")|]
+                  ])
+        , ([0,1], [ [fact|ancestor("alice", "trudy")|]
+                  ])
+        , ([2],   [ [fact|parent("toto", "toto")|] ])
+        ])

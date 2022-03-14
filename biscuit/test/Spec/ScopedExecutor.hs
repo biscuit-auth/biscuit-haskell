@@ -24,6 +24,7 @@ specs = testGroup "Block-scoped Datalog Evaluation"
   [ authorizerOnlySeesAuthority
   , authorityOnlySeesItselfAndAuthorizer
   , block1OnlySeesAuthorityAndAuthorizer
+  , block2OnlySeesAuthorityAndAuthorizer
   , block1SeesAuthorityAndAuthorizer
   , iterationCountWorks
   , maxFactsCountWorks
@@ -103,6 +104,26 @@ block1SeesAuthorityAndAuthorizer = testCase "Arbitrary blocks see previous block
        |]
   runAuthorizerNoTimeout defaultLimits (authority, "") [(block1, "")] verif @?= Left (ResultError $ NoPoliciesMatched [])
 
+block2OnlySeesAuthorityAndAuthorizer :: TestTree
+block2OnlySeesAuthorityAndAuthorizer = testCase "Arbitrary blocks only see previous blocks" $ do
+  let authority =
+       [block|
+         user(1234);
+       |]
+      block1 =
+       [block|
+         right(1234, "file1", "read");
+       |]
+      block2 =
+       [block|
+         is_allowed($user, $resource) <- right($user, $resource, "read");
+         check if is_allowed(1234, "file1");
+       |]
+      verif =
+       [authorizer|
+         allow if true;
+       |]
+  runAuthorizerNoTimeout defaultLimits (authority, "") [(block1, ""), (block2, "")] verif @?= Left (ResultError (FailedChecks $ pure [check|check if is_allowed(1234, "file1") |]))
 
 iterationCountWorks :: TestTree
 iterationCountWorks = testCase "ScopedExecutions stops when hitting the iterations threshold" $ do

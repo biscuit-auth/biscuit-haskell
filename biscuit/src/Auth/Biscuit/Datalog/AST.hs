@@ -50,6 +50,7 @@ module Auth.Biscuit.Datalog.AST
   , QueryItem' (..)
   , Rule
   , Rule' (..)
+  , RuleScope (..)
   , SetType
   , Slice (..)
   , SliceType
@@ -85,6 +86,7 @@ import           Data.Void                  (Void, absurd)
 import           Instances.TH.Lift          ()
 import           Language.Haskell.TH
 import           Language.Haskell.TH.Syntax
+import           Numeric.Natural            (Natural)
 
 data IsWithinSet = NotWithinSet | WithinSet
 data ParsedAs = RegularString | QuasiQuote
@@ -326,6 +328,7 @@ listSymbolsInPredicate Predicate{..} =
 data QueryItem' ctx = QueryItem
   { qBody        :: [Predicate' 'InPredicate ctx]
   , qExpressions :: [Expression' ctx]
+  , qScope       :: Maybe RuleScope
   }
 
 type Query' ctx = [QueryItem' ctx]
@@ -374,10 +377,18 @@ listSymbolsInCheck :: Check -> Set.Set Text
 listSymbolsInCheck =
   foldMap listSymbolsInQueryItem
 
+data RuleScope  =
+    OnlyAuthority
+  | Previous
+  | UnsafeAny
+  | OnlyBlocks (Set Natural)
+  deriving (Eq, Ord, Show, Lift)
+
 data Rule' ctx = Rule
   { rhead       :: Predicate' 'InPredicate ctx
   , body        :: [Predicate' 'InPredicate ctx]
   , expressions :: [Expression' ctx]
+  , scope       :: Maybe RuleScope
   }
 
 deriving instance ( Eq (Predicate' 'InPredicate ctx)
@@ -525,6 +536,7 @@ data Block' (ctx :: ParsedAs) = Block
   , bFacts   :: [Predicate' 'InFact ctx]
   , bChecks  :: [Check' ctx]
   , bContext :: Maybe Text
+  , bScope   :: Maybe RuleScope
   }
 
 renderBlock :: Block -> Text
@@ -557,6 +569,7 @@ instance Semigroup (Block' ctx) where
                    , bFacts = bFacts b1 <> bFacts b2
                    , bChecks = bChecks b1 <> bChecks b2
                    , bContext = bContext b2 <|> bContext b1
+                   , bScope = bScope b1 <|> bScope b2
                    }
 
 instance Monoid (Block' ctx) where
@@ -564,6 +577,7 @@ instance Monoid (Block' ctx) where
                  , bFacts = []
                  , bChecks = []
                  , bContext = Nothing
+                 , bScope = Nothing
                  }
 
 listSymbolsInBlock :: Block' 'RegularString -> Set.Set Text
@@ -621,9 +635,9 @@ deriving instance ( Show (Predicate' 'InFact ctx)
 
 elementToBlock :: BlockElement' ctx -> Block' ctx
 elementToBlock = \case
-   BlockRule r  -> Block [r] [] [] Nothing
-   BlockFact f  -> Block [] [f] [] Nothing
-   BlockCheck c -> Block [] [] [c] Nothing
+   BlockRule r  -> Block [r] [] [] Nothing Nothing
+   BlockFact f  -> Block [] [f] [] Nothing Nothing
+   BlockCheck c -> Block [] [] [c] Nothing Nothing
    BlockComment -> mempty
 
 data AuthorizerElement' ctx

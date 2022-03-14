@@ -1,9 +1,11 @@
-{-# LANGUAGE DataKinds         #-}
-{-# LANGUAGE FlexibleContexts  #-}
-{-# LANGUAGE LambdaCase        #-}
-{-# LANGUAGE NamedFieldPuns    #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TupleSections     #-}
+{-# LANGUAGE DataKinds                  #-}
+{-# LANGUAGE DerivingStrategies         #-}
+{-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE LambdaCase                 #-}
+{-# LANGUAGE NamedFieldPuns             #-}
+{-# LANGUAGE OverloadedStrings          #-}
+{-# LANGUAGE TupleSections              #-}
 {-|
   Module      : Auth.Biscuit.Datalog.Executor
   Copyright   : © Clément Delafargue, 2021
@@ -19,6 +21,11 @@ module Auth.Biscuit.Datalog.Executor
   , Name
   , MatchedQuery (..)
   , Scoped
+  , FactGroup (..)
+  , countFacts
+  , toScopedFacts
+  , fromScopedFacts
+  , keepAuthorized'
   , defaultLimits
   , evaluateExpression
 
@@ -39,10 +46,10 @@ import           Data.List.NonEmpty       (NonEmpty)
 import qualified Data.List.NonEmpty       as NE
 import           Data.Map.Strict          (Map, (!?))
 import qualified Data.Map.Strict          as Map
-import           Data.Maybe               (isJust, mapMaybe)
+import           Data.Maybe               (fromMaybe, isJust, mapMaybe)
 import           Data.Set                 (Set)
 import qualified Data.Set                 as Set
-import           Data.Text                (Text, isInfixOf)
+import           Data.Text                (Text, isInfixOf, unpack)
 import qualified Data.Text                as Text
 import           Data.Void                (absurd)
 import           Numeric.Natural          (Natural)
@@ -132,29 +139,67 @@ defaultLimits = Limits
 
 type Scoped a = (Set Natural, a)
 
-checkCheck :: Limits -> Set Fact -> Check -> Validation (NonEmpty Check) ()
-checkCheck l facts items =
-  if any (isJust . isQueryItemSatisfied l facts) items
+newtype FactGroup = FactGroup { getFactGroup :: Map (Set Natural) (Set Fact) }
+  deriving newtype (Eq)
+
+instance Show FactGroup where
+  show (FactGroup groups) =
+    let showGroup (origin, facts) = unlines
+          [ "For origin: " <> show (Set.toList origin)
+          , "Facts: \n" <> unlines (unpack . renderFact <$> Set.toList facts)
+          ]
+     in unlines $ showGroup <$> Map.toList groups
+
+instance Semigroup FactGroup where
+  FactGroup f1 <> FactGroup f2 = FactGroup $ Map.unionWith (<>) f1 f2
+instance Monoid FactGroup where
+  mempty = FactGroup mempty
+
+keepAuthorized :: FactGroup -> Set Natural -> FactGroup
+keepAuthorized (FactGroup facts) authorizedOrigins =
+  let isAuthorized k _ = k `Set.isSubsetOf` authorizedOrigins
+   in FactGroup $ Map.filterWithKey isAuthorized facts
+
+keepAuthorized' :: FactGroup -> Maybe RuleScope -> Natural -> FactGroup
+keepAuthorized' factGroup mScope currentBlockId =
+  let scope = fromMaybe OnlyAuthority mScope
+   in case scope of
+        OnlyAuthority  -> keepAuthorized factGroup (Set.fromList [0, currentBlockId])
+        Previous       -> keepAuthorized factGroup (Set.fromList [0..currentBlockId])
+        UnsafeAny      -> factGroup
+        OnlyBlocks ids -> keepAuthorized factGroup (Set.insert currentBlockId ids)
+
+toScopedFacts :: FactGroup -> Set (Scoped Fact)
+toScopedFacts (FactGroup factGroups) =
+  let distributeScope scope facts = Set.map (scope,) facts
+   in foldMap (uncurry distributeScope) $ Map.toList factGroups
+
+fromScopedFacts :: Set (Scoped Fact) -> FactGroup
+fromScopedFacts = FactGroup . Map.fromListWith (<>) . Set.toList . Set.map (fmap Set.singleton)
+
+countFacts :: FactGroup -> Int
+countFacts (FactGroup facts) = sum $ Set.size <$> Map.elems facts
+
+checkCheck :: Limits -> Natural -> FactGroup -> Check -> Validation (NonEmpty Check) ()
+checkCheck l checkBlockId facts items =
+  if any (isJust . isQueryItemSatisfied l checkBlockId facts) items
   then Success ()
   else failure items
 
-checkPolicy :: Limits -> Set Fact -> Policy -> Maybe (Either MatchedQuery MatchedQuery)
+checkPolicy :: Limits -> FactGroup -> Policy -> Maybe (Either MatchedQuery MatchedQuery)
 checkPolicy l facts (pType, query) =
-  let bindings = fold $ mapMaybe (isQueryItemSatisfied l facts) query
+  let bindings = fold $ mapMaybe (isQueryItemSatisfied l 0 facts) query
    in if not (null bindings)
       then Just $ case pType of
         Allow -> Right $ MatchedQuery{matchedQuery = query, bindings}
         Deny  -> Left $ MatchedQuery{matchedQuery = query, bindings}
       else Nothing
 
-isQueryItemSatisfied :: Limits -> Set Fact -> QueryItem' 'RegularString -> Maybe (Set Bindings)
-isQueryItemSatisfied l facts QueryItem{qBody, qExpressions} =
-  let -- in this context, we're not generating new facts, just checking if the rules match,
-      -- so we don't need to keep track of the bindings scope. We just add and remove a
-      -- dummy scope to align with more general use
-      addDummyScope = Set.map (mempty, )
-      removeDummyScope = Set.map snd
-      bindings = removeDummyScope $ getBindingsForRuleBody l (addDummyScope facts) qBody qExpressions
+isQueryItemSatisfied :: Limits -> Natural -> FactGroup -> QueryItem' 'RegularString -> Maybe (Set Bindings)
+isQueryItemSatisfied l blockId allFacts QueryItem{qBody, qExpressions, qScope} =
+  let removeScope = Set.map snd
+      facts = toScopedFacts $ keepAuthorized' allFacts qScope blockId
+      bindings = removeScope $ getBindingsForRuleBody l facts qBody qExpressions
    in if Set.size bindings > 0
       then Just bindings
       else Nothing

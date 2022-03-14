@@ -93,6 +93,7 @@ pbToBlock s PB.Block{..} = do
   bFacts <- traverse (pbToFact s) $ PB.getField facts_v2
   bRules <- traverse (pbToRule s) $ PB.getField rules_v2
   bChecks <- traverse (pbToCheck s) $ PB.getField checks_v2
+  let bScope = Nothing -- todo parse from protobuf
   when (bVersion /= Just 2) $ Left $ "Unsupported biscuit version: " <> maybe "0" show bVersion <> ". Only version 2 is supported"
   pure Block{ .. }
 
@@ -136,6 +137,7 @@ pbToRule s pbRule = do
   rhead       <- pbToPredicate s pbHead
   body        <- traverse (pbToPredicate s) pbBody
   expressions <- traverse (pbToExpression s) pbExpressions
+  let scope = Nothing -- todo read it from PB
   pure Rule {..}
 
 ruleToPb :: ReverseSymbols -> Rule -> PB.RuleV2
@@ -148,7 +150,7 @@ ruleToPb s Rule{..} =
 
 pbToCheck :: Symbols -> PB.CheckV2 -> Either String Check
 pbToCheck s PB.CheckV2{queries} = do
-  let toCheck Rule{body,expressions} = QueryItem{qBody = body, qExpressions = expressions }
+  let toCheck Rule{body,expressions,scope} = QueryItem{qBody = body, qExpressions = expressions, qScope = scope}
   rules <- traverse (pbToRule s) $ PB.getField queries
   pure $ toCheck <$> rules
 
@@ -156,7 +158,11 @@ checkToPb :: ReverseSymbols -> Check -> PB.CheckV2
 checkToPb s items =
   let dummyHead = Predicate "query" []
       toQuery QueryItem{..} =
-        ruleToPb s $ Rule dummyHead qBody qExpressions
+        ruleToPb s $ Rule { rhead = dummyHead
+                          , body = qBody
+                          , expressions = qExpressions
+                          , scope = qScope
+                          }
    in PB.CheckV2 { queries = PB.putField $ toQuery <$> items }
 
 pbToPredicate :: Symbols -> PB.PredicateV2 -> Either String (Predicate' 'InPredicate 'RegularString)

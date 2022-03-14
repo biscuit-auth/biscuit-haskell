@@ -22,6 +22,7 @@ module Auth.Biscuit.Datalog.ScopedExecutor
   , FactGroup (..)
   ) where
 
+import           Control.Applicative           ((<|>))
 import           Control.Monad                 (when)
 import           Control.Monad.State           (StateT (..), evalStateT, get,
                                                 gets, lift, put)
@@ -36,18 +37,21 @@ import           Data.Map.Strict               ((!?))
 import           Data.Maybe                    (mapMaybe)
 import           Data.Set                      (Set)
 import qualified Data.Set                      as Set
-import           Data.Text                     (Text, unpack)
+import           Data.Text                     (Text)
 import           Numeric.Natural               (Natural)
 import           Validation                    (Validation (..))
 
 import           Auth.Biscuit.Datalog.AST
 import           Auth.Biscuit.Datalog.Executor (Bindings, ExecutionError (..),
-                                                Limits (..), MatchedQuery (..),
+                                                FactGroup (..), Limits (..),
+                                                MatchedQuery (..),
                                                 ResultError (..), Scoped,
                                                 checkCheck, checkPolicy,
-                                                defaultLimits,
+                                                countFacts, defaultLimits,
+                                                fromScopedFacts,
                                                 getBindingsForRuleBody,
-                                                getFactsForRule)
+                                                getFactsForRule,
+                                                keepAuthorized', toScopedFacts)
 import           Auth.Biscuit.Datalog.Parser   (fact)
 import           Auth.Biscuit.Timer            (timer)
 
@@ -169,7 +173,7 @@ runAuthorizerNoTimeout limits authority blocks authorizer = do
 
 runStep :: StateT ComputeState (Either PureExecError) Int
 runStep = do
-  state@ComputeState{sLimits,sFacts,sRules, sIterations} <- get
+  state@ComputeState{sLimits,sFacts,sRules,sIterations} <- get
   let Limits{maxFacts, maxIterations} = sLimits
       previousCount = countFacts sFacts
       newFacts = sFacts <> extend sLimits sRules sFacts
@@ -206,70 +210,44 @@ checkChecks limits allFacts =
   traverse_ (uncurry $ checkChecksForGroup limits allFacts)
 
 checkChecksForGroup :: Limits -> FactGroup -> Natural -> [Check] -> Validation (NonEmpty Check) ()
-checkChecksForGroup limits allFacts checksBlockId checks =
-  let facts = fold $ getFactGroup $ keepAuthorized allFacts (Set.fromList [0..checksBlockId])
-   in traverse_ (checkCheck limits facts) checks
+checkChecksForGroup limits allFacts checksBlockId =
+  traverse_ (checkCheck limits checksBlockId allFacts)
 
 checkPolicies :: Limits -> FactGroup -> [Policy] -> Either (Maybe MatchedQuery) MatchedQuery
 checkPolicies limits allFacts policies =
-  let facts = fold $ getFactGroup $ keepAuthorized allFacts (Set.singleton 0)
-      results = mapMaybe (checkPolicy limits facts) policies
+  let results = mapMaybe (checkPolicy limits allFacts) policies
    in case results of
         p : _ -> first Just p
         []    -> Left Nothing
 
-newtype FactGroup = FactGroup { getFactGroup :: Map (Set Natural) (Set Fact) }
-  deriving newtype (Eq)
-
-instance Show FactGroup where
-  show (FactGroup groups) =
-    let showGroup (origin, facts) = unlines
-          [ "For origin: " <> show (Set.toList origin)
-          , "Facts: \n" <> unlines (unpack . renderFact <$> Set.toList facts)
-          ]
-     in unlines $ showGroup <$> Map.toList groups
-
-instance Semigroup FactGroup where
-  FactGroup f1 <> FactGroup f2 = FactGroup $ Map.unionWith (<>) f1 f2
-instance Monoid FactGroup where
-  mempty = FactGroup mempty
-
-toScopedFacts :: FactGroup -> Set (Scoped Fact)
-toScopedFacts (FactGroup factGroups) =
-  let distributeScope scope facts = Set.map (scope,) facts
-   in foldMap (uncurry distributeScope) $ Map.toList factGroups
-
-fromScopedFacts :: Set (Scoped Fact) -> FactGroup
-fromScopedFacts = FactGroup . Map.fromListWith (<>) . Set.toList . Set.map (fmap Set.singleton)
-
-countFacts :: FactGroup -> Int
-countFacts (FactGroup facts) = sum $ Set.size <$> Map.elems facts
-
-keepAuthorized :: FactGroup -> Set Natural -> FactGroup
-keepAuthorized (FactGroup facts) authorizedOrigins =
-  let isAuthorized k _ = k `Set.isSubsetOf` authorizedOrigins
-   in FactGroup $ Map.filterWithKey isAuthorized facts
-
 -- | Generate new facts by applying rules on existing facts
 extend :: Limits -> Map Natural (Set Rule) -> FactGroup -> FactGroup
 extend l rules facts =
-  let buildFacts :: Set Rule -> Set (Scoped Fact) -> Set (Scoped Fact)
-      buildFacts ruleGroup factGroup = foldMap (getFactsForRule l factGroup) ruleGroup
+  let buildFacts :: Natural -> Set Rule -> FactGroup -> Set (Scoped Fact)
+      buildFacts ruleBlockId ruleGroup factGroup =
+        let extendRule :: Rule -> Set (Scoped Fact)
+            extendRule r@Rule{scope} = getFactsForRule l (toScopedFacts $ keepAuthorized' factGroup scope ruleBlockId) r
+         in foldMap extendRule ruleGroup
 
       extendRuleGroup :: Natural -> Set Rule -> FactGroup
       extendRuleGroup ruleBlockId ruleGroup =
-        let authorizedFacts = toScopedFacts $ keepAuthorized facts $ Set.fromList [0..ruleBlockId]
+            -- todo pre-filter facts based on the weakest rule scope to avoid passing too many facts
+            -- to buildFacts
+        let authorizedFacts = facts -- test $ keepAuthorized facts $ Set.fromList [0..ruleBlockId]
             addRuleOrigin = FactGroup . Map.mapKeysWith (<>) (Set.insert ruleBlockId) . getFactGroup
-         in addRuleOrigin . fromScopedFacts $ buildFacts ruleGroup authorizedFacts
+         in addRuleOrigin . fromScopedFacts $ buildFacts ruleBlockId ruleGroup authorizedFacts
 
    in foldMap (uncurry extendRuleGroup) $ Map.toList rules
 
 
 collectWorld :: Natural -> Block -> (Map Natural (Set Rule), FactGroup)
 collectWorld blockId Block{..} =
-  ( Map.singleton blockId $ Set.fromList bRules
-  , FactGroup $ Map.singleton (Set.singleton blockId) $ Set.fromList bFacts
-  )
+  let -- a block can define a default scope for its rule
+      -- which is used unless the rule itself has defined a scope
+      applyScope r@Rule{scope} = r { scope = scope <|> bScope }
+   in ( Map.singleton blockId $ Set.map applyScope $ Set.fromList bRules
+      , FactGroup $ Map.singleton (Set.singleton blockId) $ Set.fromList bFacts
+      )
 
 -- | Query the facts generated by the authority and authorizer blocks
 -- during authorization. This can be used in conjuction with 'getVariableValues'
