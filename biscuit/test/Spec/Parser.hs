@@ -388,7 +388,7 @@ policyParsing = testGroup "policy blocks"
   , testCase "Allow with multiple groups, scoped" $
       parsePolicy
         "allow if fact($var), $var == true @ previous or \
-        \other($var), $var == 2 @0 ,2, 3" @?=
+        \other($var), $var == 2 @ed25519/hex:30,ed25519/hex:32,ed25519/hex:33 " @?=
           Right
             ( Allow
             , [ QueryItem [Predicate "fact" [Variable "var"]]
@@ -396,7 +396,7 @@ policyParsing = testGroup "policy blocks"
                           (Just Previous)
               , QueryItem [Predicate "other" [Variable "var"]]
                           [EBinary Equal (EValue (Variable "var")) (EValue (LInteger 2))]
-                          (Just $ OnlyBlocks $ Set.fromList [0,2,3])
+                          (Just $ OnlyBlocks $ Set.fromList ["0","2","3"])
               ]
             )
   ]
@@ -507,7 +507,7 @@ blockParsing :: TestTree
 blockParsing = testCase "Full block" $ do
   let spec :: Text
       spec =
-        " trusting 1,2,4;\n\
+        " trusting ed25519/hex:31,ed25519/hex:32,ed25519/hex:34;\n\
         \// the owner has all rights\n\
         \right($blog_id, $article_id, $operation) <-\n\
         \    article($blog_id, $article_id),\n\
@@ -563,5 +563,5 @@ blockParsing = testCase "Full block" $ do
       bFacts = []
       bChecks = []
       bContext = Nothing
-      bScope = Just $ OnlyBlocks $ Set.fromList [1,2,4]
+      bScope = Just $ OnlyBlocks $ Set.fromList ["1","2","4"]
   parseBlock spec @?= Right Block{..}

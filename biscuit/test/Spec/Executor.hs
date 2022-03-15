@@ -35,8 +35,11 @@ specs = testGroup "Datalog evaluation"
 authGroup :: Set Fact -> FactGroup
 authGroup = FactGroup . Map.singleton (Set.singleton 0)
 
-authRulesGroup :: Set Rule -> Map Natural (Set Rule)
-authRulesGroup = Map.singleton 0
+authRulesGroup :: Set Rule -> Map Natural (Set EvalRule)
+authRulesGroup = Map.singleton 0 . adaptRules
+
+adaptRules :: Set Rule -> Set EvalRule
+adaptRules = Set.map (toEvaluation [])
 
 grandparent :: TestTree
 grandparent = testCase "Basic grandparent rule" $
@@ -245,7 +248,7 @@ scopedRules = testGroup "Rules and facts in different scopes"
                     , ([2], [ [fact|parent("toto", "toto")|]
                             ])
                     ]
-       in runFactGeneration defaultLimits rules facts @?= Right (FactGroup
+       in runFactGeneration defaultLimits (adaptRules <$> rules) facts @?= Right (FactGroup
             [ ([0],   [ [fact|parent("alice", "bob")|]
                       , [fact|ancestor("alice", "bob")|]
                       , [fact|parent("bob", "trudy")|]

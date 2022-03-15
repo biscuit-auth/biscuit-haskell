@@ -159,13 +159,13 @@ keepAuthorized (FactGroup facts) authorizedOrigins =
   let isAuthorized k _ = k `Set.isSubsetOf` authorizedOrigins
    in FactGroup $ Map.filterWithKey isAuthorized facts
 
-keepAuthorized' :: FactGroup -> Maybe RuleScope -> Natural -> FactGroup
+keepAuthorized' :: FactGroup -> Maybe EvalRuleScope -> Natural -> FactGroup
 keepAuthorized' factGroup mScope currentBlockId =
   let scope = fromMaybe OnlyAuthority mScope
    in case scope of
         OnlyAuthority  -> keepAuthorized factGroup (Set.fromList [0, currentBlockId])
         Previous       -> keepAuthorized factGroup (Set.fromList [0..currentBlockId])
-        OnlyBlocks ids -> keepAuthorized factGroup (Set.insert currentBlockId ids)
+        OnlyBlocks ids -> keepAuthorized factGroup (Set.insert currentBlockId $ Set.map fst ids)
 
 toScopedFacts :: FactGroup -> Set (Scoped Fact)
 toScopedFacts (FactGroup factGroups) =
@@ -178,22 +178,22 @@ fromScopedFacts = FactGroup . Map.fromListWith (<>) . Set.toList . Set.map (fmap
 countFacts :: FactGroup -> Int
 countFacts (FactGroup facts) = sum $ Set.size <$> Map.elems facts
 
-checkCheck :: Limits -> Natural -> FactGroup -> Check -> Validation (NonEmpty Check) ()
+checkCheck :: Limits -> Natural -> FactGroup -> EvalCheck -> Validation (NonEmpty Check) ()
 checkCheck l checkBlockId facts items =
   if any (isJust . isQueryItemSatisfied l checkBlockId facts) items
   then Success ()
-  else failure items
+  else failure (toRepresentation <$> items)
 
-checkPolicy :: Limits -> FactGroup -> Policy -> Maybe (Either MatchedQuery MatchedQuery)
+checkPolicy :: Limits -> FactGroup -> EvalPolicy -> Maybe (Either MatchedQuery MatchedQuery)
 checkPolicy l facts (pType, query) =
   let bindings = fold $ mapMaybe (isQueryItemSatisfied l 0 facts) query
    in if not (null bindings)
       then Just $ case pType of
-        Allow -> Right $ MatchedQuery{matchedQuery = query, bindings}
-        Deny  -> Left $ MatchedQuery{matchedQuery = query, bindings}
+        Allow -> Right $ MatchedQuery{matchedQuery = toRepresentation <$> query, bindings}
+        Deny  -> Left $ MatchedQuery{matchedQuery = toRepresentation <$> query, bindings}
       else Nothing
 
-isQueryItemSatisfied :: Limits -> Natural -> FactGroup -> QueryItem' 'RegularString -> Maybe (Set Bindings)
+isQueryItemSatisfied :: Limits -> Natural -> FactGroup -> QueryItem' 'Eval 'Representation -> Maybe (Set Bindings)
 isQueryItemSatisfied l blockId allFacts QueryItem{qBody, qExpressions, qScope} =
   let removeScope = Set.map snd
       facts = toScopedFacts $ keepAuthorized' allFacts qScope blockId
@@ -205,7 +205,7 @@ isQueryItemSatisfied l blockId allFacts QueryItem{qBody, qExpressions, qScope} =
 -- | Given a rule and a set of available (scoped) facts, we find all fact
 -- combinations that match the rule body, and generate new facts by applying
 -- the bindings to the rule head (while keeping track of the facts origins)
-getFactsForRule :: Limits -> Set (Scoped Fact) -> Rule -> Set (Scoped Fact)
+getFactsForRule :: Limits -> Set (Scoped Fact) -> EvalRule -> Set (Scoped Fact)
 getFactsForRule l facts Rule{rhead, body, expressions} =
   let legalBindings :: Set (Scoped Bindings)
       legalBindings = getBindingsForRuleBody l facts body expressions

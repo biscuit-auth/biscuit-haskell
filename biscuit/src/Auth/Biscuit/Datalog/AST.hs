@@ -25,9 +25,11 @@ module Auth.Biscuit.Datalog.AST
   (
     Binary (..)
   , Block
+  , EvalBlock
   , Block' (..)
   , BlockElement' (..)
   , Check
+  , EvalCheck
   , Check'
   , Expression
   , Expression' (..)
@@ -38,8 +40,10 @@ module Auth.Biscuit.Datalog.AST
   , Term' (..)
   , IsWithinSet (..)
   , Op (..)
-  , ParsedAs (..)
+  , DatalogContext (..)
+  , EvaluationContext (..)
   , Policy
+  , EvalPolicy
   , Policy'
   , PolicyType (..)
   , Predicate
@@ -50,17 +54,24 @@ module Auth.Biscuit.Datalog.AST
   , Query'
   , QueryItem' (..)
   , Rule
+  , EvalRule
   , Rule' (..)
-  , RuleScope (..)
+  , RuleScope' (..)
+  , RuleScope
+  , EvalRuleScope
   , SetType
   , Slice (..)
   , SliceType
+  , BlockIdType
   , Unary (..)
   , Value
   , VariableType
   , Authorizer
   , Authorizer' (..)
   , AuthorizerElement' (..)
+  , ToEvaluation (..)
+  , checkToEvaluation
+  , policyToEvaluation
   , elementToBlock
   , elementToAuthorizer
   , fromStack
@@ -77,6 +88,7 @@ import           Control.Monad              ((<=<))
 import           Data.ByteString            (ByteString)
 import           Data.ByteString.Base16     as Hex
 import           Data.Foldable              (fold)
+import           Data.Maybe                 (mapMaybe, maybeToList)
 import           Data.Set                   (Set)
 import qualified Data.Set                   as Set
 import           Data.String                (IsString)
@@ -91,7 +103,18 @@ import           Language.Haskell.TH.Syntax
 import           Numeric.Natural            (Natural)
 
 data IsWithinSet = NotWithinSet | WithinSet
-data ParsedAs = RegularString | QuasiQuote
+data DatalogContext
+  = WithSlices
+  -- ^ Intermediate Datalog representation, which may contain references
+  -- to external variables (currently, only sliced in through TemplateHaskell,
+  -- but it could also be done at runtime, a bit like parameter substitution in
+  -- SQL queries)
+  | Representation
+  -- ^ A datalog representation faithful to its text display. There are no external
+  -- variables, and the authorized blocks are identified through their public keys
+
+data EvaluationContext = Repr | Eval
+
 data PredicateOrFact = InPredicate | InFact
 
 type family VariableType (inSet :: IsWithinSet) (pof :: PredicateOrFact) where
@@ -109,18 +132,23 @@ instance Lift Slice where
   liftTyped = unsafeTExpCoerce . lift
 #endif
 
-type family SliceType (ctx :: ParsedAs) where
-  SliceType 'RegularString = Void
-  SliceType 'QuasiQuote    = Slice
+type family SliceType (ctx :: DatalogContext) where
+  SliceType 'Representation = Void
+  SliceType 'WithSlices     = Slice
 
-type family SetType (inSet :: IsWithinSet) (ctx :: ParsedAs) where
+type family SetType (inSet :: IsWithinSet) (ctx :: DatalogContext) where
   SetType 'NotWithinSet ctx = Set (Term' 'WithinSet 'InFact ctx)
   SetType 'WithinSet    ctx = Void
+
+type family BlockIdType (evalCtx :: EvaluationContext) (ctx :: DatalogContext) where
+  BlockIdType 'Repr 'WithSlices     = Either Slice ByteString
+  BlockIdType 'Repr 'Representation = ByteString
+  BlockIdType 'Eval 'Representation = (Natural, ByteString)
 
 -- | A single datalog item.
 -- | This can be a value, a set of items, or a slice (a value that will be injected later),
 -- | depending on the context
-data Term' (inSet :: IsWithinSet) (pof :: PredicateOrFact) (ctx :: ParsedAs) =
+data Term' (inSet :: IsWithinSet) (pof :: PredicateOrFact) (ctx :: DatalogContext) =
     Variable (VariableType inSet pof)
   -- ^ A variable (eg. @$0@)
   | LInteger Int
@@ -154,13 +182,13 @@ deriving instance ( Show (VariableType inSet pof)
                   ) => Show (Term' inSet pof ctx)
 
 -- | In a regular AST, slices have already been eliminated
-type Term = Term' 'NotWithinSet 'InPredicate 'RegularString
--- | In an AST parsed from a QuasiQuoter, there might be references to haskell variables
-type QQTerm = Term' 'NotWithinSet 'InPredicate 'QuasiQuote
+type Term = Term' 'NotWithinSet 'InPredicate 'Representation
+-- | In an AST parsed from a WithSlicesr, there might be references to haskell variables
+type QQTerm = Term' 'NotWithinSet 'InPredicate 'WithSlices
 -- | A term that is not a variable
-type Value = Term' 'NotWithinSet 'InFact 'RegularString
+type Value = Term' 'NotWithinSet 'InFact 'Representation
 -- | An element of a set
-type SetValue = Term' 'WithinSet 'InFact 'RegularString
+type SetValue = Term' 'WithinSet 'InFact 'Representation
 
 instance  ( Lift (VariableType inSet pof)
           , Lift (SetType inSet ctx)
@@ -186,7 +214,7 @@ instance  ( Lift (VariableType inSet pof)
 -- | This is used when slicing a haskell variable in a datalog expression
 class ToTerm t where
   -- | How to turn a value into a datalog item
-  toTerm :: t -> Term' inSet pof 'RegularString
+  toTerm :: t -> Term' inSet pof 'Representation
 
 -- | This class describes how to turn a datalog value into a regular haskell value.
 class FromValue t where
@@ -238,7 +266,7 @@ instance FromValue Value where
   fromValue = Just
 
 toSetTerm :: Value
-          -> Maybe (Term' 'WithinSet 'InFact 'RegularString)
+          -> Maybe (Term' 'WithinSet 'InFact 'Representation)
 toSetTerm = \case
   LInteger i  -> Just $ LInteger i
   LString i   -> Just $ LString i
@@ -273,7 +301,7 @@ renderSet slice terms =
 renderId :: Term -> Text
 renderId = renderId' ("$" <>) (renderSet absurd) absurd
 
-renderFactId :: Term' 'NotWithinSet 'InFact 'RegularString -> Text
+renderFactId :: Term' 'NotWithinSet 'InFact 'Representation -> Text
 renderFactId = renderId' absurd (renderSet absurd) absurd
 
 listSymbolsInTerm :: Term -> Set.Set Text
@@ -300,7 +328,7 @@ listSymbolsInSetValue = \case
   Antiquote v -> absurd v
   _           -> mempty
 
-data Predicate' (pof :: PredicateOrFact) (ctx :: ParsedAs) = Predicate
+data Predicate' (pof :: PredicateOrFact) (ctx :: DatalogContext) = Predicate
   { name  :: Text
   , terms :: [Term' 'NotWithinSet pof ctx]
   }
@@ -314,8 +342,8 @@ deriving instance ( Show (Term' 'NotWithinSet pof ctx)
 
 deriving instance Lift (Term' 'NotWithinSet pof ctx) => Lift (Predicate' pof ctx)
 
-type Predicate = Predicate' 'InPredicate 'RegularString
-type Fact = Predicate' 'InFact 'RegularString
+type Predicate = Predicate' 'InPredicate 'Representation
+type Fact = Predicate' 'InFact 'Representation
 
 renderPredicate :: Predicate -> Text
 renderPredicate Predicate{name,terms} =
@@ -335,35 +363,42 @@ listSymbolsInPredicate Predicate{..} =
      Set.singleton name
   <> foldMap listSymbolsInTerm terms
 
-data QueryItem' ctx = QueryItem
+data QueryItem' evalCtx ctx = QueryItem
   { qBody        :: [Predicate' 'InPredicate ctx]
   , qExpressions :: [Expression' ctx]
-  , qScope       :: Maybe RuleScope
+  , qScope       :: Maybe (RuleScope' evalCtx ctx)
   }
 
-type Query' ctx = [QueryItem' ctx]
-type Query = Query' 'RegularString
+type Query' evalCtx ctx = [QueryItem' evalCtx ctx]
+type Query = Query' 'Repr 'Representation
 
-type Check' ctx = Query' ctx
-type Check = Query
+type Check' evalCtx ctx = Query' evalCtx ctx
+type Check = Check' 'Repr 'Representation
+type EvalCheck = Check' 'Eval 'Representation
 data PolicyType = Allow | Deny
   deriving (Eq, Show, Ord, Lift)
-type Policy' ctx = (PolicyType, Query' ctx)
-type Policy = (PolicyType, Query)
+type Policy' evalCtx ctx = (PolicyType, Query' evalCtx ctx)
+type Policy = Policy' 'Repr 'Representation
+type EvalPolicy = Policy' 'Eval 'Representation
 
 deriving instance ( Eq (Predicate' 'InPredicate ctx)
                   , Eq (Expression' ctx)
-                  ) => Eq (QueryItem' ctx)
+                  , Eq (RuleScope' evalCtx ctx)
+                  ) => Eq (QueryItem' evalCtx ctx)
 deriving instance ( Ord (Predicate' 'InPredicate ctx)
                   , Ord (Expression' ctx)
-                  ) => Ord (QueryItem' ctx)
+                  , Ord (RuleScope' evalCtx ctx)
+                  ) => Ord (QueryItem' evalCtx ctx)
 deriving instance ( Show (Predicate' 'InPredicate ctx)
                   , Show (Expression' ctx)
-                  ) => Show (QueryItem' ctx)
+                  , Show (RuleScope' evalCtx ctx)
+                  ) => Show (QueryItem' evalCtx ctx)
+deriving instance ( Lift (Predicate' 'InPredicate ctx)
+                  , Lift (Expression' ctx)
+                  , Lift (RuleScope' evalCtx ctx)
+                  ) => Lift (QueryItem' evalCtx ctx)
 
-deriving instance (Lift (Predicate' 'InPredicate ctx), Lift (Expression' ctx)) => Lift (QueryItem' ctx)
-
-renderQueryItem :: QueryItem' 'RegularString -> Text
+renderQueryItem :: QueryItem' 'Repr 'Representation -> Text
 renderQueryItem QueryItem{..} =
   intercalate ",\n" $ fold
     [ renderPredicate <$> qBody
@@ -374,7 +409,7 @@ renderCheck :: Check -> Text
 renderCheck is = "check if " <>
   intercalate "\n or " (renderQueryItem <$> is)
 
-listSymbolsInQueryItem :: QueryItem' 'RegularString -> Set.Set Text
+listSymbolsInQueryItem :: QueryItem' evalCtx 'Representation -> Set.Set Text
 listSymbolsInQueryItem QueryItem{..} =
      Set.singleton "query" -- query items are serialized as `Rule`s
                            -- so an empty rule head is added: `query()`
@@ -387,36 +422,51 @@ listSymbolsInCheck :: Check -> Set.Set Text
 listSymbolsInCheck =
   foldMap listSymbolsInQueryItem
 
-data RuleScope  =
+type RuleScope = RuleScope' 'Repr 'Representation
+type EvalRuleScope = RuleScope' 'Eval 'Representation
+
+data RuleScope' (evalCtx :: EvaluationContext) (ctx :: DatalogContext) =
     OnlyAuthority
   | Previous
-  | OnlyBlocks (Set Natural)
-  deriving (Eq, Ord, Show, Lift)
+  | OnlyBlocks (Set (BlockIdType evalCtx ctx))
 
-data Rule' ctx = Rule
+deriving instance Eq (BlockIdType evalCtx ctx) => Eq (RuleScope' evalCtx ctx)
+deriving instance Ord (BlockIdType evalCtx ctx) => Ord (RuleScope' evalCtx ctx)
+deriving instance Show (BlockIdType evalCtx ctx) => Show (RuleScope' evalCtx ctx)
+deriving instance Lift (BlockIdType evalCtx ctx) => Lift (RuleScope' evalCtx ctx)
+
+data Rule' evalCtx ctx = Rule
   { rhead       :: Predicate' 'InPredicate ctx
   , body        :: [Predicate' 'InPredicate ctx]
   , expressions :: [Expression' ctx]
-  , scope       :: Maybe RuleScope
+  , scope       :: Maybe (RuleScope' evalCtx ctx)
   }
 
 deriving instance ( Eq (Predicate' 'InPredicate ctx)
                   , Eq (Expression' ctx)
-                  ) => Eq (Rule' ctx)
+                  , Eq (RuleScope' evalCtx ctx)
+                  ) => Eq (Rule' evalCtx ctx)
 deriving instance ( Ord (Predicate' 'InPredicate ctx)
                   , Ord (Expression' ctx)
-                  ) => Ord (Rule' ctx)
+                  , Ord (RuleScope' evalCtx ctx)
+                  ) => Ord (Rule' evalCtx ctx)
 deriving instance ( Show (Predicate' 'InPredicate ctx)
                   , Show (Expression' ctx)
-                  ) => Show (Rule' ctx)
+                  , Show (RuleScope' evalCtx ctx)
+                  ) => Show (Rule' evalCtx ctx)
+deriving instance ( Lift (Predicate' 'InPredicate ctx)
+                  , Lift (Expression' ctx)
+                  , Lift (RuleScope' evalCtx ctx)
+                  ) => Lift (Rule' evalCtx ctx)
 
-type Rule = Rule' 'RegularString
+type Rule = Rule' 'Repr 'Representation
+type EvalRule = Rule' 'Eval 'Representation
 
-deriving instance (Lift (Predicate' 'InPredicate ctx), Lift (Expression' ctx)) => Lift (Rule' ctx)
-
-renderRule :: Rule' 'RegularString -> Text
-renderRule Rule{rhead,body,expressions} =
-  renderPredicate rhead <> " <- " <> intercalate ", " (fmap renderPredicate body <> fmap renderExpression expressions)
+renderRule :: Rule -> Text
+renderRule Rule{rhead,body,expressions,scope} =
+     renderPredicate rhead <> " <- "
+  <> intercalate ", " (fmap renderPredicate body <> fmap renderExpression expressions)
+  <> foldMap ((" @ " <>) . renderRuleScope) scope
 
 listSymbolsInRule :: Rule -> Set.Set Text
 listSymbolsInRule Rule{..} =
@@ -450,7 +500,7 @@ data Binary =
   | Union
   deriving (Eq, Ord, Show, Lift)
 
-data Expression' (ctx :: ParsedAs) =
+data Expression' (ctx :: DatalogContext) =
     EValue (Term' 'NotWithinSet 'InPredicate ctx)
   | EUnary Unary (Expression' ctx)
   | EBinary Binary (Expression' ctx) (Expression' ctx)
@@ -460,7 +510,7 @@ deriving instance Ord  (Term' 'NotWithinSet 'InPredicate ctx) => Ord (Expression
 deriving instance Lift (Term' 'NotWithinSet 'InPredicate ctx) => Lift (Expression' ctx)
 deriving instance Show (Term' 'NotWithinSet 'InPredicate ctx) => Show (Expression' ctx)
 
-type Expression = Expression' 'RegularString
+type Expression = Expression' 'Representation
 
 listSymbolsInExpression :: Expression -> Set.Set Text
 listSymbolsInExpression = \case
@@ -536,44 +586,34 @@ renderExpression =
 -- > [block| value(${v1}); |] <>
 -- > [block| value(${v2}); |] <>
 -- > [block| value(${v3}); |]
-type Block = Block' 'RegularString
+type Block = Block' 'Repr 'Representation
+type EvalBlock = Block' 'Eval 'Representation
 
 -- | A biscuit block, that may or may not contain slices referencing
 -- haskell variables
-data Block' (ctx :: ParsedAs) = Block
-  { bRules   :: [Rule' ctx]
+data Block' (evalCtx :: EvaluationContext) (ctx :: DatalogContext) = Block
+  { bRules   :: [Rule' evalCtx ctx]
   , bFacts   :: [Predicate' 'InFact ctx]
-  , bChecks  :: [Check' ctx]
+  , bChecks  :: [Check' evalCtx ctx]
   , bContext :: Maybe Text
-  , bScope   :: Maybe RuleScope
+  , bScope   :: Maybe (RuleScope' evalCtx ctx)
   }
 
-renderBlock :: Block -> Text
-renderBlock Block{..} =
-  intercalate ";\n" $ fold
-    [ renderRule <$> bRules
-    , renderFact <$> bFacts
-    , renderCheck <$> bChecks
-    ]
-
 deriving instance ( Eq (Predicate' 'InFact ctx)
-                  , Eq (Rule' ctx)
-                  , Eq (QueryItem' ctx)
-                  ) => Eq (Block' ctx)
+                  , Eq (Rule' evalCtx ctx)
+                  , Eq (QueryItem' evalCtx ctx)
+                  , Eq (RuleScope' evalCtx ctx)
+                  ) => Eq (Block' evalCtx ctx)
+deriving instance ( Lift (Predicate' 'InFact ctx)
+                  , Lift (Rule' evalCtx ctx)
+                  , Lift (QueryItem' evalCtx ctx)
+                  , Lift (RuleScope' evalCtx ctx)
+                  ) => Lift (Block' evalCtx ctx)
 
--- deriving instance ( Show (Predicate' 'InFact ctx)
---                   , Show (Rule' ctx)
---                   , Show (QueryItem' ctx)
---                   ) => Show (Block' ctx)
 instance Show Block where
   show = unpack . renderBlock
 
-deriving instance ( Lift (Predicate' 'InFact ctx)
-                  , Lift (Rule' ctx)
-                  , Lift (QueryItem' ctx)
-                  ) => Lift (Block' ctx)
-
-instance Semigroup (Block' ctx) where
+instance Semigroup (Block' evalCtx ctx) where
   b1 <> b2 = Block { bRules = bRules b1 <> bRules b2
                    , bFacts = bFacts b1 <> bFacts b2
                    , bChecks = bChecks b1 <> bChecks b2
@@ -581,7 +621,7 @@ instance Semigroup (Block' ctx) where
                    , bScope = bScope b1 <|> bScope b2
                    }
 
-instance Monoid (Block' ctx) where
+instance Monoid (Block' evalCtx ctx) where
   mempty = Block { bRules = []
                  , bFacts = []
                  , bChecks = []
@@ -589,7 +629,25 @@ instance Monoid (Block' ctx) where
                  , bScope = Nothing
                  }
 
-listSymbolsInBlock :: Block' 'RegularString -> Set.Set Text
+renderRuleScope :: RuleScope -> Text
+renderRuleScope =
+  let renderPk bs = "ed25519/hex:" <> decodeUtf8 (Hex.encode bs)
+      in \case
+        OnlyAuthority  -> "authority"
+        Previous       -> "previous"
+        OnlyBlocks pks -> intercalate ", " $ renderPk <$> Set.toList pks
+
+renderBlock :: Block -> Text
+renderBlock Block{..} =
+  let renderScopeLine = (("trusting " <>) . renderRuleScope)
+   in foldMap (<> ";\n") $ fold
+         [ renderScopeLine <$> maybeToList bScope
+         , renderRule <$> bRules
+         , renderFact <$> bFacts
+         , renderCheck <$> bChecks
+         ]
+
+listSymbolsInBlock :: Block -> Set.Set Text
 listSymbolsInBlock Block {..} = fold
   [ foldMap listSymbolsInRule bRules
   , foldMap listSymbolsInFact bFacts
@@ -597,68 +655,123 @@ listSymbolsInBlock Block {..} = fold
   ]
 
 -- | A biscuit authorizer, containing, facts, rules, checks and policies
-type Authorizer = Authorizer' 'RegularString
+type Authorizer = Authorizer' 'Repr 'Representation
 
 -- | The context in which a biscuit policies and checks are verified.
 -- A authorizer may add policies (`deny if` / `allow if` conditions), as well as rules, facts, and checks.
 -- A authorizer may or may not contain slices referencing haskell variables.
-data Authorizer' (ctx :: ParsedAs) = Authorizer
-  { vPolicies :: [Policy' ctx]
+data Authorizer' (evalCtx :: EvaluationContext) (ctx :: DatalogContext) = Authorizer
+  { vPolicies :: [Policy' evalCtx ctx]
   -- ^ the allow / deny policies.
-  , vBlock    :: Block' ctx
+  , vBlock    :: Block' evalCtx ctx
   -- ^ the facts, rules and checks
   }
 
-instance Semigroup (Authorizer' ctx) where
+instance Semigroup (Authorizer' evalCtx ctx) where
   v1 <> v2 = Authorizer { vPolicies = vPolicies v1 <> vPolicies v2
                       , vBlock = vBlock v1 <> vBlock v2
                       }
 
-instance Monoid (Authorizer' ctx) where
+instance Monoid (Authorizer' evalCtx ctx) where
   mempty = Authorizer { vPolicies = []
                     , vBlock = mempty
                     }
 
-deriving instance ( Eq (Block' ctx)
-                  , Eq (QueryItem' ctx)
-                  ) => Eq (Authorizer' ctx)
+deriving instance ( Eq (Block' evalCtx ctx)
+                  , Eq (QueryItem' evalCtx ctx)
+                  ) => Eq (Authorizer' evalCtx ctx)
 
-deriving instance ( Show (Block' ctx)
-                  , Show (QueryItem' ctx)
-                  ) => Show (Authorizer' ctx)
+deriving instance ( Show (Block' evalCtx ctx)
+                  , Show (QueryItem' evalCtx ctx)
+                  ) => Show (Authorizer' evalCtx ctx)
 
-deriving instance ( Lift (Block' ctx)
-                  , Lift (QueryItem' ctx)
-                  ) => Lift (Authorizer' ctx)
+deriving instance ( Lift (Block' evalCtx ctx)
+                  , Lift (QueryItem' evalCtx ctx)
+                  ) => Lift (Authorizer' evalCtx ctx)
 
-data BlockElement' ctx
+data BlockElement' evalCtx ctx
   = BlockFact (Predicate' 'InFact ctx)
-  | BlockRule (Rule' ctx)
-  | BlockCheck (Check' ctx)
+  | BlockRule (Rule' evalCtx ctx)
+  | BlockCheck (Check' evalCtx ctx)
   | BlockComment
 
 deriving instance ( Show (Predicate' 'InFact ctx)
-                  , Show (Rule' ctx)
-                  , Show (QueryItem' ctx)
-                  ) => Show (BlockElement' ctx)
+                  , Show (Rule' evalCtx ctx)
+                  , Show (QueryItem' evalCtx ctx)
+                  ) => Show (BlockElement' evalCtx ctx)
 
-elementToBlock :: BlockElement' ctx -> Block' ctx
+elementToBlock :: BlockElement' evalCtx ctx -> Block' evalCtx ctx
 elementToBlock = \case
    BlockRule r  -> Block [r] [] [] Nothing Nothing
    BlockFact f  -> Block [] [f] [] Nothing Nothing
    BlockCheck c -> Block [] [] [c] Nothing Nothing
    BlockComment -> mempty
 
-data AuthorizerElement' ctx
-  = AuthorizerPolicy (Policy' ctx)
-  | BlockElement (BlockElement' ctx)
+data AuthorizerElement' evalCtx ctx
+  = AuthorizerPolicy (Policy' evalCtx ctx)
+  | BlockElement (BlockElement' evalCtx ctx)
 
 deriving instance ( Show (Predicate' 'InFact ctx)
-                  , Show (Rule' ctx)
-                  , Show (QueryItem' ctx)
-                  ) => Show (AuthorizerElement' ctx)
+                  , Show (Rule' evalCtx ctx)
+                  , Show (QueryItem' evalCtx ctx)
+                  ) => Show (AuthorizerElement' evalCtx ctx)
 
-elementToAuthorizer :: AuthorizerElement' ctx -> Authorizer' ctx
+elementToAuthorizer :: AuthorizerElement' evalCtx ctx -> Authorizer' evalCtx ctx
 elementToAuthorizer = \case
   AuthorizerPolicy p -> Authorizer [p] mempty
   BlockElement be    -> Authorizer [] (elementToBlock be)
+
+class ToEvaluation elem where
+  toEvaluation :: [Maybe ByteString] -> elem 'Repr 'Representation -> elem 'Eval 'Representation
+  toRepresentation :: elem 'Eval 'Representation -> elem 'Repr 'Representation
+
+translateBlockIds :: [Maybe ByteString] -> RuleScope -> EvalRuleScope
+translateBlockIds ePks = \case
+  Previous        -> Previous
+  OnlyAuthority   -> OnlyAuthority
+  OnlyBlocks bPks ->
+    let keepListed (bId, Just pk') | Set.member pk' bPks = Just (bId, pk')
+        keepListed _  = Nothing
+     in OnlyBlocks $ Set.fromList $ mapMaybe keepListed $ zip [0..] ePks
+
+renderBlockIds :: EvalRuleScope -> RuleScope
+renderBlockIds = \case
+  Previous        -> Previous
+  OnlyAuthority   -> OnlyAuthority
+  OnlyBlocks pIds -> OnlyBlocks $ Set.map snd pIds
+
+instance ToEvaluation Rule' where
+  toEvaluation ePks r = r { scope = translateBlockIds ePks <$> scope r }
+  toRepresentation r  = r { scope = renderBlockIds <$> scope r }
+
+instance ToEvaluation QueryItem' where
+  toEvaluation ePks qi = qi{ qScope = translateBlockIds ePks <$> qScope qi}
+  toRepresentation qi  = qi { qScope = renderBlockIds <$> qScope qi}
+
+instance ToEvaluation Block' where
+  toEvaluation ePks b = b
+    { bScope = translateBlockIds ePks <$> bScope b
+    , bRules = toEvaluation ePks <$> bRules b
+    , bChecks = checkToEvaluation ePks <$> bChecks b
+    }
+  toRepresentation b  = b
+    { bScope = renderBlockIds <$> bScope b
+    , bRules = toRepresentation <$> bRules b
+    , bChecks = fmap toRepresentation <$> bChecks b
+    }
+
+instance ToEvaluation Authorizer' where
+  toEvaluation ePks a = a
+    { vBlock = toEvaluation ePks (vBlock a)
+    , vPolicies = policyToEvaluation ePks <$> vPolicies a
+    }
+  toRepresentation a = a
+    { vBlock = toRepresentation (vBlock a)
+    , vPolicies = fmap (fmap toRepresentation) <$> vPolicies a
+    }
+
+checkToEvaluation :: [Maybe ByteString] -> Check -> EvalCheck
+checkToEvaluation = fmap . toEvaluation
+
+policyToEvaluation :: [Maybe ByteString] -> Policy -> EvalPolicy
+policyToEvaluation ePks = fmap (fmap (toEvaluation ePks))

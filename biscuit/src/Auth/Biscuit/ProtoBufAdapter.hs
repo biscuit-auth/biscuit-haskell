@@ -180,7 +180,8 @@ checkToPb s items =
                           }
    in PB.CheckV2 { queries = PB.putField $ toQuery <$> items }
 
-pbToPredicate :: Symbols -> PB.PredicateV2 -> Either String (Predicate' 'InPredicate 'RegularString)
+
+pbToPredicate :: Symbols -> PB.PredicateV2 -> Either String (Predicate' 'InPredicate 'Representation)
 pbToPredicate s pbPredicate = do
   let pbName  = PB.getField $ PB.name  pbPredicate
       pbTerms = PB.getField $ PB.terms pbPredicate
@@ -242,7 +243,7 @@ valueToPb s = \case
   Variable v  -> absurd v
   Antiquote v -> absurd v
 
-pbToSetValue :: Symbols -> PB.TermV2 -> Either String (Term' 'WithinSet 'InFact 'RegularString)
+pbToSetValue :: Symbols -> PB.TermV2 -> Either String (Term' 'WithinSet 'InFact 'Representation)
 pbToSetValue s = \case
   PB.TermInteger  f -> pure $ LInteger $ fromIntegral $ PB.getField f
   PB.TermString   f ->        LString  <$> getSymbol s (SymbolRef $ PB.getField f)
@@ -252,7 +253,7 @@ pbToSetValue s = \case
   PB.TermVariable _ -> Left "Variables can't appear in facts or sets"
   PB.TermTermSet  _ -> Left "Sets can't be nested"
 
-setValueToPb :: ReverseSymbols -> Term' 'WithinSet 'InFact 'RegularString -> PB.TermV2
+setValueToPb :: ReverseSymbols -> Term' 'WithinSet 'InFact 'Representation -> PB.TermV2
 setValueToPb s = \case
   LInteger v  -> PB.TermInteger $ PB.putField $ fromIntegral v
   LString  v  -> PB.TermString  $ PB.putField $ getSymbolRef $ getSymbolCode s v

@@ -254,7 +254,7 @@ addSignedBlock eSk block b@Biscuit{..} = do
       Open p = proof
   (signedBlock, nextSk) <- signExternalBlock p eSk lastPublicKey blockSerialized
   pure $ b { blocks = blocks <> [toParsedSignedBlock block signedBlock]
-           , symbols = symbols <> blockSymbols
+           , symbols = addFromBlock symbols blockSymbols
            , proof = Open nextSk
            }
 
