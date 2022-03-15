@@ -280,26 +280,40 @@ ruleHeadParser = do
   pure Predicate{name,terms}
 
 ruleBodyParser :: HasParsers 'InPredicate ctx
-               => Parser ([Predicate' 'InPredicate ctx], [Expression' ctx])
+               => Parser ([Predicate' 'InPredicate ctx], [Expression' ctx], Maybe RuleScope)
 ruleBodyParser = do
   let predicateOrExprParser =
             Right <$> expressionParser
         <|> Left <$> predicateParser
   elems <- sepBy1 (skipSpace *> predicateOrExprParser)
                   (skipSpace *> char ',')
-  pure $ partitionEithers elems
+  scope <- optional ruleScopeParser
+  let (predicates, expressions) = partitionEithers elems
+  pure (predicates, expressions, scope)
+
+ruleScopeParser :: Parser RuleScope
+ruleScopeParser = do
+  skipSpace
+  void $ string "@"
+  skipSpace
+  choice [ OnlyAuthority <$ string "authority"
+         , Previous      <$ string "previous"
+         , OnlyBlocks . Set.fromList <$> sepBy1 (skipSpace *> decimal)
+                                                (skipSpace *> char ',')
+         ]
+         -- todo handle public keys instead of block ids
 
 ruleParser :: HasParsers 'InPredicate ctx => Parser (Rule' ctx)
 ruleParser = do
   rhead <- ruleHeadParser
   skipSpace
   void $ string "<-"
-  (body, expressions) <- ruleBodyParser
-  pure Rule{rhead, body, expressions, scope = Nothing} -- todo parse scope
+  (body, expressions, scope) <- ruleBodyParser
+  pure Rule{rhead, body, expressions, scope }
 
 queryParser :: HasParsers 'InPredicate ctx => Parser (Query' ctx)
 queryParser =
-  let mkQueryItem (qBody, qExpressions) = QueryItem { qBody, qExpressions, qScope = Nothing } -- todo parse scope
+  let mkQueryItem (qBody, qExpressions, qScope) = QueryItem { qBody, qExpressions, qScope }
    in fmap mkQueryItem <$> sepBy1 ruleBodyParser (skipSpace *> asciiCI "or" <* satisfy isSpace)
 
 checkParser :: HasParsers 'InPredicate ctx => Parser (Check' ctx)
@@ -335,8 +349,24 @@ authorizerParser :: ( HasParsers 'InPredicate ctx
                   )
                => Parser (Authorizer' ctx)
 authorizerParser = do
+  bScope <- optional blockScopeParser
   elems <- many' (skipSpace *> authorizerElementParser)
-  pure $ foldMap elementToAuthorizer elems
+  let addScope a = a { vBlock = (vBlock a) { bScope = bScope } }
+  pure $ addScope $ foldMap elementToAuthorizer elems
+
+blockScopeParser :: Parser RuleScope
+blockScopeParser = do
+  skipSpace
+  void $ string "trusting "
+  skipSpace
+  scope <- choice [ OnlyAuthority <$ string "authority"
+                  , Previous      <$ string "previous"
+                  , OnlyBlocks . Set.fromList <$> sepBy1 (skipSpace *> decimal)
+                                                         (skipSpace *> char ',')
+                  ]
+  skipSpace
+  void $ char ';'
+  pure scope
 
 blockParser :: ( HasParsers 'InPredicate ctx
                , HasParsers 'InFact ctx
@@ -344,8 +374,9 @@ blockParser :: ( HasParsers 'InPredicate ctx
                )
             => Parser (Block' ctx)
 blockParser = do
+  bScope <- optional blockScopeParser
   elems <- many' (skipSpace *> blockElementParser)
-  pure $ foldMap elementToBlock elems
+  pure $ (foldMap elementToBlock elems) { bScope = bScope }
 
 policyParser :: HasParsers 'InPredicate ctx => Parser (Policy' ctx)
 policyParser = do

@@ -10,10 +10,10 @@ import           Test.Tasty
 import           Test.Tasty.HUnit
 
 import           Auth.Biscuit.Datalog.AST
-import           Auth.Biscuit.Datalog.Parser (authorizerParser, checkParser,
-                                              expressionParser, policyParser,
-                                              predicateParser, ruleParser,
-                                              termParser)
+import           Auth.Biscuit.Datalog.Parser (authorizerParser, blockParser,
+                                              checkParser, expressionParser,
+                                              policyParser, predicateParser,
+                                              ruleParser, termParser)
 
 parseTerm :: Text -> Either String Term
 parseTerm = parseOnly termParser
@@ -39,9 +39,13 @@ parseAuthorizer = parseOnly authorizerParser
 parsePolicy :: Text -> Either String Policy
 parsePolicy = parseOnly policyParser
 
+parseBlock :: Text -> Either String Block
+parseBlock = parseOnly blockParser
+
 specs :: TestTree
 specs = testGroup "datalog parser"
-  [ factWithDate
+  [
+    factWithDate
   , simpleFact
   , oneLetterFact
   , simpleRule
@@ -51,9 +55,11 @@ specs = testGroup "datalog parser"
   , constraints
   , constrainedRule
   , constrainedRuleOrdering
+  , ruleWithScopeParsing
   , checkParsing
   , policyParsing
   , authorizerParsing
+  , blockParsing
   ]
 
 termsGroup :: TestTree
@@ -285,6 +291,18 @@ operatorPrecedences = testGroup "mixed-precedence operators"
               )
   ]
 
+ruleWithScopeParsing :: TestTree
+ruleWithScopeParsing = testCase "Parse constained rule with scope annotation" $
+  parseRule "valid_date(\"file1\") <- time($0), resource(\"file1\"), $0 <= 2019-12-04T09:46:41+00:00 @ previous" @?=
+    Right (Rule (Predicate "valid_date" [LString "file1"])
+                [ Predicate "time" [Variable "0"]
+                , Predicate "resource" [LString "file1"]
+                ]
+                [ EBinary LessOrEqual
+                    (EValue $ Variable "0")
+                    (EValue $ LDate $ read "2019-12-04 09:46:41 UTC")
+                ] (Just Previous))
+
 checkParsing :: TestTree
 checkParsing = testGroup "check blocks"
   [ testCase "Simple check" $
@@ -301,6 +319,18 @@ checkParsing = testGroup "check blocks"
             , QueryItem [Predicate "other" [Variable "var"]]
                         [EBinary Equal (EValue (Variable "var")) (EValue (LInteger 2))]
                         Nothing
+            ]
+  , testCase "Multiple groups, scoped" $
+      parseCheck
+        "check if fact($var), $var == true @ previous or \
+        \other($var), $var == 2 @ authority" @?=
+          Right
+            [ QueryItem [Predicate "fact" [Variable "var"]]
+                        [EBinary Equal (EValue (Variable "var")) (EValue (LBool True))]
+                        (Just Previous)
+            , QueryItem [Predicate "other" [Variable "var"]]
+                        [EBinary Equal (EValue (Variable "var")) (EValue (LInteger 2))]
+                        (Just OnlyAuthority)
             ]
   ]
 
@@ -355,6 +385,20 @@ policyParsing = testGroup "policy blocks"
                           Nothing
               ]
             )
+  , testCase "Allow with multiple groups, scoped" $
+      parsePolicy
+        "allow if fact($var), $var == true @ previous or \
+        \other($var), $var == 2 @0 ,2, 3" @?=
+          Right
+            ( Allow
+            , [ QueryItem [Predicate "fact" [Variable "var"]]
+                          [EBinary Equal (EValue (Variable "var")) (EValue (LBool True))]
+                          (Just Previous)
+              , QueryItem [Predicate "other" [Variable "var"]]
+                          [EBinary Equal (EValue (Variable "var")) (EValue (LInteger 2))]
+                          (Just $ OnlyBlocks $ Set.fromList [0,2,3])
+              ]
+            )
   ]
 
 authorizerParsing :: TestTree
@@ -374,7 +418,8 @@ authorizerParsing = testGroup "Simple authorizers"
   , testCase "Complete authorizer" $ do
       let spec :: Text
           spec =
-            "// the owner has all rights\n\
+            " trusting previous;\n\
+            \// the owner has all rights\n\
             \right($blog_id, $article_id, $operation) <-\n\
             \    article($blog_id, $article_id),\n\
             \    operation($operation),\n\
@@ -442,7 +487,7 @@ authorizerParsing = testGroup "Simple authorizers"
           bFacts = []
           bChecks = []
           bContext = Nothing
-          bScope = Nothing
+          bScope = Just Previous
           vPolicies =
             [ (Allow, [QueryItem [ p "operation" [sRead]
                                  , p "article"   [vBlogId, vArticleId]
@@ -457,3 +502,66 @@ authorizerParsing = testGroup "Simple authorizers"
             ]
       parseAuthorizer spec @?= Right Authorizer{vBlock = Block{..}, ..}
   ]
+
+blockParsing :: TestTree
+blockParsing = testCase "Full block" $ do
+  let spec :: Text
+      spec =
+        " trusting 1,2,4;\n\
+        \// the owner has all rights\n\
+        \right($blog_id, $article_id, $operation) <-\n\
+        \    article($blog_id, $article_id),\n\
+        \    operation($operation),\n\
+        \    user($user_id),\n\
+        \    owner($user_id, $blog_id);\n\
+        \// premium users can access some restricted articles\n\
+        \right($blog_id, $article_id, \"read\") <-\n\
+        \  article($blog_id, $article_id),\n\
+        \  premium_readable($blog_id, $article_id),\n\
+        \  user($user_id),\n\
+        \  premium_user($user_id, $blog_id);\n\
+        \// define teams and roles\n\
+        \right($blog_id, $article_id, $operation) <-\n\
+        \  article($blog_id, $article_id),\n\
+        \  operation($operation),\n\
+        \  user($user_id),\n\
+        \  member($user_id, $team_id),\n\
+        \  team_role($team_id, $blog_id, \"contributor\"),\n\
+        \  [\"read\", \"write\"].contains($operation);\n\
+        \ "
+      p = Predicate
+      sRead = LString "read"
+      sWrite = LString "write"
+      sContributor = LString "contributor"
+      vBlogId = Variable "blog_id"
+      vArticleId = Variable "article_id"
+      vUserId = Variable "user_id"
+      vTeamId = Variable "team_id"
+      vOp = Variable "operation"
+      bRules =
+        [ Rule (p "right" [vBlogId, vArticleId, vOp])
+               [ p "article" [vBlogId, vArticleId]
+               , p "operation" [vOp]
+               , p "user" [vUserId]
+               , p "owner" [vUserId, vBlogId]
+               ] [] Nothing
+        , Rule (p "right" [vBlogId, vArticleId, sRead])
+               [ p "article" [vBlogId, vArticleId]
+               , p "premium_readable" [vBlogId, vArticleId]
+               , p "user" [vUserId]
+               , p "premium_user" [vUserId, vBlogId]
+               ] [] Nothing
+        , Rule (p "right" [vBlogId, vArticleId, vOp])
+               [ p "article" [vBlogId, vArticleId]
+               , p "operation" [vOp]
+               , p "user" [vUserId]
+               , p "member" [vUserId, vTeamId]
+               , p "team_role" [vTeamId, vBlogId, sContributor]
+               ] [EBinary Contains (EValue (TermSet $ Set.fromList [sRead, sWrite]))
+                                   (EValue vOp)] Nothing
+       ]
+      bFacts = []
+      bChecks = []
+      bContext = Nothing
+      bScope = Just $ OnlyBlocks $ Set.fromList [1,2,4]
+  parseBlock spec @?= Right Block{..}
