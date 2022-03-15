@@ -3,6 +3,7 @@
 {-# LANGUAGE NamedFieldPuns    #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards   #-}
+{-# LANGUAGE TypeApplications  #-}
 {-|
   Module      : Auth.Biscuit.Utils
   Copyright   : © Clément Delafargue, 2021
@@ -24,12 +25,14 @@ module Auth.Biscuit.ProtoBufAdapter
 import           Control.Monad            (when)
 import           Crypto.PubKey.Ed25519    (PublicKey)
 import           Data.Bifunctor           (first)
+import           Data.ByteArray           (convert)
 import           Data.Int                 (Int64)
 import qualified Data.Set                 as Set
 import           Data.Time                (UTCTime)
 import           Data.Time.Clock.POSIX    (posixSecondsToUTCTime,
                                            utcTimeToPOSIXSeconds)
 import           Data.Void                (absurd)
+import           GHC.Records              (getField)
 
 import qualified Auth.Biscuit.Crypto      as Crypto
 import           Auth.Biscuit.Datalog.AST
@@ -108,7 +111,7 @@ pbToBlock s PB.Block{..} = do
   bFacts <- traverse (pbToFact s) $ PB.getField facts_v2
   bRules <- traverse (pbToRule s) $ PB.getField rules_v2
   bChecks <- traverse (pbToCheck s) $ PB.getField checks_v2
-  let bScope = Nothing -- todo parse from protobuf
+  bScope <- traverse pbToScope $ PB.getField scope
   when (bVersion /= Just 3) $ Left $ "Unsupported biscuit version: " <> maybe "0" show bVersion <> ". Only version 3 is supported"
   pure Block{ .. }
 
@@ -125,6 +128,7 @@ blockToPb existingSymbols b@Block{..} =
       facts_v2  = PB.putField $ factToPb s <$> bFacts
       rules_v2  = PB.putField $ ruleToPb s <$> bRules
       checks_v2 = PB.putField $ checkToPb s <$> bChecks
+      scope     = PB.putField $ scopeToPb <$> bScope
    in (bSymbols, PB.Block {..})
 
 pbToFact :: Symbols -> PB.FactV2 -> Either String Fact
@@ -149,10 +153,11 @@ pbToRule s pbRule = do
   let pbHead = PB.getField $ PB.head pbRule
       pbBody = PB.getField $ PB.body pbRule
       pbExpressions = PB.getField $ PB.expressions pbRule
+      pbScope = PB.getField $ getField @"scope" pbRule
   rhead       <- pbToPredicate s pbHead
   body        <- traverse (pbToPredicate s) pbBody
   expressions <- traverse (pbToExpression s) pbExpressions
-  let scope = Nothing -- todo read it from PB
+  scope       <- traverse pbToScope pbScope
   pure Rule {..}
 
 ruleToPb :: ReverseSymbols -> Rule -> PB.RuleV2
@@ -161,6 +166,7 @@ ruleToPb s Rule{..} =
     { head = PB.putField $ predicateToPb s rhead
     , body = PB.putField $ predicateToPb s <$> body
     , expressions = PB.putField $ expressionToPb s <$> expressions
+    , scope = PB.putField $ scopeToPb <$> scope
     }
 
 pbToCheck :: Symbols -> PB.CheckV2 -> Either String Check
@@ -180,6 +186,24 @@ checkToPb s items =
                           }
    in PB.CheckV2 { queries = PB.putField $ toQuery <$> items }
 
+pbToScope :: PB.Scope -> Either String RuleScope
+pbToScope = \case
+  PB.ScType e       -> case PB.getField e of
+    PB.ScopeAuthority -> Right OnlyAuthority
+    PB.ScopePrevious  -> Right Previous
+  PB.ScBlocks bs ->
+    OnlyBlocks . Set.fromList . fmap convert <$> traverse pbToPublicKey (PB.getField bs)
+
+scopeToPb :: RuleScope -> PB.Scope
+scopeToPb = \case
+  OnlyAuthority  -> PB.ScType $ PB.putField PB.ScopeAuthority
+  Previous       -> PB.ScType $ PB.putField PB.ScopePrevious
+  OnlyBlocks pks ->
+    let mkPkMsg bytes = PB.PublicKey
+          { algorithm = PB.putField PB.Ed25519
+          , key = PB.putField bytes
+          }
+     in PB.ScBlocks $ PB.putField $ mkPkMsg <$> Set.toList pks
 
 pbToPredicate :: Symbols -> PB.PredicateV2 -> Either String (Predicate' 'InPredicate 'Representation)
 pbToPredicate s pbPredicate = do

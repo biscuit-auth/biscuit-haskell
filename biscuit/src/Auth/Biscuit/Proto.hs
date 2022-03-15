@@ -19,6 +19,8 @@ module Auth.Biscuit.Proto
   , ExternalSig (..)
   , Proof (..)
   , Block (..)
+  , Scope (..)
+  , ScopeType (..)
   , FactV2 (..)
   , RuleV2 (..)
   , CheckV2 (..)
@@ -95,7 +97,19 @@ data Block = Block {
   , facts_v2  :: Repeated 4 (Message FactV2)
   , rules_v2  :: Repeated 5 (Message RuleV2)
   , checks_v2 :: Repeated 6 (Message CheckV2)
-  } deriving (Generic, Show)
+  , scope     :: Optional 7 (Message Scope)
+  } deriving stock (Generic, Show)
+    deriving anyclass (Decode, Encode)
+
+data ScopeType =
+    ScopeAuthority
+  | ScopePrevious
+  deriving stock (Show, Enum, Bounded)
+
+data Scope =
+    ScType   (Required 1 (Enumeration ScopeType))
+  | ScBlocks (Repeated 2 (Message PublicKey))
+    deriving stock (Generic, Show)
     deriving anyclass (Decode, Encode)
 
 newtype FactV2 = FactV2
@@ -107,6 +121,7 @@ data RuleV2 = RuleV2
   { head        :: Required 1 (Message PredicateV2)
   , body        :: Repeated 2 (Message PredicateV2)
   , expressions :: Repeated 3 (Message ExpressionV2)
+  , scope       :: Optional 4 (Message Scope)
   } deriving stock (Generic, Show)
     deriving anyclass (Decode, Encode)
 

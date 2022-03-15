@@ -455,7 +455,11 @@ getRevocationIds Biscuit{authority, blocks} =
 -- | Generic version of 'authorizeBiscuitWithLimits' which takes custom 'Limits'.
 authorizeBiscuitWithLimits :: Limits -> Biscuit proof Verified -> Authorizer -> IO (Either ExecutionError (AuthorizedBiscuit proof))
 authorizeBiscuitWithLimits l biscuit@Biscuit{..} authorizer =
-  let toBlockWithRevocationId ((_, block), sig, _) = (block, convert sig)
+  let toBlockWithRevocationId ((_, block), sig, _, eSig) = (block, convert sig, snd <$> eSig)
+      -- the authority block can't be externally signed. If it carries a signature, it won't be
+      -- verified. So we need to make sure there is none, to avoid having facts trusted without
+      -- a proper signature check
+      dropExternalPk (b, rid, _) = (b, rid, Nothing)
       withBiscuit authorizationSuccess =
         AuthorizedBiscuit
           { authorizedBiscuit = biscuit
@@ -463,7 +467,7 @@ authorizeBiscuitWithLimits l biscuit@Biscuit{..} authorizer =
           }
    in fmap withBiscuit <$>
         runAuthorizerWithLimits l
-          (toBlockWithRevocationId authority)
+          (dropExternalPk $ toBlockWithRevocationId authority)
           (toBlockWithRevocationId <$> blocks)
           authorizer
 

@@ -41,6 +41,7 @@ import           Data.Text                     (Text)
 import           Numeric.Natural               (Natural)
 import           Validation                    (Validation (..))
 
+import           Auth.Biscuit.Crypto           (PublicKey, convert)
 import           Auth.Biscuit.Datalog.AST
 import           Auth.Biscuit.Datalog.Executor (Bindings, ExecutionError (..),
                                                 FactGroup (..), Limits (..),
@@ -56,7 +57,7 @@ import           Auth.Biscuit.Datalog.Executor (Bindings, ExecutionError (..),
 import           Auth.Biscuit.Datalog.Parser   (fact)
 import           Auth.Biscuit.Timer            (timer)
 
-type BlockWithRevocationId = (Block, ByteString)
+type BlockWithRevocationId = (Block, ByteString, Maybe PublicKey)
 
 -- | A subset of 'ExecutionError' that can only happen during fact generation
 data PureExecError = Facts | Iterations | BadRule
@@ -117,7 +118,8 @@ mkRevocationIdFacts :: BlockWithRevocationId -> [BlockWithRevocationId]
                     -> Set Fact
 mkRevocationIdFacts authority blocks =
   let allIds :: [(Int, ByteString)]
-      allIds = zip [0..] $ snd <$> authority : blocks
+      allIds = zip [0..] $ snd' <$> authority : blocks
+      snd' (_,b,_) = b
       mkFact (index, rid) = [fact|revocation_id(${index}, ${rid})|]
    in Set.fromList $ mkFact <$> allIds
 
@@ -133,10 +135,12 @@ data ComputeState
 
 mkInitState :: Limits -> BlockWithRevocationId -> [BlockWithRevocationId] -> Authorizer -> ComputeState
 mkInitState limits authority blocks authorizer =
-  let externalKeys = [] -- todo
+  let fst' (a,_,_) = a
+      trd' (_,_,c) = c
+      externalKeys = Nothing : (fmap convert . trd' <$> blocks)
       revocationWorld = (mempty, FactGroup $ Map.singleton (Set.singleton 0) $ mkRevocationIdFacts authority blocks)
-      firstBlock = fst authority <> vBlock authorizer
-      otherBlocks = fst <$> blocks
+      firstBlock = fst' authority <> vBlock authorizer
+      otherBlocks = fst' <$> blocks
       allBlocks = firstBlock : otherBlocks
       (sRules, sFacts) = revocationWorld <> fold (zipWith collectWorld [0..] (toEvaluation externalKeys <$> allBlocks))
    in ComputeState
@@ -152,7 +156,9 @@ runAuthorizerNoTimeout :: Limits
                        -> Authorizer
                        -> Either ExecutionError AuthorizationSuccess
 runAuthorizerNoTimeout limits authority blocks authorizer = do
-  let externalKeys = [] -- todo
+  let fst' (a,_,_) = a
+      trd' (_,_,c) = c
+      externalKeys = Nothing : (fmap convert . trd' <$> blocks)
       (<$$$>) = fmap . fmap . fmap
       initState = mkInitState limits authority blocks authorizer
       toExecutionError = \case
@@ -160,7 +166,7 @@ runAuthorizerNoTimeout limits authority blocks authorizer = do
         Iterations -> TooManyIterations
         BadRule    -> InvalidRule
   allFacts <- first toExecutionError $ computeAllFacts initState
-  let checks = zip [0..] $ bChecks <$> ((fst authority <> vBlock authorizer) : (fst <$> blocks))
+  let checks = zip [0..] $ bChecks <$> ((fst' authority <> vBlock authorizer) : (fst' <$> blocks))
       policies = vPolicies authorizer
       checkResults = checkChecks limits allFacts (checkToEvaluation externalKeys <$$$> checks)
       policyResults = checkPolicies limits allFacts (policyToEvaluation externalKeys <$> policies)
@@ -194,7 +200,7 @@ runStep = do
   return addedFactsCount
 
 -- | Check if every variable from the head is present in the body
-checkRuleHead :: Rule -> Bool
+checkRuleHead :: EvalRule -> Bool
 checkRuleHead Rule{rhead, body} =
   let headVars = extractVariables [rhead]
       bodyVars = extractVariables body
