@@ -98,14 +98,14 @@ instance (FromJSON e, FromJSON a) => FromJSON (RustResult e a) where
 data ValidationR
   = ValidationR
   { world           :: Maybe WorldDesc
-  , result          :: RustResult [Text] Int
+  , result          :: RustResult Value Int
   , authorizer_code :: Authorizer
   } deriving stock (Eq, Show, Generic)
     deriving anyclass FromJSON
 
 
 checkResult :: Show a
-            => RustResult [Text] Int
+            => RustResult Value Int
             -> Either a b
             -> Assertion
 checkResult r e = case (r, e) of
@@ -191,16 +191,16 @@ processFailedValidation step e (name, ValidationR{result}) = do
   step $ "Checking validation " <> name
   checkResult result (Left e)
 
-execErrorToRust :: Either ExecutionError a -> RustResult [Text] Int
+execErrorToRust :: Either ExecutionError a -> RustResult Value Int
 execErrorToRust (Right _) = Ok 0
 execErrorToRust (Left e) = Err $ case e of
-  Timeout                            -> ["todo"]
-  TooManyFacts                       -> ["todo"]
-  TooManyIterations                  -> ["todo"]
-  FactsInBlocks                      -> ["todo"]
-  ResultError (NoPoliciesMatched cs) -> ["todo"]
-  ResultError (FailedChecks cs)      -> ["Block(FailedBlockCheck { block_id: 1, check_id: 0, rule: \"check if resource($0), operation(#read), right($0, #read)\" })"]
-  ResultError (DenyRuleMatched cs q) -> ["todo"]
+  Timeout                            -> toJSON ["todo" :: Text ]
+  TooManyFacts                       -> toJSON ["todo" :: Text ]
+  TooManyIterations                  -> toJSON ["todo" :: Text ]
+  FactsInBlocks                      -> toJSON ["todo" :: Text ]
+  ResultError (NoPoliciesMatched cs) -> toJSON ["todo" :: Text ]
+  ResultError (FailedChecks cs)      -> toJSON ["Block(FailedBlockCheck { block_id: 1, check_id: 0, rule: \"check if resource($0), operation(#read), right($0, #read)\" })" :: Text]
+  ResultError (DenyRuleMatched cs q) -> toJSON ["todo" :: Text ]
 
 processValidation :: (String -> IO ())
                   -> Biscuit OpenOrSealed Verified
