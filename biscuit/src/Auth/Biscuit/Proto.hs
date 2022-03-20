@@ -113,7 +113,7 @@ data PredicateV2 = PredicateV2
     deriving anyclass (Decode, Encode)
 
 data TermV2 =
-    TermVariable (Required 1 (Value Int32))
+    TermVariable (Required 1 (Value Int64))
   | TermInteger  (Required 2 (Value Int64))
   | TermString   (Required 3 (Value Int64))
   | TermDate     (Required 4 (Value Int64))

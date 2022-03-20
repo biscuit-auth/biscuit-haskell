@@ -24,6 +24,7 @@ source-repository head
 library
   exposed-modules:
       Auth.Biscuit
+      Auth.Biscuit.Symbols
       Auth.Biscuit.Utils
       Auth.Biscuit.Crypto
       Auth.Biscuit.Datalog.AST
