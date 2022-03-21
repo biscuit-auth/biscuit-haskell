@@ -75,12 +75,11 @@ import           Auth.Biscuit.Datalog.Executor       (ExecutionError, Limits,
 import           Auth.Biscuit.Datalog.ScopedExecutor (AuthorizationSuccess,
                                                       runAuthorizerWithLimits)
 import qualified Auth.Biscuit.Proto                  as PB
-import           Auth.Biscuit.ProtoBufAdapter        (Symbols, blockToPb,
-                                                      commonSymbols,
-                                                      extractSymbols, pbToBlock,
-                                                      pbToProof,
+import           Auth.Biscuit.ProtoBufAdapter        (blockToPb, extractSymbols,
+                                                      pbToBlock, pbToProof,
                                                       pbToSignedBlock,
                                                       signedBlockToPb)
+import           Auth.Biscuit.Symbols
 
 -- | Protobuf serialization does not have a guaranteed deterministic behaviour,
 -- so we need to keep the initial serialized payload around in order to compute
@@ -215,12 +214,12 @@ mkBiscuit = mkBiscuitWith Nothing
 -- further attenuation.
 mkBiscuitWith :: Maybe Int -> SecretKey -> Block -> IO (Biscuit Open Verified)
 mkBiscuitWith rootKeyId sk authority = do
-  let (authoritySymbols, authoritySerialized) = PB.encodeBlock <$> blockToPb commonSymbols authority
+  let (authoritySymbols, authoritySerialized) = PB.encodeBlock <$> blockToPb newSymbolTable authority
   (signedBlock, nextSk) <- signBlock sk authoritySerialized
   pure Biscuit { rootKeyId
                , authority = toParsedSignedBlock authority signedBlock
                , blocks = []
-               , symbols = commonSymbols <> authoritySymbols
+               , symbols = addFromBlock newSymbolTable authoritySymbols
                , proof = Open nextSk
                , proofCheck = Verified $ toPublic sk
                }
@@ -235,7 +234,7 @@ addBlock block b@Biscuit{..} = do
       Open p = proof
   (signedBlock, nextSk) <- signBlock p blockSerialized
   pure $ b { blocks = blocks <> [toParsedSignedBlock block signedBlock]
-           , symbols = symbols <> blockSymbols
+           , symbols = addFromBlock symbols blockSymbols
            , proof = Open nextSk
            }
 
@@ -329,7 +328,7 @@ parseBlocks BiscuitWrapper{..} = do
   rawAuthority <- toRawSignedBlock wAuthority
   rawBlocks    <- traverse toRawSignedBlock wBlocks
 
-  let symbols = extractSymbols commonSymbols $ (\((_, p), _, _) -> p) <$> rawAuthority : rawBlocks
+  let symbols = extractSymbols $ (\((_, p), _, _) -> p) <$> rawAuthority : rawBlocks
 
   authority <- rawSignedBlockToParsedSignedBlock symbols rawAuthority
   blocks    <- traverse (rawSignedBlockToParsedSignedBlock symbols) rawBlocks
