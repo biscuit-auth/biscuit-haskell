@@ -21,8 +21,6 @@ module Auth.Biscuit.ProtoBufAdapter
   , pbToProof
   ) where
 
-import           Debug.Trace
-
 import           Control.Monad            (when)
 import           Crypto.PubKey.Ed25519    (PublicKey)
 import           Data.Bifunctor           (first)
@@ -103,7 +101,7 @@ pbToBlock s PB.Block{..} = do
 blockToPb :: Symbols -> Block -> (BlockSymbols, PB.Block)
 blockToPb existingSymbols b@Block{..} =
   let
-      bSymbols = traceShowId $ buildSymbolTable existingSymbols b
+      bSymbols = buildSymbolTable existingSymbols b
       s = reverseSymbols $ addFromBlock existingSymbols bSymbols
       symbols   = PB.putField $ getSymbolList bSymbols
       context   = PB.putField bContext
