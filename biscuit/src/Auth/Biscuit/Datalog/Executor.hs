@@ -38,7 +38,7 @@ import qualified Data.Map.Strict          as Map
 import           Data.Maybe               (isJust, mapMaybe)
 import           Data.Set                 (Set)
 import qualified Data.Set                 as Set
-import           Data.Text                (Text)
+import           Data.Text                (Text, isInfixOf)
 import qualified Data.Text                as Text
 import           Data.Void                (absurd)
 import qualified Text.Regex.TDFA          as Regex
@@ -317,7 +317,8 @@ evalBinary _ Contains (TermSet t) (TermSet t') = pure $ LBool (Set.isSubsetOf t'
 evalBinary _ Contains (TermSet t) t' = case toSetTerm t' of
     Just t'' -> pure $ LBool (Set.member t'' t)
     Nothing  -> Left "Sets cannot contain nested sets nor variables"
-evalBinary _ Contains _ _ = Left "Only sets support `.contains()`"
+evalBinary _ Contains (LString t) (LString t') = pure $ LBool (t' `isInfixOf` t)
+evalBinary _ Contains _ _ = Left "Only sets and strings support `.contains()`"
 evalBinary _ Intersection (TermSet t) (TermSet t') = pure $ TermSet (Set.intersection t t')
 evalBinary _ Intersection _ _ = Left "Only sets support `.intersection()`"
 evalBinary _ Union (TermSet t) (TermSet t') = pure $ TermSet (Set.union t t')
