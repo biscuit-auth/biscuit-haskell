@@ -284,11 +284,12 @@ ruleParser = do
   skipSpace
   void $ string "<-"
   (body, expressions) <- ruleBodyParser
-  pure Rule{rhead, body, expressions}
+  pure Rule{rhead, body, expressions, scope = Nothing} -- todo parse scope
 
 queryParser :: HasParsers 'InPredicate ctx => Parser (Query' ctx)
 queryParser =
-  fmap (uncurry QueryItem) <$> sepBy1 ruleBodyParser (skipSpace *> asciiCI "or" <* satisfy isSpace)
+  let mkQueryItem (qBody, qExpressions) = QueryItem { qBody, qExpressions, qScope = Nothing } -- todo parse scope
+   in fmap mkQueryItem <$> sepBy1 ruleBodyParser (skipSpace *> asciiCI "or" <* satisfy isSpace)
 
 checkParser :: HasParsers 'InPredicate ctx => Parser (Check' ctx)
 checkParser = string "check if" *> queryParser

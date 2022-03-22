@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedLists   #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes       #-}
 module Spec.Executor (specs) where
@@ -6,6 +7,7 @@ import           Data.Attoparsec.Text                (parseOnly)
 import           Data.Map.Strict                     as Map
 import           Data.Set                            as Set
 import           Data.Text                           (Text, unpack)
+import           Numeric.Natural                     (Natural)
 import           Test.Tasty
 import           Test.Tasty.HUnit
 
@@ -21,6 +23,8 @@ import           Auth.Biscuit.Datalog.ScopedExecutor hiding (limits)
 specs :: TestTree
 specs = testGroup "Datalog evaluation"
   [ grandparent
+  , ancestor
+  , scopedRules
   , exprEval
   , exprEvalError
   , rulesWithConstraints
@@ -28,23 +32,48 @@ specs = testGroup "Datalog evaluation"
   , limits
   ]
 
+authGroup :: Set Fact -> FactGroup
+authGroup = FactGroup . Map.singleton (Set.singleton 0)
+
+authRulesGroup :: Set Rule -> Map Natural (Set Rule)
+authRulesGroup = Map.singleton 0
+
 grandparent :: TestTree
 grandparent = testCase "Basic grandparent rule" $
-  let world = World
-        { rules = Set.fromList
-                   [ [rule|grandparent($a,$b) <- parent($a,$c), parent($c,$b)|]
-                   ]
-        , facts = Set.fromList
-                   [ [fact|parent("alice", "bob")|]
-                   , [fact|parent("bob", "jean-pierre")|]
-                   , [fact|parent("alice", "toto")|]
-                   ]
-        }
-   in runFactGeneration defaultLimits world @?= Right (Set.fromList
+  let rules = authRulesGroup $ Set.fromList
+                [ [rule|grandparent($a,$b) <- parent($a,$c), parent($c,$b)|]
+                ]
+      facts = authGroup $ Set.fromList
+                [ [fact|parent("alice", "bob")|]
+                , [fact|parent("bob", "jean-pierre")|]
+                , [fact|parent("alice", "toto")|]
+                ]
+   in runFactGeneration defaultLimits rules facts @?= Right (authGroup $ Set.fromList
         [ [fact|parent("alice", "bob")|]
         , [fact|parent("bob", "jean-pierre")|]
         , [fact|parent("alice", "toto")|]
         , [fact|grandparent("alice", "jean-pierre")|]
+        ])
+
+ancestor :: TestTree
+ancestor = testCase "Ancestor rule" $
+  let rules = authRulesGroup $ Set.fromList
+                [ [rule|ancestor($a,$b) <- parent($a,$c), ancestor($c,$b)|]
+                , [rule|ancestor($a,$b) <- parent($a,$b)|]
+                ]
+      facts = authGroup $ Set.fromList
+                [ [fact|parent("alice", "bob")|]
+                , [fact|parent("bob", "jean-pierre")|]
+                , [fact|parent("alice", "toto")|]
+                ]
+   in runFactGeneration defaultLimits rules facts @?= Right (authGroup $ Set.fromList
+        [ [fact|parent("alice", "bob")|]
+        , [fact|parent("bob", "jean-pierre")|]
+        , [fact|parent("alice", "toto")|]
+        , [fact|ancestor("alice", "bob")|]
+        , [fact|ancestor("bob", "jean-pierre")|]
+        , [fact|ancestor("alice", "toto")|]
+        , [fact|ancestor("alice", "jean-pierre")|]
         ])
 
 expr :: Text -> Expression
@@ -150,18 +179,16 @@ exprEvalError = do
 
 rulesWithConstraints :: TestTree
 rulesWithConstraints = testCase "Rule with constraints" $
-  let world = World
-        { rules = Set.fromList
+  let rules = authRulesGroup $ Set.fromList
                    [ [rule|valid_date("file1") <- time($0), resource("file1"), $0 <= 2019-12-04T09:46:41+00:00|]
                    , [rule|valid_date("file2") <- time($0), resource("file2"), $0 <= 2010-12-04T09:46:41+00:00|]
                    ]
-        , facts = Set.fromList
+      facts = authGroup $ Set.fromList
                    [ [fact|time(2019-12-04T01:00:00Z)|]
                    , [fact|resource("file1")|]
                    , [fact|resource("file2")|]
                    ]
-        }
-   in runFactGeneration defaultLimits world @?= Right (Set.fromList
+   in runFactGeneration defaultLimits rules facts @?= Right (authGroup $ Set.fromList
         [ [fact|time(2019-12-04T01:00:00Z)|]
         , [fact|resource("file1")|]
         , [fact|resource("file2")|]
@@ -170,37 +197,62 @@ rulesWithConstraints = testCase "Rule with constraints" $
 
 ruleHeadWithNoVars :: TestTree
 ruleHeadWithNoVars = testCase "Rule head with no variables" $
-  let world = World
-        { rules = Set.fromList
+  let rules = authRulesGroup $ Set.fromList
                    [ [rule|operation("authority", "read") <- test($yolo, "nothing")|]
                    ]
-        , facts = Set.fromList
+      facts = authGroup $ Set.fromList
                    [ [fact|test("whatever", "notNothing")|]
                    ]
-        }
-   in runFactGeneration defaultLimits world @?= Right (Set.fromList
+   in runFactGeneration defaultLimits rules facts @?= Right (authGroup $ Set.fromList
         [ [fact|test("whatever", "notNothing")|]
         ])
 
 limits :: TestTree
 limits =
-  let world = World
-        { rules = Set.fromList
+  let rules = authRulesGroup $ Set.fromList
                    [ [rule|ancestor($a,$b) <- parent($a,$c), ancestor($c,$b)|]
                    , [rule|ancestor($a,$b) <- parent($a,$b)|]
                    ]
-        , facts = Set.fromList
+      facts = authGroup $ Set.fromList
                    [ [fact|parent("alice", "bob")|]
                    , [fact|parent("bob", "jean-pierre")|]
                    , [fact|parent("bob", "marielle")|]
                    , [fact|parent("alice", "toto")|]
                    ]
-        }
       factLimits = defaultLimits { maxFacts = 10 }
       iterLimits = defaultLimits { maxIterations = 2 }
    in testGroup "Facts generation limits"
         [ testCase "max facts" $
-            runFactGeneration factLimits world @?= Left Facts
+            runFactGeneration factLimits rules facts @?= Left Facts
         , testCase "max iterations" $
-            runFactGeneration iterLimits world @?= Left Iterations
+            runFactGeneration iterLimits rules facts @?= Left Iterations
         ]
+
+scopedRules :: TestTree
+scopedRules = testCase "Rules and facts in different scopes, with default scoping for rules" $
+  let rules :: Map Natural (Set Rule)
+      rules = [ (0, [ [rule|ancestor($a,$b) <- parent($a,$b)|] ])
+              , (1, [ [rule|ancestor($a,$b) <- parent($a,$c), ancestor($c,$b)|] ])
+              ]
+      facts :: FactGroup
+      facts = FactGroup
+                [ ([0], [ [fact|parent("alice", "bob")|]
+                        , [fact|parent("bob", "trudy")|]
+                        ])
+                , ([1], [ [fact|parent("bob", "jean-pierre")|]
+                        ])
+                , ([2], [ [fact|parent("toto", "toto")|]
+                        ])
+                ]
+   in runFactGeneration defaultLimits rules facts @?= Right (FactGroup
+        [ ([0],   [ [fact|parent("alice", "bob")|]
+                  , [fact|ancestor("alice", "bob")|]
+                  , [fact|parent("bob", "trudy")|]
+                  , [fact|ancestor("bob", "trudy")|]
+                  ])
+        , ([1],   [ [fact|parent("bob", "jean-pierre")|]
+                  ])
+        , ([0,1], [ [fact|ancestor("alice", "trudy")|]
+                  ])
+        , ([2],   [ [fact|parent("toto", "toto")|] ])
+        ])
