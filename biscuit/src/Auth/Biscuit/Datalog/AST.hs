@@ -88,7 +88,7 @@ import           Control.Monad              ((<=<))
 import           Data.ByteString            (ByteString)
 import           Data.ByteString.Base16     as Hex
 import           Data.Foldable              (fold)
-import           Data.Maybe                 (mapMaybe, maybeToList)
+import           Data.List                  (find)
 import           Data.Set                   (Set)
 import qualified Data.Set                   as Set
 import           Data.String                (IsString)
@@ -366,7 +366,7 @@ listSymbolsInPredicate Predicate{..} =
 data QueryItem' evalCtx ctx = QueryItem
   { qBody        :: [Predicate' 'InPredicate ctx]
   , qExpressions :: [Expression' ctx]
-  , qScope       :: Maybe (RuleScope' evalCtx ctx)
+  , qScope       :: Set (RuleScope' evalCtx ctx)
   }
 
 type Query' evalCtx ctx = [QueryItem' evalCtx ctx]
@@ -428,7 +428,7 @@ type EvalRuleScope = RuleScope' 'Eval 'Representation
 data RuleScope' (evalCtx :: EvaluationContext) (ctx :: DatalogContext) =
     OnlyAuthority
   | Previous
-  | OnlyBlocks (Set (BlockIdType evalCtx ctx))
+  | BlockId (BlockIdType evalCtx ctx)
 
 deriving instance Eq (BlockIdType evalCtx ctx) => Eq (RuleScope' evalCtx ctx)
 deriving instance Ord (BlockIdType evalCtx ctx) => Ord (RuleScope' evalCtx ctx)
@@ -439,7 +439,7 @@ data Rule' evalCtx ctx = Rule
   { rhead       :: Predicate' 'InPredicate ctx
   , body        :: [Predicate' 'InPredicate ctx]
   , expressions :: [Expression' ctx]
-  , scope       :: Maybe (RuleScope' evalCtx ctx)
+  , scope       :: Set (RuleScope' evalCtx ctx)
   }
 
 deriving instance ( Eq (Predicate' 'InPredicate ctx)
@@ -466,7 +466,8 @@ renderRule :: Rule -> Text
 renderRule Rule{rhead,body,expressions,scope} =
      renderPredicate rhead <> " <- "
   <> intercalate ", " (fmap renderPredicate body <> fmap renderExpression expressions)
-  <> foldMap ((" @ " <>) . renderRuleScope) scope
+  <> if null scope then ""
+                   else " @ " <> renderRuleScope scope
 
 listSymbolsInRule :: Rule -> Set.Set Text
 listSymbolsInRule Rule{..} =
@@ -596,7 +597,7 @@ data Block' (evalCtx :: EvaluationContext) (ctx :: DatalogContext) = Block
   , bFacts   :: [Predicate' 'InFact ctx]
   , bChecks  :: [Check' evalCtx ctx]
   , bContext :: Maybe Text
-  , bScope   :: Maybe (RuleScope' evalCtx ctx)
+  , bScope   :: Set (RuleScope' evalCtx ctx)
   }
 
 deriving instance ( Eq (Predicate' 'InFact ctx)
@@ -618,7 +619,11 @@ instance Semigroup (Block' evalCtx ctx) where
                    , bFacts = bFacts b1 <> bFacts b2
                    , bChecks = bChecks b1 <> bChecks b2
                    , bContext = bContext b2 <|> bContext b1
-                   , bScope = bScope b1 <|> bScope b2
+                   -- `trusting` declarations in blocks override
+                   -- each other, they don't accumulate
+                   , bScope = if null (bScope b1)
+                              then bScope b2
+                              else bScope b1
                    }
 
 instance Monoid (Block' evalCtx ctx) where
@@ -626,22 +631,22 @@ instance Monoid (Block' evalCtx ctx) where
                  , bFacts = []
                  , bChecks = []
                  , bContext = Nothing
-                 , bScope = Nothing
+                 , bScope = Set.empty
                  }
 
-renderRuleScope :: RuleScope -> Text
+renderRuleScope :: Set RuleScope -> Text
 renderRuleScope =
-  let renderPk bs = "ed25519/hex:" <> decodeUtf8 (Hex.encode bs)
-      in \case
-        OnlyAuthority  -> "authority"
-        Previous       -> "previous"
-        OnlyBlocks pks -> intercalate ", " $ renderPk <$> Set.toList pks
+  let renderScopeElem = \case
+        OnlyAuthority -> "authority"
+        Previous      -> "previous"
+        BlockId bs    -> "ed25519/hex:" <> decodeUtf8 (Hex.encode bs)
+   in intercalate ", " . Set.toList . Set.map renderScopeElem
 
 renderBlock :: Block -> Text
 renderBlock Block{..} =
-  let renderScopeLine = (("trusting " <>) . renderRuleScope)
+  let renderScopeLine = ("trusting " <>) . renderRuleScope
    in foldMap (<> ";\n") $ fold
-         [ renderScopeLine <$> maybeToList bScope
+         [ [renderScopeLine bScope | not (null bScope)]
          , renderRule <$> bRules
          , renderFact <$> bFacts
          , renderCheck <$> bChecks
@@ -702,9 +707,9 @@ deriving instance ( Show (Predicate' 'InFact ctx)
 
 elementToBlock :: BlockElement' evalCtx ctx -> Block' evalCtx ctx
 elementToBlock = \case
-   BlockRule r  -> Block [r] [] [] Nothing Nothing
-   BlockFact f  -> Block [] [f] [] Nothing Nothing
-   BlockCheck c -> Block [] [] [c] Nothing Nothing
+   BlockRule r  -> Block [r] [] [] Nothing Set.empty
+   BlockFact f  -> Block [] [f] [] Nothing Set.empty
+   BlockCheck c -> Block [] [] [c] Nothing Set.empty
    BlockComment -> mempty
 
 data AuthorizerElement' evalCtx ctx
@@ -725,37 +730,40 @@ class ToEvaluation elem where
   toEvaluation :: [Maybe ByteString] -> elem 'Repr 'Representation -> elem 'Eval 'Representation
   toRepresentation :: elem 'Eval 'Representation -> elem 'Repr 'Representation
 
-translateBlockIds :: [Maybe ByteString] -> RuleScope -> EvalRuleScope
-translateBlockIds ePks = \case
-  Previous        -> Previous
-  OnlyAuthority   -> OnlyAuthority
-  OnlyBlocks bPks ->
-    let keepListed (bId, Just pk') | Set.member pk' bPks = Just (bId, pk')
-        keepListed _  = Nothing
-     in OnlyBlocks $ Set.fromList $ mapMaybe keepListed $ zip [0..] ePks
+translateScope :: [Maybe ByteString] -> Set RuleScope -> Set EvalRuleScope
+translateScope ePks =
+  let indexedPks = zip [0..] ePks
+      getPkIndex bPk = (bPk <$) <$> find ((== Just bPk) . snd) indexedPks
+      translateElem = \case
+        Previous      -> Just Previous
+        OnlyAuthority -> Just OnlyAuthority
+        BlockId bPk   -> BlockId <$> getPkIndex bPk
+   in foldMap (foldMap Set.singleton . translateElem)
 
-renderBlockIds :: EvalRuleScope -> RuleScope
-renderBlockIds = \case
-  Previous        -> Previous
-  OnlyAuthority   -> OnlyAuthority
-  OnlyBlocks pIds -> OnlyBlocks $ Set.map snd pIds
+renderBlockIds :: Set EvalRuleScope -> Set RuleScope
+renderBlockIds =
+  let renderElem = \case
+        Previous         -> Previous
+        OnlyAuthority    -> OnlyAuthority
+        BlockId (_, ePk) -> BlockId ePk
+   in Set.map renderElem
 
 instance ToEvaluation Rule' where
-  toEvaluation ePks r = r { scope = translateBlockIds ePks <$> scope r }
-  toRepresentation r  = r { scope = renderBlockIds <$> scope r }
+  toEvaluation ePks r = r { scope = translateScope ePks $ scope r }
+  toRepresentation r  = r { scope = renderBlockIds $ scope r }
 
 instance ToEvaluation QueryItem' where
-  toEvaluation ePks qi = qi{ qScope = translateBlockIds ePks <$> qScope qi}
-  toRepresentation qi  = qi { qScope = renderBlockIds <$> qScope qi}
+  toEvaluation ePks qi = qi{ qScope = translateScope ePks $ qScope qi}
+  toRepresentation qi  = qi { qScope = renderBlockIds $ qScope qi}
 
 instance ToEvaluation Block' where
   toEvaluation ePks b = b
-    { bScope = translateBlockIds ePks <$> bScope b
+    { bScope = translateScope ePks $ bScope b
     , bRules = toEvaluation ePks <$> bRules b
     , bChecks = checkToEvaluation ePks <$> bChecks b
     }
   toRepresentation b  = b
-    { bScope = renderBlockIds <$> bScope b
+    { bScope = renderBlockIds $ bScope b
     , bRules = toRepresentation <$> bRules b
     , bChecks = fmap toRepresentation <$> bChecks b
     }

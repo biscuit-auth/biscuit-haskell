@@ -47,7 +47,7 @@ import           Data.List.NonEmpty       (NonEmpty)
 import qualified Data.List.NonEmpty       as NE
 import           Data.Map.Strict          (Map, (!?))
 import qualified Data.Map.Strict          as Map
-import           Data.Maybe               (fromMaybe, isJust, mapMaybe)
+import           Data.Maybe               (isJust, mapMaybe)
 import           Data.Set                 (Set)
 import qualified Data.Set                 as Set
 import           Data.Text                (Text, isInfixOf, unpack)
@@ -159,13 +159,16 @@ keepAuthorized (FactGroup facts) authorizedOrigins =
   let isAuthorized k _ = k `Set.isSubsetOf` authorizedOrigins
    in FactGroup $ Map.filterWithKey isAuthorized facts
 
-keepAuthorized' :: FactGroup -> Maybe EvalRuleScope -> Natural -> FactGroup
-keepAuthorized' factGroup mScope currentBlockId =
-  let scope = fromMaybe OnlyAuthority mScope
-   in case scope of
-        OnlyAuthority  -> keepAuthorized factGroup (Set.fromList [0, currentBlockId])
-        Previous       -> keepAuthorized factGroup (Set.fromList [0..currentBlockId])
-        OnlyBlocks ids -> keepAuthorized factGroup (Set.insert currentBlockId $ Set.map fst ids)
+keepAuthorized' :: FactGroup -> Set EvalRuleScope -> Natural -> FactGroup
+keepAuthorized' factGroup trustedBlocks currentBlockId =
+  let scope = if null trustedBlocks then Set.singleton OnlyAuthority
+                                    else trustedBlocks
+      toBlockIds = \case
+        OnlyAuthority    -> Set.singleton 0
+        Previous         -> Set.fromList [0..currentBlockId]
+        BlockId (idx, _) -> Set.singleton idx
+      allBlockIds = foldMap toBlockIds scope
+   in keepAuthorized factGroup $ Set.insert currentBlockId allBlockIds
 
 toScopedFacts :: FactGroup -> Set (Scoped Fact)
 toScopedFacts (FactGroup factGroups) =

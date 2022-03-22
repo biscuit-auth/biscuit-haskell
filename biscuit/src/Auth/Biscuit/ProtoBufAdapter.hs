@@ -111,7 +111,7 @@ pbToBlock s PB.Block{..} = do
   bFacts <- traverse (pbToFact s) $ PB.getField facts_v2
   bRules <- traverse (pbToRule s) $ PB.getField rules_v2
   bChecks <- traverse (pbToCheck s) $ PB.getField checks_v2
-  bScope <- traverse pbToScope $ PB.getField scope
+  bScope <- Set.fromList <$> traverse pbToScope (PB.getField scope)
   when (bVersion /= Just 3) $ Left $ "Unsupported biscuit version: " <> maybe "0" show bVersion <> ". Only version 3 is supported"
   pure Block{ .. }
 
@@ -128,7 +128,7 @@ blockToPb existingSymbols b@Block{..} =
       facts_v2  = PB.putField $ factToPb s <$> bFacts
       rules_v2  = PB.putField $ ruleToPb s <$> bRules
       checks_v2 = PB.putField $ checkToPb s <$> bChecks
-      scope     = PB.putField $ scopeToPb <$> bScope
+      scope     = PB.putField $ scopeToPb <$> Set.toList bScope
    in (bSymbols, PB.Block {..})
 
 pbToFact :: Symbols -> PB.FactV2 -> Either String Fact
@@ -157,7 +157,7 @@ pbToRule s pbRule = do
   rhead       <- pbToPredicate s pbHead
   body        <- traverse (pbToPredicate s) pbBody
   expressions <- traverse (pbToExpression s) pbExpressions
-  scope       <- traverse pbToScope pbScope
+  scope       <- Set.fromList <$> traverse pbToScope pbScope
   pure Rule {..}
 
 ruleToPb :: ReverseSymbols -> Rule -> PB.RuleV2
@@ -166,7 +166,7 @@ ruleToPb s Rule{..} =
     { head = PB.putField $ predicateToPb s rhead
     , body = PB.putField $ predicateToPb s <$> body
     , expressions = PB.putField $ expressionToPb s <$> expressions
-    , scope = PB.putField $ scopeToPb <$> scope
+    , scope = PB.putField $ scopeToPb <$> Set.toList scope
     }
 
 pbToCheck :: Symbols -> PB.CheckV2 -> Either String Check
@@ -191,19 +191,19 @@ pbToScope = \case
   PB.ScType e       -> case PB.getField e of
     PB.ScopeAuthority -> Right OnlyAuthority
     PB.ScopePrevious  -> Right Previous
-  PB.ScBlocks bs ->
-    OnlyBlocks . Set.fromList . fmap convert <$> traverse pbToPublicKey (PB.getField bs)
+  PB.ScBlock bs ->
+    BlockId . convert <$> pbToPublicKey (PB.getField bs)
 
 scopeToPb :: RuleScope -> PB.Scope
-scopeToPb = \case
-  OnlyAuthority  -> PB.ScType $ PB.putField PB.ScopeAuthority
-  Previous       -> PB.ScType $ PB.putField PB.ScopePrevious
-  OnlyBlocks pks ->
-    let mkPkMsg bytes = PB.PublicKey
+scopeToPb =
+  let mkPkMsg bytes = PB.PublicKey
           { algorithm = PB.putField PB.Ed25519
           , key = PB.putField bytes
           }
-     in PB.ScBlocks $ PB.putField $ mkPkMsg <$> Set.toList pks
+   in \case
+        OnlyAuthority -> PB.ScType $ PB.putField PB.ScopeAuthority
+        Previous      -> PB.ScType $ PB.putField PB.ScopePrevious
+        BlockId pk    -> PB.ScBlock $ PB.putField (mkPkMsg pk)
 
 pbToPredicate :: Symbols -> PB.PredicateV2 -> Either String (Predicate' 'InPredicate 'Representation)
 pbToPredicate s pbPredicate = do

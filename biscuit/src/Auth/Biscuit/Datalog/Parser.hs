@@ -297,31 +297,40 @@ ruleHeadParser = do
   pure Predicate{name,terms}
 
 ruleBodyParser :: (HasParsers 'InPredicate evalCtx ctx)
-               => Parser ([Predicate' 'InPredicate ctx], [Expression' ctx], Maybe (RuleScope' evalCtx ctx))
+               => Parser ([Predicate' 'InPredicate ctx], [Expression' ctx], Set.Set (RuleScope' evalCtx ctx))
 ruleBodyParser = do
   let predicateOrExprParser =
             Right <$> expressionParser
         <|> Left <$> predicateParser
   elems <- sepBy1 (skipSpace *> predicateOrExprParser)
                   (skipSpace *> char ',')
-  scope <- optional ruleScopeParser
+  scope <- ruleScopeParser
   let (predicates, expressions) = partitionEithers elems
   pure (predicates, expressions, scope)
+
+scopeParser :: forall evalCtx ctx
+             . ( ScopeParser evalCtx ctx
+               , Ord (BlockIdType evalCtx ctx)
+               )
+            => Parser (Set.Set (RuleScope' evalCtx ctx))
+scopeParser =
+  let elemParser = choice [ OnlyAuthority <$  string "authority"
+                          , Previous      <$  string "previous"
+                          , BlockId       <$> parseBlockId @evalCtx @ctx
+                          ]
+   in Set.fromList <$> sepBy1 (skipSpace *> elemParser)
+                              (skipSpace *> char ',')
 
 ruleScopeParser :: forall evalCtx ctx
                  . ( ScopeParser evalCtx ctx
                    , Ord (BlockIdType evalCtx ctx)
                    )
-                => Parser (RuleScope' evalCtx ctx)
-ruleScopeParser = do
+                => Parser (Set.Set (RuleScope' evalCtx ctx))
+ruleScopeParser = option Set.empty $ do
   skipSpace
   void $ string "@"
   skipSpace
-  choice [ OnlyAuthority <$ string "authority"
-         , Previous      <$ string "previous"
-         , OnlyBlocks . Set.fromList <$> sepBy1 (skipSpace *> parseBlockId @evalCtx @ctx)
-                                                (skipSpace *> char ',')
-         ]
+  scopeParser
 
 ruleParser :: HasParsers 'InPredicate evalCtx ctx
            => Parser (Rule' evalCtx ctx)
@@ -364,34 +373,29 @@ authorizerElementParser = choice
   , BlockElement    <$> blockElementParser
   ]
 
+blockScopeParser :: forall evalCtx ctx
+                  . ( ScopeParser evalCtx ctx
+                    , Ord (BlockIdType evalCtx ctx)
+                    )
+                 => Parser (Set.Set (RuleScope' evalCtx ctx))
+blockScopeParser = option Set.empty $ do
+  skipSpace
+  void $ string "trusting "
+  skipSpace
+  scope <- scopeParser
+  void $ char ';'
+  pure scope
+
 authorizerParser :: ( HasParsers 'InPredicate evalCtx ctx
                     , HasParsers 'InFact evalCtx ctx
                     , Show (AuthorizerElement' evalCtx ctx)
                     )
                  => Parser (Authorizer' evalCtx ctx)
 authorizerParser = do
-  bScope <- optional blockScopeParser
+  bScope <- blockScopeParser
   elems <- many' (skipSpace *> authorizerElementParser)
   let addScope a = a { vBlock = (vBlock a) { bScope = bScope } }
   pure $ addScope $ foldMap elementToAuthorizer elems
-
-blockScopeParser :: forall evalCtx ctx
-                 . ( ScopeParser evalCtx ctx
-                   , Ord (BlockIdType evalCtx ctx)
-                   )
-                => Parser (RuleScope' evalCtx ctx)
-blockScopeParser = do
-  skipSpace
-  void $ string "trusting "
-  skipSpace
-  scope <- choice [ OnlyAuthority <$ string "authority"
-                  , Previous      <$ string "previous"
-                  , OnlyBlocks . Set.fromList <$> sepBy1 (skipSpace *> parseBlockId @evalCtx @ctx)
-                                                         (skipSpace *> char ',')
-                  ]
-  skipSpace
-  void $ char ';'
-  pure scope
 
 blockParser :: ( HasParsers 'InPredicate evalCtx ctx
                , HasParsers 'InFact evalCtx ctx
@@ -399,7 +403,7 @@ blockParser :: ( HasParsers 'InPredicate evalCtx ctx
                )
             => Parser (Block' evalCtx ctx)
 blockParser = do
-  bScope <- optional blockScopeParser
+  bScope <- blockScopeParser
   elems <- many' (skipSpace *> blockElementParser)
   pure $ (foldMap elementToBlock elems) { bScope = bScope }
 

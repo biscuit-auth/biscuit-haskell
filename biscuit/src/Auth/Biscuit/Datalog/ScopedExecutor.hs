@@ -22,7 +22,6 @@ module Auth.Biscuit.Datalog.ScopedExecutor
   , FactGroup (..)
   ) where
 
-import           Control.Applicative           ((<|>))
 import           Control.Monad                 (unless, when)
 import           Control.Monad.State           (StateT (..), evalStateT, get,
                                                 gets, lift, put)
@@ -264,7 +263,7 @@ collectWorld :: Natural -> EvalBlock -> (Map Natural (Set EvalRule), FactGroup)
 collectWorld blockId Block{..} =
   let -- a block can define a default scope for its rule
       -- which is used unless the rule itself has defined a scope
-      applyScope r@Rule{scope} = r { scope = scope <|> bScope }
+      applyScope r@Rule{scope} = r { scope = if null scope then bScope else scope }
    in ( Map.singleton blockId $ Set.map applyScope $ Set.fromList bRules
       , FactGroup $ Map.singleton (Set.singleton blockId) $ Set.fromList bFacts
       )
