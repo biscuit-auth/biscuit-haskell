@@ -74,7 +74,6 @@ test-suite biscuit-haskell-test
       Spec.Executor
       Spec.Parser
       Spec.Quasiquoter
-      Spec.RevocationIds
       Spec.Roundtrip
       Spec.SampleReader
       Spec.ScopedExecutor
@@ -95,6 +94,8 @@ test-suite biscuit-haskell-test
     , cereal
     , containers
     , cryptonite
+    , lens
+    , lens-aeson
     , mtl
     , parser-combinators
     , protobuf
