@@ -28,6 +28,7 @@ module Auth.Biscuit.Datalog.Executor
   , keepAuthorized'
   , defaultLimits
   , evaluateExpression
+  , extractVariables
 
   --
   , getFactsForRule
@@ -99,6 +100,9 @@ data ExecutionError
   -- ^ Evaluation did not converge in the alloted number of iterations
   | FactsInBlocks
   -- ^ Some blocks contained either rules or facts while it was forbidden
+  | InvalidRule
+  -- ^ Some rules were malformed: every variable present in their head must
+  -- appear in their body
   | ResultError ResultError
   -- ^ The evaluation ran to completion, but checks and policies were not
   -- fulfilled.
