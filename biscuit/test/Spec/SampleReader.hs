@@ -217,14 +217,10 @@ compareExecErrors ee re =
         Timeout                            -> mustMatch $ key "RunLimit" . key "Timeout"
         TooManyFacts                       -> mustMatch $ key "RunLimit" . key "TooManyFacts"
         TooManyIterations                  -> mustMatch $ key "RunLimit" . key "TooManyIterations"
+        InvalidRule                        -> mustMatch $ key "FailedLogic" . key "InvalidBlockRule"
         FactsInBlocks                      -> assertFailure "FactsInBlocks can't happen here"
         ResultError (NoPoliciesMatched cs) -> mustMatch $ key "FailedLogic" . key "Unauthorized"
-        ResultError (FailedChecks cs)      ->
-          let isBogusRule = isJust $ re ^? key "FailedLogic" . key "InvalidBlockRule"
-              -- ^ invalid rules are silently ignored in haskell, so they materialize as
-              -- a failed check
-              isFailedCheck = isJust $ re ^? key "FailedLogic" . key "Unauthorized"
-           in assertBool errorMessage $ isBogusRule || isFailedCheck
+        ResultError (FailedChecks cs)      -> mustMatch $ key "FailedLogic" . key "Unauthorized"
         ResultError (DenyRuleMatched cs q) -> mustMatch $ key "FailedLogic" . key "Unauthorized"
 
 processFailedValidation :: (String -> IO ())

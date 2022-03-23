@@ -23,7 +23,7 @@ module Auth.Biscuit.Datalog.ScopedExecutor
   ) where
 
 import           Control.Applicative           ((<|>))
-import           Control.Monad                 (when)
+import           Control.Monad                 (unless, when)
 import           Control.Monad.State           (StateT (..), evalStateT, get,
                                                 gets, lift, put)
 import           Data.Bifunctor                (first)
@@ -48,6 +48,7 @@ import           Auth.Biscuit.Datalog.Executor (Bindings, ExecutionError (..),
                                                 ResultError (..), Scoped,
                                                 checkCheck, checkPolicy,
                                                 countFacts, defaultLimits,
+                                                extractVariables,
                                                 fromScopedFacts,
                                                 getBindingsForRuleBody,
                                                 getFactsForRule,
@@ -58,7 +59,7 @@ import           Auth.Biscuit.Timer            (timer)
 type BlockWithRevocationId = (Block, ByteString)
 
 -- | A subset of 'ExecutionError' that can only happen during fact generation
-data PureExecError = Facts | Iterations
+data PureExecError = Facts | Iterations | BadRule
   deriving (Eq, Show)
 
 -- | Proof that a biscuit was authorized successfully. In addition to the matched
@@ -155,6 +156,7 @@ runAuthorizerNoTimeout limits authority blocks authorizer = do
       toExecutionError = \case
         Facts      -> TooManyFacts
         Iterations -> TooManyIterations
+        BadRule    -> InvalidRule
   allFacts <- first toExecutionError $ computeAllFacts initState
   let checks = zip [0..] $ bChecks <$> ((fst authority <> vBlock authorizer) : (fst <$> blocks))
       policies = vPolicies authorizer
@@ -189,14 +191,24 @@ runStep = do
               }
   return addedFactsCount
 
+-- | Check if every variable from the head is present in the body
+checkRuleHead :: Rule -> Bool
+checkRuleHead Rule{rhead, body} =
+  let headVars = extractVariables [rhead]
+      bodyVars = extractVariables body
+   in headVars `Set.isSubsetOf` bodyVars
+
 -- | Repeatedly generate new facts until it converges (no new
 -- facts are generated)
 computeAllFacts :: ComputeState -> Either PureExecError FactGroup
-computeAllFacts initState =
-  let go = do
+computeAllFacts initState@ComputeState{sRules} = do
+  let checkRules = all (all checkRuleHead) sRules
+      go = do
         newFacts <- runStep
         if newFacts > 0 then go else gets sFacts
-   in evalStateT go initState
+
+  unless checkRules $ Left BadRule
+  evalStateT go initState
 
 -- | Small helper used in tests to directly provide rules and facts without creating
 -- a biscuit token

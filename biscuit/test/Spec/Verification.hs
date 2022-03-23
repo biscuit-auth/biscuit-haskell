@@ -74,7 +74,7 @@ unboundVarRule = testCase "Rule with unbound variable" $ do
   b1 <- mkBiscuit secret [block|check if operation("read");|]
   b2 <- addBlock [block|operation($unbound, "read") <- operation($any1, $any2);|] b1
   res <- authorizeBiscuit b2 [authorizer|operation("write");allow if true;|]
-  res @?= Left (Executor.ResultError $ Executor.FailedChecks $ pure [check|check if operation("read")|])
+  res @?= Left InvalidRule
 
 symbolRestrictions :: TestTree
 symbolRestrictions = testGroup "Restricted symbols in blocks"
