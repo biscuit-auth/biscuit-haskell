@@ -94,7 +94,7 @@ pbToBlock s PB.Block{..} = do
   bRules <- traverse (pbToRule s) $ PB.getField rules_v2
   bChecks <- traverse (pbToCheck s) $ PB.getField checks_v2
   let bScope = Nothing -- todo parse from protobuf
-  when (bVersion /= Just 2) $ Left $ "Unsupported biscuit version: " <> maybe "0" show bVersion <> ". Only version 2 is supported"
+  when (bVersion /= Just 3) $ Left $ "Unsupported biscuit version: " <> maybe "0" show bVersion <> ". Only version 3 is supported"
   pure Block{ .. }
 
 -- | Turn a biscuit block into a protobuf block, for serialization,
@@ -106,7 +106,7 @@ blockToPb existingSymbols b@Block{..} =
       s = reverseSymbols $ addFromBlock existingSymbols bSymbols
       symbols   = PB.putField $ getSymbolList bSymbols
       context   = PB.putField bContext
-      version   = PB.putField $ Just 2
+      version   = PB.putField $ Just 3
       facts_v2  = PB.putField $ factToPb s <$> bFacts
       rules_v2  = PB.putField $ ruleToPb s <$> bRules
       checks_v2 = PB.putField $ checkToPb s <$> bChecks
