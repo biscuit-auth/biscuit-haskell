@@ -13,19 +13,24 @@ module Spec.SampleReader where
 import           Debug.Trace
 
 import           Control.Arrow                 ((&&&))
+import           Control.Lens                  ((^?))
 import           Control.Monad                 (join, void, when)
 import           Data.Aeson
+import           Data.Aeson.Lens               (key)
 import           Data.Aeson.Types              (typeMismatch, unexpected)
 import           Data.Attoparsec.Text          (parseOnly)
 import           Data.Bifunctor                (Bifunctor (..))
 import           Data.ByteString               (ByteString)
 import qualified Data.ByteString               as BS
+import qualified Data.ByteString.Base16        as Hex
+import qualified Data.ByteString.Lazy          as LBS
 import           Data.Foldable                 (traverse_)
-import           Data.List.NonEmpty            (NonEmpty (..))
+import           Data.List.NonEmpty            (NonEmpty (..), toList)
 import           Data.Map.Strict               (Map)
 import qualified Data.Map.Strict               as Map
-import           Data.Text                     (Text, pack)
-import           Data.Text.Encoding            (encodeUtf8)
+import           Data.Maybe                    (isJust, isNothing)
+import           Data.Text                     (Text, pack, unpack)
+import           Data.Text.Encoding            (decodeUtf8, encodeUtf8)
 import           GHC.Generics                  (Generic)
 
 import           Test.Tasty                    hiding (Timeout)
@@ -95,22 +100,27 @@ instance (FromJSON e, FromJSON a) => FromJSON (RustResult e a) where
    parseJSON = genericParseJSON $
      defaultOptions { sumEncoding = ObjectWithSingleField }
 
+type RustError = Value
+
 data ValidationR
   = ValidationR
   { world           :: Maybe WorldDesc
-  , result          :: RustResult Value Int
+  , result          :: RustResult RustError Int
   , authorizer_code :: Authorizer
+  , revocation_ids  :: [Text]
   } deriving stock (Eq, Show, Generic)
     deriving anyclass FromJSON
 
 
 checkResult :: Show a
-            => RustResult Value Int
+            => (a -> RustError -> Assertion)
+            -> RustResult RustError Int
             -> Either a b
             -> Assertion
-checkResult r e = case (r, e) of
+checkResult f r e = case (r, e) of
   (Err es, Right _) -> assertFailure $ "Got success, but expected failure: " <> show es
   (Ok   _, Left  e) -> assertFailure $ "Expected success, but got failure: " <> show e
+  (Err es, Left e) -> f e es
   _ -> pure ()
 
 
@@ -173,15 +183,49 @@ processTestCase step rootPk TestCase{..} = do
       checkTokenBlocks step biscuit token
       traverse_ (processValidation step biscuit) vList
 
-parseErrorToRust :: ParseError -> RustResult [Text] a
-parseErrorToRust = Err . pure . \case
-  InvalidHexEncoding -> "todo"
-  InvalidB64Encoding -> "todo"
-  InvalidProtobufSer w e -> pack $ "todo " <> show w <> e
-  InvalidProtobuf True "Invalid signature" -> "Format(InvalidSignatureSize(16))"
-  InvalidProtobuf w e -> "todo"
-  InvalidProof -> "todo"
-  InvalidSignatures -> "Format(Signature(InvalidSignature(\"signature error\")))"
+compareParseErrors :: ParseError -> RustError -> Assertion
+compareParseErrors pe re =
+  let mustMatch p = assertBool (show re) $ isJust $ re ^? p
+   in case pe of
+        InvalidHexEncoding ->
+          assertFailure $ "InvalidHexEncoding can't appear here " <> show re
+        InvalidB64Encoding ->
+          mustMatch $ key "Base64"
+        InvalidProtobufSer True s ->
+          mustMatch $ key "Format" . key "SerializationError"
+        InvalidProtobufSer False s ->
+          mustMatch $ key "Format" . key "BlockSerializationError"
+        InvalidProtobuf True "Invalid signature" ->
+          mustMatch $ key "Format" . key "InvalidSignatureSize"
+        InvalidProtobuf True s ->
+          mustMatch $ key "Format" . key "DeserializationError"
+        InvalidProtobuf False s ->
+          mustMatch $ key "Format" . key "BlockDeserializationError"
+        InvalidSignatures ->
+          mustMatch $ key "Format" . key "Signature" . key "InvalidSignature"
+        InvalidProof ->
+          assertFailure $ "InvalidProof can't appear here " <> show re
+        RevokedBiscuit ->
+          assertFailure $ "RevokedBiscuit can't appear here " <> show re
+
+compareExecErrors :: ExecutionError -> RustError -> Assertion
+compareExecErrors ee re =
+  let errorMessage = "ExecutionError mismatch: " <> show ee <> " " <> unpack (decodeUtf8 . LBS.toStrict $ encode re)
+      mustMatch p = assertBool errorMessage $ isJust $ re ^? p
+      -- todo compare `Unauthorized` contents
+   in case ee of
+        Timeout                            -> mustMatch $ key "RunLimit" . key "Timeout"
+        TooManyFacts                       -> mustMatch $ key "RunLimit" . key "TooManyFacts"
+        TooManyIterations                  -> mustMatch $ key "RunLimit" . key "TooManyIterations"
+        FactsInBlocks                      -> assertFailure "FactsInBlocks can't happen here"
+        ResultError (NoPoliciesMatched cs) -> mustMatch $ key "FailedLogic" . key "Unauthorized"
+        ResultError (FailedChecks cs)      ->
+          let isBogusRule = isJust $ re ^? key "FailedLogic" . key "InvalidBlockRule"
+              -- ^ invalid rules are silently ignored in haskell, so they materialize as
+              -- a failed check
+              isFailedCheck = isJust $ re ^? key "FailedLogic" . key "Unauthorized"
+           in assertBool errorMessage $ isBogusRule || isFailedCheck
+        ResultError (DenyRuleMatched cs q) -> mustMatch $ key "FailedLogic" . key "Unauthorized"
 
 processFailedValidation :: (String -> IO ())
                         -> ParseError
@@ -189,18 +233,7 @@ processFailedValidation :: (String -> IO ())
                         -> Assertion
 processFailedValidation step e (name, ValidationR{result}) = do
   step $ "Checking validation " <> name
-  checkResult result (Left e)
-
-execErrorToRust :: Either ExecutionError a -> RustResult Value Int
-execErrorToRust (Right _) = Ok 0
-execErrorToRust (Left e) = Err $ case e of
-  Timeout                            -> toJSON ["todo" :: Text ]
-  TooManyFacts                       -> toJSON ["todo" :: Text ]
-  TooManyIterations                  -> toJSON ["todo" :: Text ]
-  FactsInBlocks                      -> toJSON ["todo" :: Text ]
-  ResultError (NoPoliciesMatched cs) -> toJSON ["todo" :: Text ]
-  ResultError (FailedChecks cs)      -> toJSON ["Block(FailedBlockCheck { block_id: 1, check_id: 0, rule: \"check if resource($0), operation(#read), right($0, #read)\" })" :: Text]
-  ResultError (DenyRuleMatched cs q) -> toJSON ["todo" :: Text ]
+  checkResult compareParseErrors result (Left e)
 
 processValidation :: (String -> IO ())
                   -> Biscuit OpenOrSealed Verified
@@ -211,7 +244,11 @@ processValidation step b (name, ValidationR{..}) = do
   w    <- maybe (assertFailure "missing authorizer contents") pure world
   pols <- either (assertFailure . show) pure $ parseAuthorizer $ foldMap (<> ";") (policies w)
   res <- authorizeBiscuit b (authorizer_code <> pols)
-  checkResult result res
+  checkResult compareExecErrors result res
+  let revocationIds = decodeUtf8 . Hex.encode <$> toList (getRevocationIds b)
+  step "Comparing revocation ids"
+  revocation_ids @?= revocationIds
+
 
 runTests :: (String -> IO ())
          -> Assertion
