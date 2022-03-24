@@ -218,7 +218,6 @@ compareExecErrors ee re =
         TooManyFacts                       -> mustMatch $ key "RunLimit" . key "TooManyFacts"
         TooManyIterations                  -> mustMatch $ key "RunLimit" . key "TooManyIterations"
         InvalidRule                        -> mustMatch $ key "FailedLogic" . key "InvalidBlockRule"
-        FactsInBlocks                      -> assertFailure "FactsInBlocks can't happen here"
         ResultError (NoPoliciesMatched cs) -> mustMatch $ key "FailedLogic" . key "Unauthorized"
         ResultError (FailedChecks cs)      -> mustMatch $ key "FailedLogic" . key "Unauthorized"
         ResultError (DenyRuleMatched cs q) -> mustMatch $ key "FailedLogic" . key "Unauthorized"

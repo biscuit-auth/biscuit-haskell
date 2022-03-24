@@ -98,8 +98,6 @@ data ExecutionError
   -- ^ Too many facts were generated during evaluation
   | TooManyIterations
   -- ^ Evaluation did not converge in the alloted number of iterations
-  | FactsInBlocks
-  -- ^ Some blocks contained either rules or facts while it was forbidden
   | InvalidRule
   -- ^ Some rules were malformed: every variable present in their head must
   -- appear in their body
@@ -112,17 +110,15 @@ data ExecutionError
 -- See `defaultLimits` for default values.
 data Limits
   = Limits
-  { maxFacts        :: Int
+  { maxFacts      :: Int
   -- ^ maximum number of facts that can be produced before throwing `TooManyFacts`
-  , maxIterations   :: Int
+  , maxIterations :: Int
   -- ^ maximum number of iterations before throwing `TooManyIterations`
-  , maxTime         :: Int
+  , maxTime       :: Int
   -- ^ maximum duration the verification can take (in μs)
-  , allowRegexes    :: Bool
+  , allowRegexes  :: Bool
   -- ^ whether or not allowing `.matches()` during verification (untrusted regex computation
   -- can enable DoS attacks). This security risk is mitigated by the 'maxTime' setting.
-  , allowBlockFacts :: Bool
-  -- ^ whether or not accept facts and rules in blocks
   }
   deriving (Eq, Show)
 
@@ -138,7 +134,6 @@ defaultLimits = Limits
   , maxIterations = 100
   , maxTime = 1000
   , allowRegexes = True
-  , allowBlockFacts = True
   }
 
 type Scoped a = (Set Natural, a)

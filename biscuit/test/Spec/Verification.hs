@@ -24,7 +24,6 @@ specs = testGroup "Datalog checks"
   , errorAccumulation
   , unboundVarRule
   , symbolRestrictions
-  , factsRestrictions
   ]
 
 ifTrue :: MatchedQuery
@@ -91,21 +90,3 @@ symbolRestrictions = testGroup "Restricted symbols in blocks"
       res <- authorizeBiscuit b2 [authorizer|operation("write");allow if true;|]
       res @?= Left (Executor.ResultError $ Executor.FailedChecks $ pure [check|check if operation("read")|])
   ]
-
-factsRestrictions :: TestTree
-factsRestrictions =
-  let limits = defaultLimits { allowBlockFacts = False }
-   in testGroup "No facts or rules in blocks"
-        [ testCase "No facts" $ do
-            secret <- newSecret
-            b1 <- mkBiscuit secret [block|right("read");|]
-            b2 <- addBlock [block|right("write");|] b1
-            res <- authorizeBiscuitWithLimits limits b2 [authorizer|allow if right("write");|]
-            res @?= Left (Executor.ResultError $ Executor.NoPoliciesMatched [])
-        , testCase "No rules" $ do
-            secret <- newSecret
-            b1 <- mkBiscuit secret [block|right("read");|]
-            b2 <- addBlock [block|right("write") <- right("read");|] b1
-            res <- authorizeBiscuitWithLimits limits b2 [authorizer|allow if right("write");|]
-            res @?= Left (Executor.ResultError $ Executor.NoPoliciesMatched [])
-        ]
