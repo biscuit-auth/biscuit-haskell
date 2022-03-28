@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP                        #-}
 {-# LANGUAGE DataKinds                  #-}
 {-# LANGUAGE DeriveLift                 #-}
 {-# LANGUAGE DerivingStrategies         #-}
@@ -101,7 +102,11 @@ newtype Slice = Slice String
 
 instance Lift Slice where
   lift (Slice name) = [| toTerm $(varE $ mkName name) |]
+#if MIN_VERSION_template_haskell(2,17,0)
+  liftTyped = liftCode . unsafeTExpCoerce . lift
+#else
   liftTyped = unsafeTExpCoerce . lift
+#endif
 
 type family SliceType (ctx :: ParsedAs) where
   SliceType 'RegularString = Void
@@ -170,7 +175,11 @@ instance  ( Lift (VariableType inSet pof)
   lift (LDate t)       = [| LDate (read $(lift $ show t)) |]
   lift (Antiquote s)   = [| s |]
 
+#if MIN_VERSION_template_haskell(2,17,0)
+  liftTyped = liftCode . unsafeTExpCoerce . lift
+#else
   liftTyped = unsafeTExpCoerce . lift
+#endif
 
 -- | This class describes how to turn a haskell value into a datalog value.
 -- | This is used when slicing a haskell variable in a datalog expression
