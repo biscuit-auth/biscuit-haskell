@@ -35,12 +35,18 @@ module Auth.Biscuit.Proto
   , BinaryKind (..)
   , OpTernary (..)
   , TernaryKind (..)
+  , ThirdPartyBlockContents (..)
+  , ThirdPartyBlockRequest (..)
   , getField
   , putField
   , decodeBlockList
   , decodeBlock
   , encodeBlockList
   , encodeBlock
+  , decodeThirdPartyBlockRequest
+  , decodeThirdPartyBlockContents
+  , encodeThirdPartyBlockRequest
+  , encodeThirdPartyBlockContents
   ) where
 
 import           Data.ByteString      (ByteString)
@@ -98,6 +104,7 @@ data Block = Block {
   , rules_v2  :: Repeated 5 (Message RuleV2)
   , checks_v2 :: Repeated 6 (Message CheckV2)
   , scope     :: Repeated 7 (Message Scope)
+  , pksTable  :: Repeated 8 (Message PublicKey)
   } deriving stock (Generic, Show)
     deriving anyclass (Decode, Encode)
 
@@ -108,7 +115,7 @@ data ScopeType =
 
 data Scope =
     ScType  (Required 1 (Enumeration ScopeType))
-  | ScBlock (Required 2 (Message PublicKey))
+  | ScBlock (Required 2 (Value Int64))
     deriving stock (Generic, Show)
     deriving anyclass (Decode, Encode)
 
@@ -220,3 +227,29 @@ encodeBlockList = runPut . encodeMessage
 
 encodeBlock :: Block -> ByteString
 encodeBlock = runPut . encodeMessage
+
+encodeThirdPartyBlockRequest :: ThirdPartyBlockRequest -> ByteString
+encodeThirdPartyBlockRequest = runPut . encodeMessage
+
+encodeThirdPartyBlockContents :: ThirdPartyBlockContents -> ByteString
+encodeThirdPartyBlockContents = runPut . encodeMessage
+
+decodeThirdPartyBlockRequest :: ByteString -> Either String ThirdPartyBlockRequest
+decodeThirdPartyBlockRequest = runGet decodeMessage
+
+decodeThirdPartyBlockContents :: ByteString -> Either String ThirdPartyBlockContents
+decodeThirdPartyBlockContents = runGet decodeMessage
+
+data ThirdPartyBlockRequest
+  = ThirdPartyBlockRequest
+  { previousPk :: Required 1 (Message PublicKey)
+  , pkTable    :: Repeated 2 (Message PublicKey)
+  } deriving stock (Generic, Show)
+    deriving anyclass (Decode, Encode)
+
+data ThirdPartyBlockContents
+  = ThirdPartyBlockContents
+  { payload     :: Required 1 (Value ByteString)
+  , externalSig :: Required 2 (Message ExternalSig)
+  } deriving stock (Generic, Show)
+    deriving anyclass (Decode, Encode)

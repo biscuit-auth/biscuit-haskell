@@ -2,10 +2,12 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes       #-}
 {-# LANGUAGE RecordWildCards   #-}
+{-# LANGUAGE TupleSections     #-}
 module Spec.Roundtrip
   ( specs
   ) where
 
+import           Control.Arrow       ((&&&))
 import           Data.ByteString     (ByteString)
 import           Data.List.NonEmpty  (NonEmpty ((:|)))
 import           Test.Tasty
@@ -21,6 +23,7 @@ specs = testGroup "Serde roundtrips"
   [ testGroup "Raw serde"
       [ singleBlock    (serialize, parse)
       , multipleBlocks (serialize, parse)
+      , thirdPartyBlocks (serialize, parse)
       ]
   , testGroup "B64 serde"
       [ singleBlock    (serializeB64, parseB64)
@@ -39,19 +42,54 @@ type Roundtrip = ( Biscuit Open Verified -> ByteString
 roundtrip :: Roundtrip
           -> NonEmpty Block
           -> Assertion
-roundtrip (s,p) i@(authority' :| blocks') = do
+roundtrip r bs = roundtrip' r $ (Nothing,) <$> bs
+
+roundtrip' :: Roundtrip
+           -> NonEmpty (Maybe SecretKey, Block)
+           -> Assertion
+roundtrip' (s,p) i@(authority' :| blocks') = do
   let addBlocks bs biscuit = case bs of
-        (b:rest) -> addBlocks rest =<< addBlock b biscuit
-        []       -> pure biscuit
+        ((Just sk, b):rest) -> addBlocks rest =<< addSignedBlock sk b biscuit
+        ((Nothing, b):rest) -> addBlocks rest =<< addBlock b biscuit
+        []                  -> pure biscuit
   sk <- generateSecretKey
   let pk = toPublic sk
-  init' <- mkBiscuitWith (Just 1) sk authority'
+  init' <- mkBiscuitWith (Just 1) sk (snd authority')
   final <- addBlocks blocks' init'
   let serialized = s final
       parsed = p pk serialized
       getBlock ((_, b), _, _, _) = b
       getBlocks b = getBlock <$> authority b :| blocks b
-  getBlocks <$> parsed @?= Right i
+  getBlocks <$> parsed @?= Right (snd <$> i)
+  rootKeyId <$> parsed @?= Right (Just 1)
+
+roundtrip'' :: Bool
+            -> Roundtrip
+            -> NonEmpty (Maybe SecretKey, Block)
+            -> Assertion
+roundtrip'' direct (s,p) i@(authority' :| blocks') = do
+  let addSignedBlock' :: SecretKey -> Block -> Biscuit Open check -> IO (Biscuit Open check)
+      addSignedBlock' sk block biscuit = do
+        if direct
+          then
+            addSignedBlock sk block biscuit
+          else do
+            let req = mkThirdPartyBlockReq biscuit
+            thirdPartyBlock <- either (fail . ("req " <>)) pure $ mkThirdPartyBlock sk req block
+            either (fail . ("apply " <>)) id $ applyThirdPartyBlock biscuit thirdPartyBlock
+      addBlocks bs biscuit = case bs of
+        ((Just sk, b):rest) -> addBlocks rest =<< addSignedBlock' sk b biscuit
+        ((Nothing, b):rest) -> addBlocks rest =<< addBlock b biscuit
+        []                  -> pure biscuit
+  sk <- generateSecretKey
+  let pk = toPublic sk
+  init' <- mkBiscuitWith (Just 1) sk (snd authority')
+  final <- addBlocks blocks' init'
+  let serialized = s final
+      parsed = p pk serialized
+      getBlock ((_, b), _, _, _) = b
+      getBlocks b = getBlock <$> authority b :| blocks b
+  getBlocks <$> parsed @?= Right (snd <$> i)
   rootKeyId <$> parsed @?= Right (Just 1)
 
 singleBlock :: Roundtrip -> TestTree
@@ -116,6 +154,40 @@ multipleBlocks r = testCase "Multiple block" $ roundtrip r $
       check if time($date), $date <= 2018-12-20T00:00:00+00:00;
     |]
   ]
+
+thirdPartyBlocks :: Roundtrip -> TestTree
+thirdPartyBlocks r =
+  let mkBlocks = do
+        (sk1, pkOne) <- (id &&& toPublic) <$> generateSecretKey
+        (sk2, pkTwo) <- (id &&& toPublic) <$> generateSecretKey
+        (sk3, pkThree) <- (id &&& toPublic) <$> generateSecretKey
+        pure $ (Nothing, [block|
+                   query("authority");
+                   right("file1", "read");
+                   right("file2", "read");
+                   right("file1", "write");
+                   check if true trusting previous, ${pkOne};
+               |]) :|
+               [ (Just sk1, [block|
+                   query("block1");
+                   check if right("file2", "read") trusting ${pkTwo};
+                   check if right("file3", "read") trusting ${pkOne};
+                 |])
+               , (Just sk2, [block|
+                   query("block2");
+                   check if right("file2", "read") trusting ${pkTwo};
+                   check if right("file3", "read") trusting ${pkOne};
+                 |])
+               , (Nothing, [block|
+                   query("block3");
+                   check if right("file2", "read") trusting ${pkTwo};
+                   check if right("file3", "read") trusting ${pkThree};
+                 |])
+               ]
+   in testGroup "Third party blocks"
+        [ testCase "Direct append" $ roundtrip'' True r =<< mkBlocks
+        , testCase "Indirect append" $ roundtrip'' False r =<< mkBlocks
+        ]
 
 secret :: TestTree
 secret = testGroup "Secret key serde"

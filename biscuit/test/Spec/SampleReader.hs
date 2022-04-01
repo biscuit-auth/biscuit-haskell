@@ -185,24 +185,30 @@ processTestCase step rootPk TestCase{..} = do
 
 compareParseErrors :: ParseError -> RustError -> Assertion
 compareParseErrors pe re =
-  let mustMatch p = assertBool (show re) $ isJust $ re ^? p
+  let mustMatch p = assertBool (show (re,pe)) $ isJust $ re ^? p
+      mustMatchEither ps = assertBool (show (re, pe)) $ any isJust $ (re ^?) <$> ps
    in case pe of
         InvalidHexEncoding ->
           assertFailure $ "InvalidHexEncoding can't appear here " <> show re
         InvalidB64Encoding ->
           mustMatch $ key "Base64"
         InvalidProtobufSer True s ->
-          mustMatch $ key "Format" . key "SerializationError"
-        InvalidProtobufSer False s ->
-          mustMatch $ key "Format" . key "BlockSerializationError"
-        InvalidProtobuf True "Invalid signature" ->
-          mustMatch $ key "Format" . key "InvalidSignatureSize"
+          mustMatch $ key "Format" . key "DeserializationError"
         InvalidProtobuf True s ->
           mustMatch $ key "Format" . key "DeserializationError"
+        InvalidProtobufSer False s ->
+          mustMatch $ key "Format" . key "BlockDeserializationError"
         InvalidProtobuf False s ->
           mustMatch $ key "Format" . key "BlockDeserializationError"
+        -- the signature size is now verified just before verifying the
+        -- signature itself, not at deserialization time, since we want
+        -- to interpret signatures only relative to the verifying public
+        -- key.
         InvalidSignatures ->
-          mustMatch $ key "Format" . key "Signature" . key "InvalidSignature"
+          mustMatchEither
+            [ key "Format" . key "Signature" . key "InvalidSignature"
+            , key "Format" . key "InvalidSignatureSize"
+            ]
         InvalidProof ->
           assertFailure $ "InvalidProof can't appear here " <> show re
         RevokedBiscuit ->

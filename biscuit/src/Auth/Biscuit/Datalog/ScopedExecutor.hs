@@ -40,7 +40,7 @@ import           Data.Text                     (Text)
 import           Numeric.Natural               (Natural)
 import           Validation                    (Validation (..))
 
-import           Auth.Biscuit.Crypto           (PublicKey, convert)
+import           Auth.Biscuit.Crypto           (PublicKey)
 import           Auth.Biscuit.Datalog.AST
 import           Auth.Biscuit.Datalog.Executor (Bindings, ExecutionError (..),
                                                 FactGroup (..), Limits (..),
@@ -136,7 +136,7 @@ mkInitState :: Limits -> BlockWithRevocationId -> [BlockWithRevocationId] -> Aut
 mkInitState limits authority blocks authorizer =
   let fst' (a,_,_) = a
       trd' (_,_,c) = c
-      externalKeys = Nothing : (fmap convert . trd' <$> blocks)
+      externalKeys = Nothing : (trd' <$> blocks)
       revocationWorld = (mempty, FactGroup $ Map.singleton (Set.singleton 0) $ mkRevocationIdFacts authority blocks)
       firstBlock = fst' authority <> vBlock authorizer
       otherBlocks = fst' <$> blocks
@@ -157,7 +157,7 @@ runAuthorizerNoTimeout :: Limits
 runAuthorizerNoTimeout limits authority blocks authorizer = do
   let fst' (a,_,_) = a
       trd' (_,_,c) = c
-      externalKeys = Nothing : (fmap convert . trd' <$> blocks)
+      externalKeys = Nothing : (trd' <$> blocks)
       (<$$$>) = fmap . fmap . fmap
       initState = mkInitState limits authority blocks authorizer
       toExecutionError = \case

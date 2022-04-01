@@ -3,13 +3,16 @@
 {- HLINT ignore "Reduce duplication" -}
 module Spec.ScopedExecutor (specs) where
 
+import           Control.Arrow                       ((&&&))
 import           Data.Attoparsec.Text                (parseOnly)
+import           Data.Either                         (isRight)
 import           Data.Map.Strict                     as Map
 import           Data.Set                            as Set
 import           Data.Text                           (Text, unpack)
 import           Test.Tasty
 import           Test.Tasty.HUnit
 
+import           Auth.Biscuit.Crypto
 import           Auth.Biscuit.Datalog.AST
 import           Auth.Biscuit.Datalog.Executor       (ExecutionError (..),
                                                       Limits (..),
@@ -26,6 +29,7 @@ specs = testGroup "Block-scoped Datalog Evaluation"
   , block1OnlySeesAuthorityAndAuthorizer
   , block2OnlySeesAuthorityAndAuthorizer
   , block1SeesAuthorityAndAuthorizer
+  , thirdPartyBlocks
   , iterationCountWorks
   , maxFactsCountWorks
   , allChecksAreCollected
@@ -124,6 +128,30 @@ block2OnlySeesAuthorityAndAuthorizer = testCase "Arbitrary blocks only see previ
          allow if true;
        |]
   runAuthorizerNoTimeout defaultLimits (authority, "", Nothing) [(block1, "", Nothing), (block2, "", Nothing)] verif @?= Left (ResultError (FailedChecks $ pure [check|check if is_allowed(1234, "file1") |]))
+
+thirdPartyBlocks :: TestTree
+thirdPartyBlocks = testCase "Third party blocks are correctly scoped" $ do
+    (sk1, pkOne) <- (id &&& toPublic) <$> generateSecretKey
+    let authority =
+          [block|
+            user(1234);
+            check if from3rd(true) trusting ${pkOne};
+          |]
+        block1 =
+          [block|
+          from3rd(true);
+          |]
+        verif =
+          [authorizer|
+            deny if from3rd(true);
+            allow if from3rd(true) trusting ${pkOne};
+          |]
+    let result = runAuthorizerNoTimeout defaultLimits
+                   (authority, "", Nothing)
+                   [ (block1, "", Just pkOne)
+                   ]
+                   verif
+    isRight result @?= True
 
 iterationCountWorks :: TestTree
 iterationCountWorks = testCase "ScopedExecutions stops when hitting the iterations threshold" $ do

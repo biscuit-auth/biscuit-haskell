@@ -1,39 +1,105 @@
+{-# LANGUAGE CPP                        #-}
+{-# LANGUAGE DerivingStrategies         #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE QuasiQuotes                #-}
+{-# LANGUAGE TemplateHaskell            #-}
+{-# LANGUAGE TypeApplications           #-}
 module Auth.Biscuit.Crypto
   ( SignedBlock
   , Blocks
   , signBlock
   , signExternalBlock
+  , sign3rdPartyBlock
   , verifyBlocks
   , verifySecretProof
   , verifySignatureProof
   , getSignatureProof
-
-  -- Ed25519 reexports
+  , verifyExternalSig
   , PublicKey
+  , pkBytes
+  , readEd25519PublicKey
   , SecretKey
+  , skBytes
+  , readEd25519SecretKey
   , Signature
-  , convert
-  , publicKey
-  , secretKey
+  , sigBytes
   , signature
-  , eitherCryptoError
-  , maybeCryptoError
   , generateSecretKey
   , toPublic
+  , sign
   ) where
 
-import           Control.Arrow         ((&&&))
-import           Crypto.Error          (eitherCryptoError, maybeCryptoError)
-import           Crypto.PubKey.Ed25519
-import           Data.ByteArray        (convert)
-import           Data.ByteString       (ByteString)
-import           Data.Int              (Int32)
-import           Data.List.NonEmpty    (NonEmpty (..))
-import qualified Data.List.NonEmpty    as NE
-import           Data.Maybe            (catMaybes)
+import           Control.Arrow              ((&&&))
+import           Crypto.Error               (maybeCryptoError)
+import qualified Crypto.PubKey.Ed25519      as Ed25519
+import           Data.ByteArray             (convert)
+import           Data.ByteString            (ByteString)
+import           Data.Function              (on)
+import           Data.Int                   (Int32)
+import           Data.List.NonEmpty         (NonEmpty (..))
+import qualified Data.List.NonEmpty         as NE
+import           Data.Maybe                 (catMaybes, fromJust)
+import           Instances.TH.Lift          ()
+import           Language.Haskell.TH.Syntax
 
-import qualified Auth.Biscuit.Proto    as PB
-import qualified Data.Serialize        as PB
+import qualified Auth.Biscuit.Proto         as PB
+import qualified Data.Serialize             as PB
+
+newtype PublicKey = PublicKey Ed25519.PublicKey
+  deriving newtype (Eq, Show)
+
+instance Ord PublicKey where
+  compare = compare `on` serializePublicKey
+
+instance Lift PublicKey where
+  lift pk = [| fromJust $ readEd25519PublicKey $(lift $ pkBytes pk) |]
+#if MIN_VERSION_template_haskell(2,17,0)
+  liftTyped = liftCode . unsafeTExpCoerce . lift
+#else
+  liftTyped = unsafeTExpCoerce . lift
+#endif
+
+newtype SecretKey = SecretKey Ed25519.SecretKey
+  deriving newtype (Eq, Show)
+newtype Signature = Signature ByteString
+  deriving newtype (Eq, Show)
+
+signature :: ByteString -> Signature
+signature = Signature
+
+sigBytes :: Signature -> ByteString
+sigBytes (Signature b) = b
+
+readEd25519PublicKey :: ByteString -> Maybe PublicKey
+readEd25519PublicKey bs = PublicKey <$> maybeCryptoError (Ed25519.publicKey bs)
+
+readEd25519SecretKey :: ByteString -> Maybe SecretKey
+readEd25519SecretKey bs = SecretKey <$> maybeCryptoError (Ed25519.secretKey bs)
+
+readEd25519Signature :: Signature -> Maybe Ed25519.Signature
+readEd25519Signature (Signature bs) = maybeCryptoError (Ed25519.signature bs)
+
+toPublic :: SecretKey -> PublicKey
+toPublic (SecretKey sk) = PublicKey $ Ed25519.toPublic sk
+
+generateSecretKey :: IO SecretKey
+generateSecretKey = SecretKey <$> Ed25519.generateSecretKey
+
+sign :: SecretKey -> PublicKey -> ByteString -> Signature
+sign (SecretKey sk) (PublicKey pk) payload =
+  Signature . convert $ Ed25519.sign sk pk payload
+
+verify :: PublicKey -> ByteString -> Signature -> Bool
+verify (PublicKey pk) payload sig =
+  case readEd25519Signature sig of
+    Just sig' -> Ed25519.verify pk payload sig'
+    Nothing   -> False
+
+pkBytes :: PublicKey -> ByteString
+pkBytes (PublicKey pk) = convert pk
+
+skBytes :: SecretKey -> ByteString
+skBytes (SecretKey sk) = convert sk
 
 type SignedBlock = (ByteString, Signature, PublicKey, Maybe (Signature, PublicKey))
 type Blocks = NonEmpty SignedBlock
@@ -46,7 +112,7 @@ type Blocks = NonEmpty SignedBlock
 -- signatures, and the final signature for sealed tokens).
 serializePublicKey :: PublicKey -> ByteString
 serializePublicKey pk =
-  let keyBytes = convert pk
+  let keyBytes = pkBytes pk
       algId :: Int32
       algId = fromIntegral $ fromEnum PB.Ed25519
       -- The spec mandates that we serialize the algorithm id as a little-endian int32
@@ -77,16 +143,24 @@ addExternalSignature :: SecretKey
                      -> SignedBlock
                      -> SignedBlock
 addExternalSignature eSk pk (payload, sig, nextPk, _) =
-  let toSign = payload <> convert pk
-      ePk = toPublic eSk
-      eSig = sign eSk ePk toSign
+  let (eSig, ePk) = sign3rdPartyBlock eSk pk payload
    in (payload, sig, nextPk, Just (eSig, ePk))
 
+sign3rdPartyBlock :: SecretKey
+                  -> PublicKey
+                  -> ByteString
+                  -> (Signature, PublicKey)
+sign3rdPartyBlock eSk nextPk payload =
+  let toSign = payload <> serializePublicKey nextPk
+      ePk = toPublic eSk
+      eSig = sign eSk ePk toSign
+   in (eSig, ePk)
+
 getSignatureProof :: SignedBlock -> SecretKey -> Signature
-getSignatureProof (lastPayload, lastSig, lastPk, _todo) nextSecret =
+getSignatureProof (lastPayload, Signature lastSig, lastPk, _todo) nextSecret =
   let sk = nextSecret
       pk = toPublic nextSecret
-      toSign = lastPayload <> serializePublicKey lastPk <> convert lastSig
+      toSign = lastPayload <> serializePublicKey lastPk <> lastSig
    in sign sk pk toSign
 
 getToSig :: (ByteString, a, PublicKey, Maybe (Signature, PublicKey)) -> ByteString
@@ -103,8 +177,14 @@ getPublicKey (_, _, pk, _) = pk
 -- the previous block: this prevents signature reuse (the external signature cannot be used on another
 -- token)
 getExternalSigPayload :: PublicKey -> SignedBlock -> Maybe (PublicKey, ByteString, Signature)
-getExternalSigPayload pkN (payload, _, _, Just (eSig, ePk)) = Just (ePk, payload <> convert pkN, eSig)
+getExternalSigPayload pkN (payload, _, _, Just (eSig, ePk)) = Just (ePk, payload <> serializePublicKey pkN, eSig)
 getExternalSigPayload _ _ = Nothing
+
+-- | When adding a pre-signed third-party block to a token, we make sure the third-party block is correctly
+-- signed (pk-signature match, and the third-party block is pinned to the last biscuit block)
+verifyExternalSig :: PublicKey -> (ByteString, Signature, PublicKey) -> Bool
+verifyExternalSig previousPk (payload, eSig, ePk) =
+  verify ePk (payload <> serializePublicKey previousPk) eSig
 
 -- ToDo verify optional signatures as well
 verifyBlocks :: Blocks
@@ -138,6 +218,6 @@ verifySecretProof nextSecret (_, _, lastPk, _) =
 verifySignatureProof :: Signature
                      -> SignedBlock
                      -> Bool
-verifySignatureProof extraSig (lastPayload, lastSig, lastPk, _) =
-  let toSign = lastPayload <> serializePublicKey lastPk <> convert lastSig
+verifySignatureProof extraSig (lastPayload, Signature lastSig, lastPk, _) =
+  let toSign = lastPayload <> serializePublicKey lastPk <> lastSig
    in verify lastPk toSign extraSig

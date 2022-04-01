@@ -104,11 +104,11 @@ import qualified Data.Set                            as Set
 import           Data.Text                           (Text)
 
 import           Auth.Biscuit.Crypto                 (PublicKey, SecretKey,
-                                                      convert,
                                                       generateSecretKey,
-                                                      maybeCryptoError,
-                                                      publicKey, secretKey,
-                                                      toPublic)
+                                                      pkBytes,
+                                                      readEd25519PublicKey,
+                                                      readEd25519SecretKey,
+                                                      skBytes, toPublic)
 import           Auth.Biscuit.Datalog.AST            (Authorizer, Block,
                                                       FromValue (..), Term,
                                                       Term' (..), ToTerm (..),
@@ -250,23 +250,23 @@ newSecret = generateSecretKey
 
 -- | Serialize a 'SecretKey' to raw bytes, without any encoding
 serializeSecretKey :: SecretKey -> ByteString
-serializeSecretKey = convert
+serializeSecretKey = skBytes
 
 -- | Serialize a 'PublicKey' to raw bytes, without any encoding
 serializePublicKey :: PublicKey -> ByteString
-serializePublicKey = convert
+serializePublicKey = pkBytes
 
 -- | Serialize a 'SecretKey' to a hex-encoded bytestring
 serializeSecretKeyHex :: SecretKey -> ByteString
-serializeSecretKeyHex = Hex.encode . convert
+serializeSecretKeyHex = Hex.encode . skBytes
 
 -- | Serialize a 'PublicKey' to a hex-encoded bytestring
 serializePublicKeyHex :: PublicKey -> ByteString
-serializePublicKeyHex = Hex.encode . convert
+serializePublicKeyHex = Hex.encode . pkBytes
 
 -- | Read a 'SecretKey' from raw bytes
 parseSecretKey :: ByteString -> Maybe SecretKey
-parseSecretKey = maybeCryptoError . secretKey
+parseSecretKey = readEd25519SecretKey
 
 -- | Read a 'SecretKey' from an hex bytestring
 parseSecretKeyHex :: ByteString -> Maybe SecretKey
@@ -274,7 +274,7 @@ parseSecretKeyHex = parseSecretKey <=< fromHex
 
 -- | Read a 'PublicKey' from raw bytes
 parsePublicKey :: ByteString -> Maybe PublicKey
-parsePublicKey = maybeCryptoError . publicKey
+parsePublicKey = readEd25519PublicKey
 
 -- | Read a 'PublicKey' from an hex bytestring
 parsePublicKeyHex :: ByteString -> Maybe PublicKey

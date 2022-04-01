@@ -5,16 +5,25 @@
 module Spec.Parser (specs) where
 
 import           Data.Attoparsec.Text        (parseOnly)
+import           Data.Maybe                  (fromJust)
 import qualified Data.Set                    as Set
 import           Data.Text                   (Text)
 import           Test.Tasty
 import           Test.Tasty.HUnit
 
+import           Auth.Biscuit                (PublicKey, parsePublicKeyHex)
 import           Auth.Biscuit.Datalog.AST
 import           Auth.Biscuit.Datalog.Parser (authorizerParser, blockParser,
                                               checkParser, expressionParser,
                                               policyParser, predicateParser,
                                               ruleParser, termParser)
+
+pk1, pk2, pk3, pk4, pk5 :: PublicKey
+pk1 = fromJust $ parsePublicKeyHex "a1b712761c609039f878edad694d762652f1548a68acccc96735b3196a240e8b"
+pk2 = fromJust $ parsePublicKeyHex "b82c748be51784a58496675752e04cc48009a7e78bcfae8cad51fba959102af1"
+pk3 = fromJust $ parsePublicKeyHex "083aae4ba29a9a3781cdee7a800f4f8ab90591f65ca983fc429687628311aedd"
+pk4 = fromJust $ parsePublicKeyHex "c6864578bc03596d52878bd70025ec966c95c60727cb6573198453e82132510d"
+pk5 = fromJust $ parsePublicKeyHex "a0d3dc7ab62a0a2732ba267e0d57894170458ec1659ca1226240b99764554a2e"
 
 parseTerm :: Text -> Either String Term
 parseTerm = parseOnly termParser
@@ -294,7 +303,7 @@ operatorPrecedences = testGroup "mixed-precedence operators"
 
 ruleWithScopeParsing :: TestTree
 ruleWithScopeParsing = testCase "Parse constained rule with scope annotation" $
-  parseRule "valid_date(\"file1\") <- time($0), resource(\"file1\"), $0 <= 2019-12-04T09:46:41+00:00 @ previous" @?=
+  parseRule "valid_date(\"file1\") <- time($0), resource(\"file1\"), $0 <= 2019-12-04T09:46:41+00:00 trusting previous" @?=
     Right (Rule (Predicate "valid_date" [LString "file1"])
                 [ Predicate "time" [Variable "0"]
                 , Predicate "resource" [LString "file1"]
@@ -323,8 +332,8 @@ checkParsing = testGroup "check blocks"
             ]
   , testCase "Multiple groups, scoped" $
       parseCheck
-        "check if fact($var), $var == true @ previous or \
-        \other($var), $var == 2 @ authority" @?=
+        "check if fact($var), $var == true trusting previous or \
+        \other($var), $var == 2 trusting authority" @?=
           Right
             [ QueryItem [Predicate "fact" [Variable "var"]]
                         [EBinary Equal (EValue (Variable "var")) (EValue (LBool True))]
@@ -388,8 +397,8 @@ policyParsing = testGroup "policy blocks"
             )
   , testCase "Allow with multiple groups, scoped" $
       parsePolicy
-        "allow if fact($var), $var == true @ previous or \
-        \other($var), $var == 2 @ed25519/hex:30,ed25519/hex:32,ed25519/hex:33 " @?=
+        "allow if fact($var), $var == true trusting previous or \
+        \other($var), $var == 2 trusting ed25519/hex:a1b712761c609039f878edad694d762652f1548a68acccc96735b3196a240e8b,ed25519/hex:083aae4ba29a9a3781cdee7a800f4f8ab90591f65ca983fc429687628311aedd,ed25519/hex:c6864578bc03596d52878bd70025ec966c95c60727cb6573198453e82132510d " @?=
           Right
             ( Allow
             , [ QueryItem [Predicate "fact" [Variable "var"]]
@@ -397,7 +406,7 @@ policyParsing = testGroup "policy blocks"
                           [Previous]
               , QueryItem [Predicate "other" [Variable "var"]]
                           [EBinary Equal (EValue (Variable "var")) (EValue (LInteger 2))]
-                          [BlockId "0", BlockId "2", BlockId "3"]
+                          [BlockId pk1, BlockId pk3, BlockId pk4]
               ]
             )
   ]
@@ -508,7 +517,7 @@ blockParsing :: TestTree
 blockParsing = testCase "Full block" $ do
   let spec :: Text
       spec =
-        " trusting ed25519/hex:31,ed25519/hex:32,ed25519/hex:34;\n\
+        " trusting ed25519/hex:b82c748be51784a58496675752e04cc48009a7e78bcfae8cad51fba959102af1,ed25519/hex:083aae4ba29a9a3781cdee7a800f4f8ab90591f65ca983fc429687628311aedd,ed25519/hex:a0d3dc7ab62a0a2732ba267e0d57894170458ec1659ca1226240b99764554a2e;\n\
         \// the owner has all rights\n\
         \right($blog_id, $article_id, $operation) <-\n\
         \    article($blog_id, $article_id),\n\
@@ -564,5 +573,5 @@ blockParsing = testCase "Full block" $ do
       bFacts = []
       bChecks = []
       bContext = Nothing
-      bScope = Set.fromList $ BlockId <$> ["1","2","4"]
+      bScope = Set.fromList $ BlockId <$> [pk2,pk3,pk5]
   parseBlock spec @?= Right Block{..}

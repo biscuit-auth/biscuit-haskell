@@ -59,6 +59,8 @@ import           Language.Haskell.TH
 import           Language.Haskell.TH.Quote
 import           Language.Haskell.TH.Syntax     (Lift)
 
+import           Auth.Biscuit.Crypto            (PublicKey,
+                                                 readEd25519PublicKey)
 import           Auth.Biscuit.Datalog.AST
 
 class ConditionalParse a v where
@@ -86,13 +88,18 @@ class ScopeParser (evalCtx :: EvaluationContext) (ctx :: DatalogContext) where
   parseBlockId :: Parser (BlockIdType evalCtx ctx)
 
 instance ScopeParser 'Repr 'Representation where
-  parseBlockId = string "ed25519/" *> hexBsParser
+  parseBlockId = publicKeyParser
 
 instance ScopeParser 'Repr 'WithSlices where
   parseBlockId = do
-    choice [ Left . Slice <$> (string "${" *> haskellVariableParser <* char '}')
-           , Right <$> (string "ed25519/" *> hexBsParser)
+    choice [ PkSlice <$> (string "${" *> haskellVariableParser <* char '}')
+           , Pk <$> publicKeyParser
            ]
+
+publicKeyParser :: Parser PublicKey
+publicKeyParser =
+  let parsePk = maybe (fail "invalid publick key") pure . readEd25519PublicKey
+   in string "ed25519/" *> (hexBsParser >>= parsePk)
 
 type HasTermParsers inSet pof ctx =
   ( ConditionalParse (SliceType 'WithSlices)                   (SliceType ctx)
@@ -328,7 +335,7 @@ ruleScopeParser :: forall evalCtx ctx
                 => Parser (Set.Set (RuleScope' evalCtx ctx))
 ruleScopeParser = option Set.empty $ do
   skipSpace
-  void $ string "@"
+  void $ string "trusting "
   skipSpace
   scopeParser
 

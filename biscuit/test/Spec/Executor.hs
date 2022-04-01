@@ -262,9 +262,9 @@ scopedRules = testGroup "Rules and facts in different scopes"
             ])
   , testCase "with explicit scoping for rules (authority)" $
       let rules :: Map Natural (Set Rule)
-          rules = [ (0, [ [rule|ancestor($a,$b) <- parent($a,$b) @ authority |] ])
-                  , (1, [ [rule|ancestor($a,$b) <- parent($a,$c), ancestor($c,$b) @ authority |] ])
-                  , (2, [ [rule|family($a,$b) <- parent($a,$b) @ authority |] ])
+          rules = [ (0, [ [rule|ancestor($a,$b) <- parent($a,$b) trusting authority |] ])
+                  , (1, [ [rule|ancestor($a,$b) <- parent($a,$c), ancestor($c,$b) trusting authority |] ])
+                  , (2, [ [rule|family($a,$b) <- parent($a,$b) trusting authority |] ])
                   ]
           facts :: FactGroup
           facts = FactGroup

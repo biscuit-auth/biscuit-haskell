@@ -61,6 +61,7 @@ module Auth.Biscuit.Datalog.AST
   , EvalRuleScope
   , SetType
   , Slice (..)
+  , PkOrSlice (..)
   , SliceType
   , BlockIdType
   , Unary (..)
@@ -76,7 +77,9 @@ module Auth.Biscuit.Datalog.AST
   , elementToAuthorizer
   , fromStack
   , listSymbolsInBlock
+  , listPublicKeysInBlock
   , renderBlock
+  , renderAuthorizer
   , renderFact
   , renderRule
   , toSetTerm
@@ -101,6 +104,8 @@ import           Instances.TH.Lift          ()
 import           Language.Haskell.TH
 import           Language.Haskell.TH.Syntax
 import           Numeric.Natural            (Natural)
+
+import           Auth.Biscuit.Crypto        (PublicKey, pkBytes)
 
 data IsWithinSet = NotWithinSet | WithinSet
 data DatalogContext
@@ -136,14 +141,28 @@ type family SliceType (ctx :: DatalogContext) where
   SliceType 'Representation = Void
   SliceType 'WithSlices     = Slice
 
+data PkOrSlice
+  = PkSlice Text
+  | Pk PublicKey
+  deriving (Eq, Show, Ord)
+
+instance Lift PkOrSlice where
+  lift (PkSlice name) = [| $(varE $ mkName $ unpack name) |]
+  lift (Pk pk)        = [| pk |]
+#if MIN_VERSION_template_haskell(2,17,0)
+  liftTyped = liftCode . unsafeTExpCoerce . lift
+#else
+  liftTyped = unsafeTExpCoerce . lift
+#endif
+
 type family SetType (inSet :: IsWithinSet) (ctx :: DatalogContext) where
   SetType 'NotWithinSet ctx = Set (Term' 'WithinSet 'InFact ctx)
   SetType 'WithinSet    ctx = Void
 
 type family BlockIdType (evalCtx :: EvaluationContext) (ctx :: DatalogContext) where
-  BlockIdType 'Repr 'WithSlices     = Either Slice ByteString
-  BlockIdType 'Repr 'Representation = ByteString
-  BlockIdType 'Eval 'Representation = (Natural, ByteString)
+  BlockIdType 'Repr 'WithSlices     = PkOrSlice
+  BlockIdType 'Repr 'Representation = PublicKey
+  BlockIdType 'Eval 'Representation = (Natural, PublicKey)
 
 -- | A single datalog item.
 -- | This can be a value, a set of items, or a slice (a value that will be injected later),
@@ -398,12 +417,21 @@ deriving instance ( Lift (Predicate' 'InPredicate ctx)
                   , Lift (RuleScope' evalCtx ctx)
                   ) => Lift (QueryItem' evalCtx ctx)
 
+renderPolicy :: Policy -> Text
+renderPolicy (pType, query) =
+  let prefix = case pType of
+        Allow -> "allow if "
+        Deny  -> "deny if "
+   in prefix <> intercalate " or \n" (renderQueryItem <$> query) <> ";"
+
 renderQueryItem :: QueryItem' 'Repr 'Representation -> Text
 renderQueryItem QueryItem{..} =
-  intercalate ",\n" $ fold
+  intercalate ",\n" (fold
     [ renderPredicate <$> qBody
     , renderExpression <$> qExpressions
-    ]
+    ])
+  <> if null qScope then ""
+                   else " trusting " <> renderRuleScope qScope
 
 renderCheck :: Check -> Text
 renderCheck is = "check if " <>
@@ -422,6 +450,14 @@ listSymbolsInCheck :: Check -> Set.Set Text
 listSymbolsInCheck =
   foldMap listSymbolsInQueryItem
 
+listPublicKeysInQueryItem :: QueryItem' 'Repr 'Representation -> Set.Set PublicKey
+listPublicKeysInQueryItem QueryItem{qScope} =
+  listPublicKeysInScope qScope
+
+listPublicKeysInCheck :: Check -> Set.Set PublicKey
+listPublicKeysInCheck = foldMap listPublicKeysInQueryItem
+
+
 type RuleScope = RuleScope' 'Repr 'Representation
 type EvalRuleScope = RuleScope' 'Eval 'Representation
 
@@ -434,6 +470,12 @@ deriving instance Eq (BlockIdType evalCtx ctx) => Eq (RuleScope' evalCtx ctx)
 deriving instance Ord (BlockIdType evalCtx ctx) => Ord (RuleScope' evalCtx ctx)
 deriving instance Show (BlockIdType evalCtx ctx) => Show (RuleScope' evalCtx ctx)
 deriving instance Lift (BlockIdType evalCtx ctx) => Lift (RuleScope' evalCtx ctx)
+
+listPublicKeysInScope :: Set.Set RuleScope -> Set.Set PublicKey
+listPublicKeysInScope = foldMap $
+  \case BlockId pk -> Set.singleton pk
+        _          -> Set.empty
+
 
 data Rule' evalCtx ctx = Rule
   { rhead       :: Predicate' 'InPredicate ctx
@@ -467,13 +509,16 @@ renderRule Rule{rhead,body,expressions,scope} =
      renderPredicate rhead <> " <- "
   <> intercalate ", " (fmap renderPredicate body <> fmap renderExpression expressions)
   <> if null scope then ""
-                   else " @ " <> renderRuleScope scope
+                   else " trusting " <> renderRuleScope scope
 
 listSymbolsInRule :: Rule -> Set.Set Text
 listSymbolsInRule Rule{..} =
      listSymbolsInPredicate rhead
   <> foldMap listSymbolsInPredicate body
   <> foldMap listSymbolsInExpression expressions
+
+listPublicKeysInRule :: Rule -> Set.Set PublicKey
+listPublicKeysInRule Rule{scope} = listPublicKeysInScope scope
 
 data Unary =
     Negate
@@ -639,7 +684,7 @@ renderRuleScope =
   let renderScopeElem = \case
         OnlyAuthority -> "authority"
         Previous      -> "previous"
-        BlockId bs    -> "ed25519/hex:" <> decodeUtf8 (Hex.encode bs)
+        BlockId bs    -> "ed25519/hex:" <> decodeUtf8 (Hex.encode $ pkBytes bs)
    in intercalate ", " . Set.toList . Set.map renderScopeElem
 
 renderBlock :: Block -> Text
@@ -657,6 +702,13 @@ listSymbolsInBlock Block {..} = fold
   [ foldMap listSymbolsInRule bRules
   , foldMap listSymbolsInFact bFacts
   , foldMap listSymbolsInCheck bChecks
+  ]
+
+listPublicKeysInBlock :: Block -> Set.Set PublicKey
+listPublicKeysInBlock Block{..} = fold
+  [ foldMap listPublicKeysInRule bRules
+  , foldMap listPublicKeysInCheck bChecks
+  , listPublicKeysInScope bScope
   ]
 
 -- | A biscuit authorizer, containing, facts, rules, checks and policies
@@ -694,6 +746,11 @@ deriving instance ( Lift (Block' evalCtx ctx)
                   , Lift (QueryItem' evalCtx ctx)
                   ) => Lift (Authorizer' evalCtx ctx)
 
+renderAuthorizer :: Authorizer -> Text
+renderAuthorizer Authorizer{..} =
+  renderBlock vBlock <> "\n" <>
+  intercalate "\n" (renderPolicy <$> vPolicies)
+
 data BlockElement' evalCtx ctx
   = BlockFact (Predicate' 'InFact ctx)
   | BlockRule (Rule' evalCtx ctx)
@@ -727,10 +784,10 @@ elementToAuthorizer = \case
   BlockElement be    -> Authorizer [] (elementToBlock be)
 
 class ToEvaluation elem where
-  toEvaluation :: [Maybe ByteString] -> elem 'Repr 'Representation -> elem 'Eval 'Representation
+  toEvaluation :: [Maybe PublicKey] -> elem 'Repr 'Representation -> elem 'Eval 'Representation
   toRepresentation :: elem 'Eval 'Representation -> elem 'Repr 'Representation
 
-translateScope :: [Maybe ByteString] -> Set RuleScope -> Set EvalRuleScope
+translateScope :: [Maybe PublicKey] -> Set RuleScope -> Set EvalRuleScope
 translateScope ePks =
   let indexedPks = zip [0..] ePks
       getPkIndex bPk = (bPk <$) <$> find ((== Just bPk) . snd) indexedPks
@@ -778,8 +835,8 @@ instance ToEvaluation Authorizer' where
     , vPolicies = fmap (fmap toRepresentation) <$> vPolicies a
     }
 
-checkToEvaluation :: [Maybe ByteString] -> Check -> EvalCheck
+checkToEvaluation :: [Maybe PublicKey] -> Check -> EvalCheck
 checkToEvaluation = fmap . toEvaluation
 
-policyToEvaluation :: [Maybe ByteString] -> Policy -> EvalPolicy
+policyToEvaluation :: [Maybe PublicKey] -> Policy -> EvalPolicy
 policyToEvaluation ePks = fmap (fmap (toEvaluation ePks))
