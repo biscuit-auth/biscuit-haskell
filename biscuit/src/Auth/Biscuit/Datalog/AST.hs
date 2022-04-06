@@ -82,7 +82,8 @@ import qualified Data.Set                   as Set
 import           Data.String                (IsString)
 import           Data.Text                  (Text, intercalate, pack, unpack)
 import           Data.Text.Encoding         (decodeUtf8)
-import           Data.Time                  (UTCTime)
+import           Data.Time                  (UTCTime, defaultTimeLocale,
+                                             formatTime)
 import           Data.Void                  (Void, absurd)
 import           Instances.TH.Lift          ()
 import           Language.Haskell.TH
@@ -256,7 +257,7 @@ renderId' var set slice = \case
   Variable name -> var name
   LInteger int  -> pack $ show int
   LString str   -> pack $ show str
-  LDate time    -> pack $ show time
+  LDate time    -> pack $ formatTime defaultTimeLocale "%FT%T%Q%EZ" time
   LBytes bs     -> "hex:" <> decodeUtf8 (Hex.encode bs)
   LBool True    -> "true"
   LBool False   -> "false"
