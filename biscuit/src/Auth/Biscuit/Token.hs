@@ -109,12 +109,14 @@ data OpenOrSealed
 -- /open/ (capable of being attenuated further). In that case the proof is a secret
 -- key that can be used to sign a new block.
 newtype Open = Open SecretKey
+  deriving stock Show
 
 -- | This datatype represents the final proof of a biscuit statically known to be
 -- /sealed/ (not capable of being attenuated further). In that case the proof is a
 -- signature proving that the party who sealed the token did know the last secret
 -- key.
 newtype Sealed = Sealed Signature
+  deriving stock Show
 
 -- | This class allows functions working on both open and sealed biscuits to accept
 -- indifferently 'OpenOrSealed', 'Open' or 'Sealed' biscuits. It has no laws, it only
