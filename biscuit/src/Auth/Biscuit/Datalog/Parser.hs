@@ -42,10 +42,12 @@ import           Data.Attoparsec.Text
 import qualified Data.Attoparsec.Text           as A
 import           Data.ByteString                (ByteString)
 import           Data.ByteString.Base16         as Hex
-import           Data.Char                      (isAlphaNum, isLetter, isSpace)
+import           Data.Char                      (isAlphaNum, isLetter, isLower,
+                                                 isSpace)
 import           Data.Either                    (partitionEithers)
 import           Data.Foldable                  (fold)
 import           Data.Functor                   (void, ($>))
+import           Data.Maybe                     (isJust)
 import qualified Data.Set                       as Set
 import           Data.Text                      (Text, pack, singleton, unpack)
 import           Data.Text.Encoding             (encodeUtf8)
@@ -96,6 +98,15 @@ predicateNameParser = do
 
 variableNameParser :: Parser Text
 variableNameParser = char '$' *> takeWhile1 (\c -> c == '_' || c == ':' || isAlphaNum c)
+
+haskellVariableParser :: Parser Text
+haskellVariableParser = do
+  leadingUS <- optional $ char '_'
+  first <- if isJust leadingUS
+           then satisfy isLetter
+           else satisfy (\c -> isLetter c && isLower c)
+  rest  <- A.takeWhile (\c -> c == '_' || c == '\'' || isAlphaNum c)
+  pure $ foldMap singleton leadingUS <> singleton first <> rest
 
 delimited :: Parser x
           -> Parser y
@@ -246,7 +257,7 @@ termParser :: forall inSet pof ctx
               )
            => Parser (Term' inSet pof ctx)
 termParser = skipSpace *> choice
-  [ Antiquote <$> ifPresent "slice" (Slice <$> (string "${" *> many1 letter <* char '}'))
+  [ Antiquote <$> ifPresent "slice" (Slice <$> (string "${" *> haskellVariableParser <* char '}'))
   , Variable <$> ifPresent "var" variableNameParser
   , TermSet <$> parseSet @inSet @ctx
   , LBytes <$> hexBsParser
