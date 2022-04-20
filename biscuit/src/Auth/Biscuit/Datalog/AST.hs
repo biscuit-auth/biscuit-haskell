@@ -98,11 +98,11 @@ type family VariableType (inSet :: IsWithinSet) (pof :: PredicateOrFact) where
   VariableType 'NotWithinSet 'InPredicate = Text
   VariableType inSet          pof         = Void
 
-newtype Slice = Slice String
+newtype Slice = Slice Text
   deriving newtype (Eq, Show, Ord, IsString)
 
 instance Lift Slice where
-  lift (Slice name) = [| toTerm $(varE $ mkName name) |]
+  lift (Slice name) = [| toTerm $(varE $ mkName $ unpack name) |]
 #if MIN_VERSION_template_haskell(2,17,0)
   liftTyped = liftCode . unsafeTExpCoerce . lift
 #else

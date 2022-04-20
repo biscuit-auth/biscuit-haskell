@@ -38,10 +38,10 @@ basicRule = testCase "Basic rule" $
 
 antiquotedFact :: TestTree
 antiquotedFact = testCase "Sliced fact" $
-  let toto :: Text
-      toto = "test"
+  let toto2' :: Text
+      toto2' = "test"
       actual :: Fact
-      actual = [fact|right(${toto}, "read")|]
+      actual = [fact|right(${toto2'}, "read")|]
    in actual @?=
     Predicate "right" [ LString "test"
                       , LString "read"
