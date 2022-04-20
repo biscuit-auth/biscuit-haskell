@@ -75,6 +75,7 @@ module Auth.Biscuit
   , defaultLimits
   , ParseError (..)
   , ExecutionError (..)
+  , AuthorizedBiscuit (..)
   , AuthorizationSuccess (..)
   , MatchedQuery (..)
   , query
@@ -122,7 +123,8 @@ import           Auth.Biscuit.Datalog.ScopedExecutor (AuthorizationSuccess (..),
                                                       getSingleVariableValue,
                                                       getVariableValues,
                                                       queryAuthorizerFacts)
-import           Auth.Biscuit.Token                  (Biscuit,
+import           Auth.Biscuit.Token                  (AuthorizedBiscuit (..),
+                                                      Biscuit,
                                                       BiscuitEncoding (..),
                                                       BiscuitProof (..), Open,
                                                       OpenOrSealed,

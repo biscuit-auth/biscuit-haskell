@@ -57,6 +57,7 @@ test-suite biscuit-servant-test
     , bytestring
     , hspec
     , http-client
+    , mtl
     , servant
     , servant-server
     , servant-client

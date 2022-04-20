@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds         #-}
+{-# LANGUAGE NamedFieldPuns    #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes       #-}
 {-# LANGUAGE TypeApplications  #-}
@@ -9,6 +10,7 @@ module AppWithAuthorizer where
 import           Auth.Biscuit
 import           Auth.Biscuit.Servant
 import           Control.Monad.IO.Class (liftIO)
+import           Control.Monad.Reader   (ask)
 import           Data.Text              (Text)
 import           Data.Time              (getCurrentTime)
 import           Servant
@@ -28,15 +30,22 @@ call2 b =
 
 call3 :: Text -> ClientM Int
 call3 b =
-  let (_ :<|> _ :<|> e3) = client @API Proxy (protect b)
+  let (_ :<|> _ :<|> e3 :<|> _) = client @API Proxy (protect b)
    in e3
 
+call4 :: Text -> ClientM Int
+call4 b =
+  let (_ :<|> _ :<|> _ :<|> e4) = client @API Proxy (protect b)
+   in e4
+
 type H = WithAuthorizer Handler
+type H' = WithAuthorizer' Int Handler
 type API = RequireBiscuit :> ProtectedAPI
 type ProtectedAPI =
        "endpoint1" :> Get '[JSON] Int
   :<|> "endpoint2" :> Capture "int" Int :> Get '[JSON] Int
   :<|> "endpoint3" :> Get '[JSON] Int
+  :<|> "endpoint4" :> Get '[JSON] Int
 
 app :: PublicKey -> Application
 app appPublicKey =
@@ -53,7 +62,7 @@ server b =
         . withPriorityAuthorizerM nowFact
         . withPriorityAuthorizer [authorizer|allow if right("admin");|]
         . withFallbackAuthorizer [authorizer|allow if right("anon");|]
-      handlers = handler1 :<|> handler2 :<|> handler3
+      handlers = handler1 :<|> handler2 :<|> handler3 :<|> handler4
    in hoistServer @ProtectedAPI Proxy handleAuth handlers
 
 handler1 :: H Int
@@ -64,3 +73,13 @@ handler2 v = withAuthorizer [authorizer|allow if right("two", ${v});|] $ pure 2
 
 handler3 :: H Int
 handler3 = withAuthorizer [authorizer|deny if true;|] $ pure 3
+
+handler4 :: H Int
+handler4 = withTransformation extractUserId $
+  withAuthorizer [authorizer|allow if user($user_id); |] $ do
+    ask
+
+extractUserId :: AuthorizedBiscuit OpenOrSealed -> Handler Int
+extractUserId AuthorizedBiscuit{authorizationSuccess} = do
+  let b = getBindings authorizationSuccess
+   in maybe (throwError err403) pure $ getSingleVariableValue b "user_id"
