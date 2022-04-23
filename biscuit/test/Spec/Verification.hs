@@ -46,7 +46,7 @@ singleBlock = testCase "Single block" $ do
   secret <- newSecret
   biscuit <- mkBiscuit secret [block|right("file1", "read");|]
   res <- authorizeBiscuit biscuit [authorizer|check if right("file1", "read");allow if true;|]
-  matchedAllowQuery <$> res @?= Right ifTrue
+  matchedAllowQuery . authorizationSuccess <$> res @?= Right ifTrue
 
 errorAccumulation :: TestTree
 errorAccumulation = testGroup "Error accumulation"

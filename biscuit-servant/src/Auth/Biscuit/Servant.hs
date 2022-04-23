@@ -2,6 +2,8 @@
 {-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE NamedFieldPuns    #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RankNTypes        #-}
+{-# LANGUAGE RecordWildCards   #-}
 {-# LANGUAGE TypeFamilies      #-}
 module Auth.Biscuit.Servant
   (
@@ -13,14 +15,24 @@ module Auth.Biscuit.Servant
     RequireBiscuit
   , authHandler
   , genBiscuitCtx
+  -- *** Custom parsing and error handling
+  , authHandlerWith
+  , genBiscuitCtxWith
+  , BiscuitConfig (..)
+  , defaultBiscuitConfig
   -- ** Supplying a authorizer for a single endpoint
   -- $singleEndpointAuthorizer
   , checkBiscuit
   , checkBiscuitM
+  -- *** Custom parsing and error handling
+  , checkBiscuitWith
+  , checkBiscuitMWith
   -- ** Decorate regular handlers with composable authorizers
   -- $composableAuthorizers
-  , WithAuthorizer (..)
+  , WithAuthorizer' (..)
+  , WithAuthorizer
   , handleBiscuit
+  , handleBiscuitWith
   , withAuthorizer
   , withAuthorizer_
   , withAuthorizerM
@@ -31,20 +43,25 @@ module Auth.Biscuit.Servant
   , withPriorityAuthorizer
   , withFallbackAuthorizerM
   , withPriorityAuthorizerM
+  -- *** Extract information from an authorized token
+  -- $tokenPostProcessing
+  , withTransformation
 
   , module Biscuit
   ) where
 
 import           Auth.Biscuit                     as Biscuit
-import           Data.Kind (Type)
 import           Control.Applicative              (liftA2)
 import           Control.Monad.Except             (MonadError, throwError)
 import           Control.Monad.IO.Class           (MonadIO, liftIO)
-import           Control.Monad.Reader             (ReaderT, lift, runReaderT)
-import           Data.Bifunctor                   (first)
+import           Control.Monad.Reader             (ReaderT (..), lift,
+                                                   runReaderT, withReaderT)
+import           Data.ByteString                  (ByteString)
 import qualified Data.ByteString                  as BS
 import qualified Data.ByteString.Char8            as C8
 import qualified Data.ByteString.Lazy             as LBS
+import           Data.Either                      (fromRight)
+import           Data.Kind                        (Type)
 import           Network.Wai
 import           Servant                          (AuthProtect)
 import           Servant.Server
@@ -64,12 +81,12 @@ import           Servant.Server.Experimental.Auth
 -- To protect and endpoint (or a whole API tree), you can use 'RequireBiscuit'
 -- like so:
 --
---
 -- > type API = RequireBiscuit :> ProtectedAPI
 -- > type ProtectedAPI =
 -- >        "endpoint1" :> Get '[JSON] Int
 -- >   :<|> "endpoint2" :> Capture "int" Int :> Get '[JSON] Int
 -- >   :<|> "endpoint3" :> Get '[JSON] Int
+-- >   :<|> "endpoint4" :> Get '[JSON] Int
 -- >
 -- > app :: PublicKey -> Application
 -- > app publicKey =
@@ -119,7 +136,7 @@ import           Servant.Server.Experimental.Auth
 -- >                // checkBiscuitM (getting the current time is an effect)
 -- >                time(${now});
 -- >                // only allow biscuits granting access to the endpoint tagged "two"
--- >                // AND for the provided int value. This show how the checks can depend
+-- >                // AND for the provided int value. This shows how the checks can depend
 -- >                // on the http request contents.
 -- >                allow if right("two", ${value});
 -- >              |]
@@ -186,7 +203,28 @@ import           Servant.Server.Experimental.Auth
 -- >      handlers = handler1 :<|> handler2 :<|> handler3
 -- >   in hoistServer @ProtectedAPI Proxy handleAuth handlers
 -- >        -- ^ this will apply `handleAuth` on all 'ProtectedAPI' endpoints.
-
+--
+-- $tokenPostProcessing
+--
+-- By default, an `AuthorizedBiscuit` value is available through `MonadReader` in all
+-- `WithAuthorizer` handlers. In many case, a post-processing step is needed to extract
+-- meaningful information from the token (for instance extracting a user id and then fetching
+-- user information from the database). In order to avoid repeating this operation in every
+-- endpoint, `withTransformation` allows to do it for whole API trees.
+--
+-- > handler4 :: WithAuthorizer Handler Int
+-- > handler4 = withTransformation extractUserId $
+-- >   withAuthorizer [authorizer|allow if user($user_id); |] $ do
+-- >     userId <- ask -- we can access the extracted user id directly
+-- >     pure userId
+-- >
+-- > -- given a @AuthorizedBiscuit OpenOrSealed@, we can extract information from
+-- > -- the token. This step can perform effects (for instance `IO`, or `MonadError`).
+-- > extractUserId :: AuthorizedBiscuit OpenOrSealed -> Handler Int
+-- > extractUserId AuthorizedBiscuit{authorizationSuccess} = do
+-- >   let b = bindings $ matchedAllowQuery authorizationSuccess
+-- >    in maybe (throwError err403) pure $ getSingleVariableValue b "user_id"
+--
 -- | Type used to protect and API tree, requiring a biscuit token
 -- to be attached to requests. The associated auth handler will
 -- only check the biscuit signature. Checking the datalog part
@@ -199,15 +237,18 @@ type instance AuthServerData RequireBiscuit = Biscuit OpenOrSealed Verified
 -- | Wrapper for a servant handler, equipped with a biscuit 'Authorizer'
 -- that will be used to authorize the request. If the authorization
 -- succeeds, the handler is ran.
--- The handler itself is given access to the verified biscuit through
--- a @ReaderT (Biscuit OpenOrSealed Verified)@.
-data WithAuthorizer (m :: Type -> Type) (a :: Type)
+-- The handler itself is given access to the authorized biscuit (or another
+-- value derived from it) through a @ReaderT@ wrapper
+data WithAuthorizer' (t :: Type) (m :: Type -> Type) (a :: Type)
   = WithAuthorizer
-  { handler_    :: ReaderT (Biscuit OpenOrSealed Verified) m a
+  { handler_    :: ReaderT t m a
   -- ^ the wrapped handler, in a 'ReaderT' to give easy access to the biscuit
   , authorizer_ :: m Authorizer
   -- ^ the 'Authorizer' associated to the handler
   }
+
+-- | Default wrapper giving access to the @AuthorizedBiscuit@ directly.
+type WithAuthorizer = WithAuthorizer' (AuthorizedBiscuit OpenOrSealed)
 
 -- | Combines the provided 'Authorizer' to the 'Authorizer' attached to the wrapped
 -- handler. /facts/, /rules/ and /checks/ are unordered, but /policies/ have a
@@ -223,8 +264,8 @@ data WithAuthorizer (m :: Type -> Type) (a :: Type)
 -- or to query a database), you can use 'withFallbackAuthorizerM' instead.
 withFallbackAuthorizer :: Functor m
                      => Authorizer
-                     -> WithAuthorizer m a
-                     -> WithAuthorizer m a
+                     -> WithAuthorizer' t m a
+                     -> WithAuthorizer' t m a
 withFallbackAuthorizer newV h@WithAuthorizer{authorizer_} =
   h { authorizer_ = (<> newV) <$> authorizer_ }
 
@@ -242,8 +283,8 @@ withFallbackAuthorizer newV h@WithAuthorizer{authorizer_} =
 -- you can use 'withFallbackAuthorizer' instead.
 withFallbackAuthorizerM :: Applicative m
                       => m Authorizer
-                      -> WithAuthorizer m a
-                      -> WithAuthorizer m a
+                      -> WithAuthorizer' t m a
+                      -> WithAuthorizer' t m a
 withFallbackAuthorizerM newV h@WithAuthorizer{authorizer_} =
   h { authorizer_ = liftA2 (<>) authorizer_ newV }
 
@@ -280,8 +321,8 @@ withPriorityAuthorizer newV h@WithAuthorizer{authorizer_} =
 -- you can use 'withFallbackAuthorizer' instead.
 withPriorityAuthorizerM :: Applicative m
                       => m Authorizer
-                      -> WithAuthorizer m a
-                      -> WithAuthorizer m a
+                      -> WithAuthorizer' t m a
+                      -> WithAuthorizer' t m a
 withPriorityAuthorizerM newV h@WithAuthorizer{authorizer_} =
      h { authorizer_ = liftA2 (<>) newV authorizer_ }
 
@@ -293,9 +334,9 @@ withPriorityAuthorizerM newV h@WithAuthorizer{authorizer_} =
 -- If you need to perform effects to compute the authorizer (eg. to get the current date,
 -- or to query a database), you can use 'withAuthorizerM' instead.
 withAuthorizer :: Applicative m
-             => Authorizer
-             -> ReaderT (Biscuit OpenOrSealed Verified) m a
-             -> WithAuthorizer m a
+               => Authorizer
+               -> ReaderT t m a
+               -> WithAuthorizer' t m a
 withAuthorizer v handler_ =
   WithAuthorizer
     { handler_
@@ -310,8 +351,8 @@ withAuthorizer v handler_ =
 -- Here, the 'Authorizer' can be computed effectfully. If you don't need to perform effects,
 -- you can use 'withAuthorizer' instead.
 withAuthorizerM :: m Authorizer
-              -> ReaderT (Biscuit OpenOrSealed Verified) m a
-              -> WithAuthorizer m a
+                -> ReaderT t m a
+                -> WithAuthorizer' t m a
 withAuthorizerM authorizer_ handler_ =
   WithAuthorizer
     { handler_
@@ -324,7 +365,7 @@ withAuthorizerM authorizer_ handler_ =
 --
 -- If you need to perform effects to compute the authorizer (eg. to get the current date,
 -- or to query a database), you can use 'withAuthorizerM_' instead.
-withAuthorizer_ :: Monad m => Authorizer -> m a -> WithAuthorizer m a
+withAuthorizer_ :: Monad m => Authorizer -> m a -> WithAuthorizer' t m a
 withAuthorizer_ v = withAuthorizer v . lift
 
 -- | Wraps an existing handler block, attaching a 'Authorizer'. The handler can be
@@ -335,7 +376,7 @@ withAuthorizer_ v = withAuthorizer v . lift
 --
 -- Here, the 'Authorizer' can be computed effectfully. If you don't need to perform effects,
 -- you can use 'withAuthorizer_' instead.
-withAuthorizerM_ :: Monad m => m Authorizer -> m a -> WithAuthorizer m a
+withAuthorizerM_ :: Monad m => m Authorizer -> m a -> WithAuthorizer' t m a
 withAuthorizerM_ v = withAuthorizerM v . lift
 
 -- | Wraps an existing handler block, attaching an empty 'Authorizer'. The handler has
@@ -348,8 +389,8 @@ withAuthorizerM_ v = withAuthorizerM v . lift
 -- 'withFallbackAuthorizer' or 'withPriorityAuthorizer' to apply policies on several
 -- handlers at the same time (with 'hoistServer' for instance).
 noAuthorizer :: Applicative m
-           => ReaderT (Biscuit OpenOrSealed Verified) m a
-           -> WithAuthorizer m a
+           => ReaderT t m a
+           -> WithAuthorizer' t m a
 noAuthorizer = withAuthorizer mempty
 
 -- | Wraps an existing handler block, attaching an empty 'Authorizer'. The handler can be
@@ -360,40 +401,102 @@ noAuthorizer = withAuthorizer mempty
 -- context, and the authorizer context is applied on the whole API tree through
 -- 'withFallbackAuthorizer' or 'withPriorityAuthorizer' to apply policies on several
 -- handlers at the same time (with 'hoistServer' for instance).
-noAuthorizer_ :: Monad m => m a -> WithAuthorizer m a
+noAuthorizer_ :: Monad m => m a -> WithAuthorizer' t m a
 noAuthorizer_ = noAuthorizer . lift
 
--- | Extracts a biscuit from an http request, assuming:
+-- | Configuration record for use with `authHandlerWith`. If you don't care about details,
+-- you should use `authHandler` instead, which provides sensible defaults.
+data BiscuitConfig e
+  = BiscuitConfig
+  { parserConfig             :: ParserConfig Handler
+  -- ^ how to parse a serialized biscuit (this includes public key and revocation checks)
+  , extractSerializedBiscuit :: Request -> Either e ByteString
+  -- ^ how to extract the serialized biscuit from the request
+  , onExtractionError        :: forall a. e -> Handler a
+  -- ^ what to do when the biscuit cannot be extracted from the request
+  , onParseError             :: forall a. ParseError -> Handler a
+  -- ^ what to do when the biscuit cannot be parsed
+  }
+
+-- | Default configuration used by `authHandler`.
+--
+-- It assumes:
 --
 -- - the biscuit is b64-encoded
 -- - prefixed with the @Bearer @ string
 -- - in the @Authorization@ header
-extractBiscuit :: PublicKey
-               -> Request
-               -> Either String (Biscuit OpenOrSealed Verified)
-extractBiscuit pk req = do
+--
+-- It always uses the same public key and does not perform revocation checks. It returns
+-- text-based 401 errors.
+defaultBiscuitConfig :: PublicKey -> BiscuitConfig String
+defaultBiscuitConfig publicKey = BiscuitConfig
+  { parserConfig = ParserConfig
+      { getPublicKey = const publicKey
+      , isRevoked = const $ pure False
+      , encoding = UrlBase64
+      }
+  , extractSerializedBiscuit = readFromAuthHeader
+  , onExtractionError = throwError . defaultInvalidBiscuitError . Right
+  , onParseError      = throwError . defaultInvalidBiscuitError . Left
+  }
+
+-- | Read a serialized biscuit from the @Authorization@ header, assuming it is prefixed
+-- by @Bearer@.
+readFromAuthHeader :: Request -> Either String ByteString
+readFromAuthHeader req = do
   let note e = maybe (Left e) Right
   authHeader <- note "Missing Authorization header" . lookup "Authorization" $ requestHeaders req
-  b64Token   <- note "Not a Bearer token" $ BS.stripPrefix "Bearer " authHeader
-  first (const "Not a B64-encoded biscuit") $ parseB64 pk b64Token
+  note "Not a Bearer token" $ BS.stripPrefix "Bearer " authHeader
+
+-- | Default 401 error returned if the biscuit can't be extracted or fails to parse.
+defaultInvalidBiscuitError :: Either ParseError String -> ServerError
+defaultInvalidBiscuitError e =
+  let s = fromRight "Not a B64-encoded biscuit" e
+   in err401 { errBody = LBS.fromStrict (C8.pack s) }
+
+-- | Default 403 error returned if the biscuit fails authorization.
+defaultUnauthorizedBiscuitError :: ExecutionError -> ServerError
+defaultUnauthorizedBiscuitError _ =
+  err403 { errBody = "Biscuit failed checks" }
 
 -- | Servant authorization handler. This extracts the biscuit from the request,
 -- checks its signature (but not the datalog part) and returns a 'Biscuit'
--- upon success.
-authHandler :: PublicKey
-            -> AuthHandler Request (Biscuit OpenOrSealed Verified)
-authHandler publicKey = mkAuthHandler handler
+-- upon success. See `BiscuitConfig` for configuration details.
+authHandlerWith :: BiscuitConfig e
+                -> AuthHandler Request (Biscuit OpenOrSealed Verified)
+authHandlerWith BiscuitConfig{..} = mkAuthHandler handler
   where
-    authError s = err401 { errBody = LBS.fromStrict (C8.pack s) }
-    orError = either (throwError . authError) pure
-    handler req =
-      orError $ extractBiscuit publicKey req
+    orExtractionError = either onExtractionError  pure
+    orParseError = either onParseError pure
+    handler req = do
+      bs <- orExtractionError $ extractSerializedBiscuit req
+      orParseError =<< parseWith parserConfig bs
+
+-- | Default servant authorization handler. This extracts the biscuit from the request,
+-- checks its signature (but not the datalog part) and returns a 'Biscuit'
+-- upon success. If you need to customize token extraction or error handling, you can
+-- use `authHandlerWith` instead.
+authHandler :: PublicKey -> AuthHandler Request (Biscuit OpenOrSealed Verified)
+authHandler = authHandlerWith . defaultBiscuitConfig
 
 -- | Helper function generating a servant context containing the authorization
--- handler.
+-- handler. The token will be read as a b64-url string (prefixed with @Bearer@)
+-- in the @Authorization@ header.
+--
+-- If you need custom error handling or token parsing, you can use 'genBiscuitCtxWith'
+-- instead.
 genBiscuitCtx :: PublicKey
               -> Context '[AuthHandler Request (Biscuit OpenOrSealed Verified)]
 genBiscuitCtx pk = authHandler pk :. EmptyContext
+
+-- | Helper function generating a servant context containing the authorization
+-- handler, with the provided configuration.
+--
+-- If you don't need custom error handling or token extraction, you can use
+-- 'genBiscuitCtx' instead.
+genBiscuitCtxWith :: BiscuitConfig e
+                  -> Context '[AuthHandler Request (Biscuit OpenOrSealed Verified)]
+genBiscuitCtxWith c = authHandlerWith c :. EmptyContext
 
 -- | Given a biscuit (provided by the servant authorization mechanism),
 -- verify its validity (with the provided 'Authorizer').
@@ -411,12 +514,32 @@ checkBiscuit :: (MonadIO m, MonadError ServerError m)
              -> Authorizer
              -> m a
              -> m a
-checkBiscuit vb v h = do
-  res <- liftIO $ authorizeBiscuit vb v
-  case res of
-    Left e  -> do liftIO $ print e
-                  throwError $ err401 { errBody = "Biscuit failed checks" }
-    Right _ -> h
+checkBiscuit vb = do
+  checkBiscuitM vb . pure
+
+-- | Given a biscuit (provided by the servant authorization mechanism),
+-- verify its validity (with the provided 'Authorizer').
+-- If the authorization fails, the provided error handler will be used to return
+-- an error.
+--
+-- If you need to perform effects in the verification phase (eg to get the current time,
+-- or if you need to issue a DB query to retrieve extra information needed to check the token),
+-- you can use 'checkBiscuitMWith' instead.
+--
+-- If you don't want a custom error handler, you can use 'checkBiscuit' instead.
+--
+-- If you don't want to pass the biscuit manually to all the endpoints or want to
+-- blanket apply authorizers on whole API trees, you can consider using 'withAuthorizer'
+-- (on endpoints), 'withFallbackAuthorizer' and 'withPriorityAuthorizer' (on API sub-trees)
+-- and 'handleBiscuit' (on the whole API).
+checkBiscuitWith :: (MonadIO m, MonadError ServerError m)
+                 => (forall b. ExecutionError -> m b)
+                 -> Biscuit OpenOrSealed Verified
+                 -> Authorizer
+                 -> ReaderT (AuthorizedBiscuit OpenOrSealed) m a
+                 -> m a
+checkBiscuitWith onError vb =
+  checkBiscuitMWith onError vb . pure
 
 -- | Given a 'Biscuit' (provided by the servant authorization mechanism),
 -- verify its validity (with the provided 'Authorizer', which can be effectful).
@@ -434,12 +557,35 @@ checkBiscuitM :: (MonadIO m, MonadError ServerError m)
               -> m a
               -> m a
 checkBiscuitM vb mv h = do
+  let onError = throwError . defaultUnauthorizedBiscuitError
+   in checkBiscuitMWith onError vb mv (lift h)
+
+-- | Given a 'Biscuit' (provided by the servant authorization mechanism),
+-- verify its validity (with the provided 'Authorizer', which can be effectful).
+-- If the authorization fails, the provided error handler will be used to return
+-- an error.
+--
+-- If you don't need to run any effects in the verifying phase, you can use 'checkBiscuitWith'
+-- instead.
+--
+-- If you don't want a custom error handler, you can use 'checkBiscuitM' instead.
+--
+-- If you don't want to pass the biscuit manually to all the endpoints or want to blanket apply
+-- authorizers on whole API trees, you can consider using 'withAuthorizer' (on endpoints),
+-- 'withFallbackAuthorizer' and 'withPriorityAuthorizer' (on API sub-trees) and 'handleBiscuit'
+-- (on the whole API).
+checkBiscuitMWith :: (MonadIO m, MonadError ServerError m)
+                  => (forall b. ExecutionError -> m b)
+                  -> Biscuit OpenOrSealed Verified
+                  -> m Authorizer
+                  -> ReaderT (AuthorizedBiscuit OpenOrSealed) m a
+                  -> m a
+checkBiscuitMWith onError vb mv h = do
   v   <- mv
   res <- liftIO $ authorizeBiscuit vb v
   case res of
-    Left e  -> do liftIO $ print e
-                  throwError $ err401 { errBody = "Biscuit failed checks" }
-    Right _ -> h
+    Left e   -> onError e
+    Right as -> runReaderT h as
 
 -- | Given a handler wrapped in a 'WithAuthorizer', use the attached 'Authorizer' to
 -- verify the provided biscuit and return an error as needed.
@@ -451,5 +597,36 @@ handleBiscuit :: (MonadIO m, MonadError ServerError m)
               -> WithAuthorizer m a
               -> m a
 handleBiscuit b WithAuthorizer{authorizer_, handler_} =
-  let h = runReaderT handler_ b
-  in checkBiscuitM b authorizer_ h
+  let onError = throwError . defaultUnauthorizedBiscuitError
+   in checkBiscuitMWith onError b authorizer_ handler_
+
+-- | Given a handler wrapped in a 'WithAuthorizer', use the attached 'Authorizer' to
+-- verify the provided biscuit and return an error as needed, with the provided error
+-- handler.
+--
+-- If you don't want to provide the error handler, you can use 'handleBiscuit' which
+-- uses a default error handler
+--
+-- For simpler use cases, consider using 'checkBiscuitWith' instead, which works on regular
+-- servant handlers.
+handleBiscuitWith :: (MonadIO m, MonadError ServerError m)
+                  => (forall b. ExecutionError -> m b)
+                  -> Biscuit OpenOrSealed Verified
+                  -> WithAuthorizer m a
+                  -> m a
+handleBiscuitWith onError b WithAuthorizer{authorizer_, handler_} =
+  checkBiscuitMWith onError b authorizer_ handler_
+
+-- | Transform the context provided by 'WithAuthorizer'' in an effectful way.
+-- This is useful to turn an 'AuthorizedBiscuit' into a custom type.
+-- Transformations can be chained within an API tree as long as the outermost value
+-- is a 'WithAuthorizer', that can be handled by 'handleBiscuit'.
+withTransformation :: Monad m
+                   => (t -> m t')
+                   -> WithAuthorizer' t' m a
+                   -> WithAuthorizer' t  m a
+withTransformation compute wa@WithAuthorizer{handler_} =
+  let newHandler = do
+        t' <- ReaderT compute
+        withReaderT (const t') handler_
+   in wa { handler_ = newHandler }

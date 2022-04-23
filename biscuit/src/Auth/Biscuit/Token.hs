@@ -23,6 +23,7 @@ module Auth.Biscuit.Token
   , ParseError (..)
   , ExistingBlock
   , ParsedSignedBlock
+  , AuthorizedBiscuit (..)
   -- $openOrSealed
   , OpenOrSealed
   , Open
@@ -109,14 +110,14 @@ data OpenOrSealed
 -- /open/ (capable of being attenuated further). In that case the proof is a secret
 -- key that can be used to sign a new block.
 newtype Open = Open SecretKey
-  deriving stock Show
+  deriving stock (Eq, Show)
 
 -- | This datatype represents the final proof of a biscuit statically known to be
 -- /sealed/ (not capable of being attenuated further). In that case the proof is a
 -- signature proving that the party who sealed the token did know the last secret
 -- key.
 newtype Sealed = Sealed Signature
-  deriving stock Show
+  deriving stock (Eq, Show)
 
 -- | This class allows functions working on both open and sealed biscuits to accept
 -- indifferently 'OpenOrSealed', 'Open' or 'Sealed' biscuits. It has no laws, it only
@@ -434,13 +435,19 @@ getRevocationIds Biscuit{authority, blocks} =
    in getRevocationId <$> allBlocks
 
 -- | Generic version of 'authorizeBiscuitWithLimits' which takes custom 'Limits'.
-authorizeBiscuitWithLimits :: Limits -> Biscuit a Verified -> Authorizer -> IO (Either ExecutionError AuthorizationSuccess)
-authorizeBiscuitWithLimits l Biscuit{..} authorizer =
+authorizeBiscuitWithLimits :: Limits -> Biscuit proof Verified -> Authorizer -> IO (Either ExecutionError (AuthorizedBiscuit proof))
+authorizeBiscuitWithLimits l biscuit@Biscuit{..} authorizer =
   let toBlockWithRevocationId ((_, block), sig, _) = (block, convert sig)
-   in runAuthorizerWithLimits l
-        (toBlockWithRevocationId authority)
-        (toBlockWithRevocationId <$> blocks)
-        authorizer
+      withBiscuit authorizationSuccess =
+        AuthorizedBiscuit
+          { authorizedBiscuit = biscuit
+          , authorizationSuccess
+          }
+   in fmap withBiscuit <$>
+        runAuthorizerWithLimits l
+          (toBlockWithRevocationId authority)
+          (toBlockWithRevocationId <$> blocks)
+          authorizer
 
 -- | Given a biscuit with a verified signature and an authorizer (a set of facts, rules, checks
 -- and policies), verify a biscuit:
@@ -455,7 +462,7 @@ authorizeBiscuitWithLimits l Biscuit{..} authorizer =
 --
 -- Specific runtime limits can be specified by using 'authorizeBiscuitWithLimits'. 'authorizeBiscuit'
 -- uses a set of defaults defined in 'defaultLimits'.
-authorizeBiscuit :: Biscuit proof Verified -> Authorizer -> IO (Either ExecutionError AuthorizationSuccess)
+authorizeBiscuit :: Biscuit proof Verified -> Authorizer -> IO (Either ExecutionError (AuthorizedBiscuit proof))
 authorizeBiscuit = authorizeBiscuitWithLimits defaultLimits
 
 -- | Retrieve the `PublicKey` which was used to verify the `Biscuit` signatures
@@ -463,3 +470,10 @@ getVerifiedBiscuitPublicKey :: Biscuit a Verified -> PublicKey
 getVerifiedBiscuitPublicKey Biscuit{proofCheck} =
   let Verified pk = proofCheck
    in pk
+
+data AuthorizedBiscuit p
+  = AuthorizedBiscuit
+  { authorizedBiscuit    :: Biscuit p Verified
+  , authorizationSuccess :: AuthorizationSuccess
+  }
+  deriving (Eq, Show)

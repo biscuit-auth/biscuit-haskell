@@ -13,7 +13,7 @@ import           Data.Text.Encoding (decodeUtf8)
 import           Data.Time          (UTCTime, addUTCTime, getCurrentTime)
 import           Test.Hspec
 
-import           AppWithAuthorizer    (app, call1, call2, call3)
+import           AppWithAuthorizer  (app, call1, call2, call3, call4)
 import           ClientHelpers      (runC, withApp)
 
 main :: IO ()
@@ -28,6 +28,7 @@ main = do
   e22    <- toText <$> mkE2Biscuit 2 appSecretKey
   ttld   <- toText <$> (addTtl later =<< mkAdminBiscuit appSecretKey)
   expd   <- toText <$> (addTtl earlier =<< mkAdminBiscuit appSecretKey)
+  e4     <- toText <$> mkE4Biscuit 42 appSecretKey
   print adminB
   hspec $
     around (withApp $ app appPk) $
@@ -48,6 +49,8 @@ main = do
         it "Effectful verification should work as expected" $ \port -> do
           runC port (call1 ttld) `shouldReturn` Right 1
           runC port (call1 expd) `shouldReturn` Left (Just "Biscuit failed checks")
+        it "Token post-processing should work as expected" $ \port -> do
+          runC port (call4 e4) `shouldReturn` Right 42
 
 appSecretKey :: SecretKey
 appSecretKey = fromJust . parseSecretKeyHex $ "c2b7507af4f849fd028d0f7e90b04a4e74d9727b358fca18b65beffd86c47209"
@@ -66,6 +69,9 @@ mkE1Biscuit sk = mkBiscuit sk [block|right("one");|]
 
 mkE2Biscuit :: Int -> SecretKey -> IO (Biscuit Open Verified)
 mkE2Biscuit v sk = mkBiscuit sk [block|right("two", ${v});|]
+
+mkE4Biscuit :: Int -> SecretKey -> IO (Biscuit Open Verified)
+mkE4Biscuit v sk = mkBiscuit sk [block|user(${v});|]
 
 addTtl :: UTCTime -> Biscuit Open Verified -> IO (Biscuit Open Verified)
 addTtl expiration =

@@ -83,7 +83,6 @@ data AuthorizationSuccess
 getBindings :: AuthorizationSuccess -> Set Bindings
 getBindings AuthorizationSuccess{matchedAllowQuery=MatchedQuery{bindings}} = bindings
 
-
 -- | Given a series of blocks and an authorizer, ensure that all
 -- the checks and policies match
 runAuthorizer :: BlockWithRevocationId
