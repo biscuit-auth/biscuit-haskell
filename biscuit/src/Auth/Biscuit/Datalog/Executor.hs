@@ -165,7 +165,6 @@ keepAuthorized' factGroup mScope currentBlockId =
    in case scope of
         OnlyAuthority  -> keepAuthorized factGroup (Set.fromList [0, currentBlockId])
         Previous       -> keepAuthorized factGroup (Set.fromList [0..currentBlockId])
-        UnsafeAny      -> factGroup
         OnlyBlocks ids -> keepAuthorized factGroup (Set.insert currentBlockId ids)
 
 toScopedFacts :: FactGroup -> Set (Scoped Fact)
