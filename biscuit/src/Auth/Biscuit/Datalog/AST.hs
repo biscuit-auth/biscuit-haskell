@@ -390,7 +390,6 @@ listSymbolsInCheck =
 data RuleScope  =
     OnlyAuthority
   | Previous
-  | UnsafeAny
   | OnlyBlocks (Set Natural)
   deriving (Eq, Ord, Show, Lift)
 
