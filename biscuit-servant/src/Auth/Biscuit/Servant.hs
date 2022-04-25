@@ -78,7 +78,7 @@ import           Servant.Server.Experimental.Auth
 
 -- $apitypes
 --
--- To protect and endpoint (or a whole API tree), you can use 'RequireBiscuit'
+-- To protect an endpoint (or a whole API tree), you can use 'RequireBiscuit'
 -- like so:
 --
 -- > type API = RequireBiscuit :> ProtectedAPI
@@ -207,7 +207,7 @@ import           Servant.Server.Experimental.Auth
 -- $tokenPostProcessing
 --
 -- By default, an `AuthorizedBiscuit` value is available through `MonadReader` in all
--- `WithAuthorizer` handlers. In many case, a post-processing step is needed to extract
+-- `WithAuthorizer` handlers. In many cases, a post-processing step is needed to extract
 -- meaningful information from the token (for instance extracting a user id and then fetching
 -- user information from the database). In order to avoid repeating this operation in every
 -- endpoint, `withTransformation` allows to do it for whole API trees.
@@ -224,14 +224,17 @@ import           Servant.Server.Experimental.Auth
 -- > extractUserId AuthorizedBiscuit{authorizationSuccess} = do
 -- >   let b = bindings $ matchedAllowQuery authorizationSuccess
 -- >    in maybe (throwError err403) pure $ getSingleVariableValue b "user_id"
---
--- | Type used to protect and API tree, requiring a biscuit token
+
+-- | Type used to protect an API tree, requiring a biscuit token
 -- to be attached to requests. The associated auth handler will
 -- only check the biscuit signature. Checking the datalog part
 -- usually requires endpoint-specific information, and has to
 -- be performed separately with either 'checkBiscuit' (for simple
 -- use-cases) or 'handleBiscuit' (for more complex use-cases).
 type RequireBiscuit = AuthProtect "biscuit"
+
+-- | The result of a 'RequireBiscuit' check will be a @Biscuit OpenOrSealed Verified@:
+-- a biscuit that's been successfully parsed, with its signatures verified.
 type instance AuthServerData RequireBiscuit = Biscuit OpenOrSealed Verified
 
 -- | Wrapper for a servant handler, equipped with a biscuit 'Authorizer'
@@ -623,8 +626,14 @@ handleBiscuitWith onError b WithAuthorizer{authorizer_, handler_} =
 -- is a 'WithAuthorizer', that can be handled by 'handleBiscuit'.
 withTransformation :: Monad m
                    => (t -> m t')
+                   -- ^ context transformation function. @t@ will usually be
+                   -- @AuthorizedBiscuit OpenOrSealed@
                    -> WithAuthorizer' t' m a
+                   -- ^ wrapped handler with reader access to a @t'@ value
+                   -- (derived from an @AuthorizedBiscuit OpenOrSealed@)
                    -> WithAuthorizer' t  m a
+                   -- ^ wrapped handler with reader access to a @t@ value
+                   -- (usually @AuthorizedBiscuit OpenOrSealed@)
 withTransformation compute wa@WithAuthorizer{handler_} =
   let newHandler = do
         t' <- ReaderT compute
