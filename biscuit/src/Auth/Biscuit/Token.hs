@@ -34,6 +34,7 @@ module Auth.Biscuit.Token
   , mkBiscuit
   , mkBiscuitWith
   , addBlock
+  , addSignedBlock
   , BiscuitEncoding (..)
   , ParserConfig (..)
   , parseBiscuitWith
@@ -66,8 +67,9 @@ import           Auth.Biscuit.Crypto                 (PublicKey, SecretKey,
                                                       Signature, SignedBlock,
                                                       convert,
                                                       getSignatureProof,
-                                                      signBlock, toPublic,
-                                                      verifyBlocks,
+                                                      signBlock,
+                                                      signExternalBlock,
+                                                      toPublic, verifyBlocks,
                                                       verifySecretProof,
                                                       verifySignatureProof)
 import           Auth.Biscuit.Datalog.AST            (Authorizer, Block)
@@ -86,7 +88,7 @@ import           Auth.Biscuit.Symbols
 -- so we need to keep the initial serialized payload around in order to compute
 -- a new signature when adding a block.
 type ExistingBlock = (ByteString, Block)
-type ParsedSignedBlock = (ExistingBlock, Signature, PublicKey)
+type ParsedSignedBlock = (ExistingBlock, Signature, PublicKey, Maybe (Signature, PublicKey))
 
 -- $openOrSealed
 --
@@ -206,7 +208,7 @@ asOpen b@Biscuit{proof}   = case proof of
   _           -> Nothing
 
 toParsedSignedBlock :: Block -> SignedBlock -> ParsedSignedBlock
-toParsedSignedBlock block (serializedBlock, sig, pk) = ((serializedBlock, block), sig, pk)
+toParsedSignedBlock block (serializedBlock, sig, pk, eSig) = ((serializedBlock, block), sig, pk, eSig)
 
 -- | Create a new biscuit with the provided authority block. Such a biscuit is 'Open' to
 -- further attenuation.
@@ -241,13 +243,29 @@ addBlock block b@Biscuit{..} = do
            , proof = Open nextSk
            }
 
+addSignedBlock :: SecretKey
+               -> Block
+               -> Biscuit Open check
+               -> IO (Biscuit Open check)
+addSignedBlock eSk block b@Biscuit{..} = do
+  let (blockSymbols, blockSerialized) = PB.encodeBlock <$> blockToPb symbols block
+      lastBlock = NE.last (authority :| blocks)
+      (_, _, lastPublicKey, _) = lastBlock
+      Open p = proof
+  (signedBlock, nextSk) <- signExternalBlock p eSk lastPublicKey blockSerialized
+  pure $ b { blocks = blocks <> [toParsedSignedBlock block signedBlock]
+           , symbols = symbols <> blockSymbols
+           , proof = Open nextSk
+           }
+
+
 -- | Turn an 'Open' biscuit into a 'Sealed' one, preventing it from being attenuated
 -- further. A 'Sealed' biscuit cannot be turned into an 'Open' one.
 seal :: Biscuit Open check -> Biscuit Sealed check
 seal b@Biscuit{..} =
   let Open sk = proof
-      ((lastPayload, _), lastSig, lastPk) = NE.last $ authority :| blocks
-      newProof = Sealed $ getSignatureProof (lastPayload, lastSig, lastPk) sk
+      ((lastPayload, _), lastSig, lastPk, eSig) = NE.last $ authority :| blocks
+      newProof = Sealed $ getSignatureProof (lastPayload, lastSig, lastPk, eSig) sk
    in b { proof = newProof }
 
 -- | Serialize a biscuit to a raw bytestring
@@ -264,7 +282,7 @@ serializeBiscuit Biscuit{..} =
         }
 
 toPBSignedBlock :: ParsedSignedBlock -> PB.SignedBlock
-toPBSignedBlock ((block, _), sig, pk) = signedBlockToPb (block, sig, pk)
+toPBSignedBlock ((block, _), sig, pk, eSig) = signedBlockToPb (block, sig, pk, eSig)
 
 -- | Errors that can happen when parsing a biscuit. Since complete parsing of a biscuit
 -- requires a signature check, an invalid signature check is a parsing error
@@ -316,7 +334,7 @@ checkRevocation :: Applicative m
                 -> BiscuitWrapper
                 -> m (Either ParseError BiscuitWrapper)
 checkRevocation isRevoked bw@BiscuitWrapper{wAuthority,wBlocks} =
-  let getRevocationId (_, sig, _) = convert sig
+  let getRevocationId (_, sig, _, _) = convert sig
       revocationIds = getRevocationId <$> wAuthority :| wBlocks
       keepIfNotRevoked True  = Left RevokedBiscuit
       keepIfNotRevoked False = Right bw
@@ -324,14 +342,14 @@ checkRevocation isRevoked bw@BiscuitWrapper{wAuthority,wBlocks} =
 
 parseBlocks :: BiscuitWrapper -> Either ParseError (Symbols, NonEmpty ParsedSignedBlock)
 parseBlocks BiscuitWrapper{..} = do
-  let toRawSignedBlock (payload, sig, pk') = do
+  let toRawSignedBlock (payload, sig, pk', eSig) = do
         pbBlock <- first (InvalidProtobufSer False) $ PB.decodeBlock payload
-        pure ((payload, pbBlock), sig, pk')
+        pure ((payload, pbBlock), sig, pk', eSig)
 
   rawAuthority <- toRawSignedBlock wAuthority
   rawBlocks    <- traverse toRawSignedBlock wBlocks
 
-  let symbols = extractSymbols $ (\((_, p), _, _) -> p) <$> rawAuthority : rawBlocks
+  let symbols = extractSymbols $ (\((_, p), _, _, _) -> p) <$> rawAuthority : rawBlocks
 
   authority <- rawSignedBlockToParsedSignedBlock symbols rawAuthority
   blocks    <- traverse (rawSignedBlockToParsedSignedBlock symbols) rawBlocks
@@ -377,7 +395,7 @@ checkBiscuitSignatures :: BiscuitProof proof
                        -> Either ParseError (Biscuit proof Verified)
 checkBiscuitSignatures getPublicKey b@Biscuit{..} = do
   let pk = getPublicKey rootKeyId
-      toSignedBlock ((payload, _), sig, nextPk) = (payload, sig, nextPk)
+      toSignedBlock ((payload, _), sig, nextPk, eSig) = (payload, sig, nextPk, eSig)
       allBlocks = toSignedBlock <$> (authority :| blocks)
       blocksResult = verifyBlocks allBlocks pk
       proofResult = case toPossibleProofs proof of
@@ -419,11 +437,11 @@ parseBiscuitWith ParserConfig{..} bs =
    in join <$> traverse wrapperToBiscuit parsedWrapper
 
 rawSignedBlockToParsedSignedBlock :: Symbols
-                                  -> ((ByteString, PB.Block), Signature, PublicKey)
+                                  -> ((ByteString, PB.Block), Signature, PublicKey, Maybe (Signature, PublicKey))
                                   -> Either ParseError ParsedSignedBlock
-rawSignedBlockToParsedSignedBlock s ((payload, pbBlock), sig, pk) = do
+rawSignedBlockToParsedSignedBlock s ((payload, pbBlock), sig, pk, eSig) = do
   block   <- first (InvalidProtobuf False) $ pbToBlock s pbBlock
-  pure ((payload, block), sig, pk)
+  pure ((payload, block), sig, pk, eSig)
 
 -- | Extract the list of revocation ids from a biscuit.
 -- To reject revoked biscuits, please use 'parseWith' instead. This function
@@ -431,7 +449,7 @@ rawSignedBlockToParsedSignedBlock s ((payload, pbBlock), sig, pk) = do
 getRevocationIds :: Biscuit proof check -> NonEmpty ByteString
 getRevocationIds Biscuit{authority, blocks} =
   let allBlocks = authority :| blocks
-      getRevocationId (_, sig, _) = convert sig
+      getRevocationId (_, sig, _, _) = convert sig
    in getRevocationId <$> allBlocks
 
 -- | Generic version of 'authorizeBiscuitWithLimits' which takes custom 'Limits'.

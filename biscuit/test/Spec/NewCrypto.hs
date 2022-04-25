@@ -47,6 +47,15 @@ append t@Token{payload} p = do
     , privKey
     }
 
+appendSigned :: Token -> SecretKey -> ByteString -> IO Token
+appendSigned t@Token{payload} eSk p = do
+  let (_, _, lastPk, _) = NE.last payload
+  (signedBlock, privKey) <- signExternalBlock (privKey t) eSk lastPk p
+  pure Token
+    { payload = snocNE payload signedBlock
+    , privKey
+    }
+
 seal :: Token -> SealedToken
 seal Token{payload,privKey} =
   let lastBlock = NE.last payload
@@ -89,6 +98,10 @@ specs = testGroup "new biscuit crypto"
       , tamperedBlockSealed
       , removedBlockSealed
       ]
+  , testGroup "external signatures"
+      [ multiBlockRoundtripWithExternal
+      , invalidExternalSig
+      ]
   ]
 
 singleBlockRoundtrip :: TestTree
@@ -110,6 +123,36 @@ multiBlockRoundtrip = testCase "Multi block roundtrip" $ do
   let res = verifyToken attenuated pk
   res @?= True
 
+multiBlockRoundtripWithExternal :: TestTree
+multiBlockRoundtripWithExternal = testCase "Multi block with external signatures roundtrip" $ do
+  sk <- generateSecretKey
+  eSk <- generateSecretKey
+  let pk = toPublic sk
+      content = "content"
+  token <- signToken content sk
+  attenuated <- appendSigned token eSk "block1"
+  let res = verifyToken attenuated pk
+  res @?= True
+
+invalidExternalSig :: TestTree
+invalidExternalSig = testCase "Invalid external signature" $ do
+  sk <- generateSecretKey
+  eSk <- generateSecretKey
+  let pk = toPublic sk
+      ePk = toPublic eSk
+      content = "content"
+  token <- signToken content sk
+  attenuated <- appendSigned token eSk "block1"
+  let bogusSignature = sign eSk ePk ("yolo yolo" :: ByteString)
+      replaceExternalSig :: SignedBlock -> SignedBlock
+      replaceExternalSig (p, s, pk, Just (_, ePk)) = (p, s, pk, Just (bogusSignature, ePk))
+      replaceExternalSig sb = sb
+      tamper :: Blocks -> Blocks
+      tamper = fmap replaceExternalSig
+      tampered = alterPayload tamper attenuated
+  let res = verifyToken tampered pk
+  res @?= False
+
 alterPayload :: (Blocks -> Blocks)
              -> Token
              -> Token
@@ -122,7 +165,7 @@ tamperedAuthority = testCase "Tampered authority" $ do
       content = "content"
   token <- signToken content sk
   attenuated <- append token "block1"
-  let tamper ((_, s, pk) :| o) = ("tampered", s, pk) :| o
+  let tamper ((_, s, pk, eS) :| o) = ("tampered", s, pk, eS) :| o
       tampered = alterPayload tamper attenuated
   let res = verifyToken tampered pk
   res @?= False
@@ -134,7 +177,7 @@ tamperedBlock = testCase "Tampered block" $ do
       content = "content"
   token <- signToken content sk
   attenuated <- append token "block1"
-  let tamper (h :| ((_, s, pk): t)) = h :| (("tampered", s, pk) : t)
+  let tamper (h :| ((_, s, pk, eS): t)) = h :| (("tampered", s, pk, eS) : t)
       tampered = alterPayload tamper attenuated
   let res = verifyToken tampered pk
   res @?= False
@@ -182,7 +225,7 @@ tamperedAuthoritySealed = testCase "Tampered authority" $ do
       content = "content"
   token <- signToken content sk
   attenuated <- seal <$> append token "block1"
-  let tamper ((_, s, pk) :| o) = ("tampered", s, pk) :| o
+  let tamper ((_, s, pk, eS) :| o) = ("tampered", s, pk, eS) :| o
       tampered = alterPayloadSealed tamper attenuated
   let res = verifySealedToken tampered pk
   res @?= False
@@ -194,7 +237,7 @@ tamperedBlockSealed = testCase "Tampered block" $ do
       content = "content"
   token <- signToken content sk
   attenuated <- seal <$> append token "block1"
-  let tamper (h :| ((_, s, pk): t)) = h :| (("tampered", s, pk) : t)
+  let tamper (h :| ((_, s, pk, eS): t)) = h :| (("tampered", s, pk, eS) : t)
       tampered = alterPayloadSealed tamper attenuated
   let res = verifySealedToken tampered pk
   res @?= False

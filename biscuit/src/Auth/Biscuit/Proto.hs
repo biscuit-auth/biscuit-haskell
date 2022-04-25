@@ -16,6 +16,7 @@ module Auth.Biscuit.Proto
   , SignedBlock (..)
   , PublicKey (..)
   , Algorithm (..)
+  , ExternalSig (..)
   , Proof (..)
   , Block (..)
   , FactV2 (..)
@@ -61,10 +62,18 @@ data Proof =
   deriving (Generic, Show)
   deriving anyclass (Decode, Encode)
 
+data ExternalSig = ExternalSig
+  { signature :: Required 1 (Value ByteString)
+  , publicKey :: Required 2 (Message PublicKey)
+  }
+  deriving (Generic, Show)
+  deriving anyclass (Decode, Encode)
+
 data SignedBlock = SignedBlock
-  { block     :: Required 1 (Value ByteString)
-  , nextKey   :: Required 2 (Message PublicKey)
-  , signature :: Required 3 (Value ByteString)
+  { block       :: Required 1 (Value ByteString)
+  , nextKey     :: Required 2 (Message PublicKey)
+  , signature   :: Required 3 (Value ByteString)
+  , externalSig :: Optional 4 (Message ExternalSig)
   }
   deriving (Generic, Show)
   deriving anyclass (Decode, Encode)

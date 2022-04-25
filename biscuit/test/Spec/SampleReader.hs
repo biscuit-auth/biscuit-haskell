@@ -43,7 +43,7 @@ import           Auth.Biscuit.Datalog.Parser   (authorizerParser, blockParser)
 import           Auth.Biscuit.Token
 
 getB :: ParsedSignedBlock -> Block
-getB ((_, b), _, _) = b
+getB ((_, b), _, _, _) = b
 
 getAuthority :: Biscuit OpenOrSealed Verified -> Block
 getAuthority = getB . authority

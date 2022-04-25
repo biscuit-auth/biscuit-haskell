@@ -2,6 +2,7 @@ module Auth.Biscuit.Crypto
   ( SignedBlock
   , Blocks
   , signBlock
+  , signExternalBlock
   , verifyBlocks
   , verifySecretProof
   , verifySignatureProof
@@ -29,11 +30,12 @@ import           Data.ByteString       (ByteString)
 import           Data.Int              (Int32)
 import           Data.List.NonEmpty    (NonEmpty (..))
 import qualified Data.List.NonEmpty    as NE
+import           Data.Maybe            (catMaybes)
 
 import qualified Auth.Biscuit.Proto    as PB
 import qualified Data.Serialize        as PB
 
-type SignedBlock = (ByteString, Signature, PublicKey)
+type SignedBlock = (ByteString, Signature, PublicKey, Maybe (Signature, PublicKey))
 type Blocks = NonEmpty SignedBlock
 
 -- | Biscuit 2.0 allows multiple signature algorithms.
@@ -59,25 +61,52 @@ signBlock sk payload = do
   (nextPk, nextSk) <- (toPublic &&& id) <$> generateSecretKey
   let toSign = payload <> serializePublicKey nextPk
       sig = sign sk pk toSign
-  pure ((payload, sig, nextPk), nextSk)
+  pure ((payload, sig, nextPk, Nothing), nextSk)
+
+signExternalBlock :: SecretKey
+                  -> SecretKey
+                  -> PublicKey
+                  -> ByteString
+                  -> IO (SignedBlock, SecretKey)
+signExternalBlock sk eSk pk payload = do
+  (block, nextSk) <- signBlock sk payload
+  pure (addExternalSignature eSk pk block, nextSk)
+
+addExternalSignature :: SecretKey
+                     -> PublicKey
+                     -> SignedBlock
+                     -> SignedBlock
+addExternalSignature eSk pk (payload, sig, nextPk, _) =
+  let toSign = payload <> convert pk
+      ePk = toPublic eSk
+      eSig = sign eSk ePk toSign
+   in (payload, sig, nextPk, Just (eSig, ePk))
 
 getSignatureProof :: SignedBlock -> SecretKey -> Signature
-getSignatureProof (lastPayload, lastSig, lastPk) nextSecret =
+getSignatureProof (lastPayload, lastSig, lastPk, _todo) nextSecret =
   let sk = nextSecret
       pk = toPublic nextSecret
       toSign = lastPayload <> serializePublicKey lastPk <> convert lastSig
    in sign sk pk toSign
 
-getToSig :: (ByteString, a, PublicKey) -> ByteString
-getToSig (p, _, nextPk) =
+getToSig :: (ByteString, a, PublicKey, Maybe (Signature, PublicKey)) -> ByteString
+getToSig (p, _, nextPk, _) =
     p <> serializePublicKey nextPk
 
 getSignature :: SignedBlock -> Signature
-getSignature (_, sig, _) = sig
+getSignature (_, sig, _, _) = sig
 
 getPublicKey :: SignedBlock -> PublicKey
-getPublicKey (_, _, pk) = pk
+getPublicKey (_, _, pk, _) = pk
 
+-- | The data signed by the external key is the payload for the current block + the public key from
+-- the previous block: this prevents signature reuse (the external signature cannot be used on another
+-- token)
+getExternalSigPayload :: PublicKey -> SignedBlock -> Maybe (PublicKey, ByteString, Signature)
+getExternalSigPayload pkN (payload, _, _, Just (eSig, ePk)) = Just (ePk, payload <> convert pkN, eSig)
+getExternalSigPayload _ _ = Nothing
+
+-- ToDo verify optional signatures as well
 verifyBlocks :: Blocks
              -> PublicKey
              -> Bool
@@ -90,17 +119,25 @@ verifyBlocks blocks rootPk =
       -- key for block n is the key from block (n - 1)
       keys = pure rootPk <> (getPublicKey <$> blocks)
       keysPayloadsSigs = NE.zipWith attachKey keys (NE.zip toSigs sigs)
-   in all (uncurry3 verify) keysPayloadsSigs
+
+      -- external_signature(block_n) = sign(external_key_n, payload_n <> public_key_n-1)
+      -- so we need to pair each block with the public key carried by the previous block
+      -- (the authority block can't have an external signature)
+      previousKeys = getPublicKey <$> NE.init blocks
+      blocksAfterAuthority = NE.tail blocks
+      eKeysPayloadsESigs = catMaybes $ zipWith getExternalSigPayload previousKeys blocksAfterAuthority
+   in  all (uncurry3 verify) keysPayloadsSigs
+    && all (uncurry3 verify) eKeysPayloadsESigs
 
 verifySecretProof :: SecretKey
                   -> SignedBlock
                   -> Bool
-verifySecretProof nextSecret (_, _, lastPk) =
+verifySecretProof nextSecret (_, _, lastPk, _) =
   lastPk == toPublic nextSecret
 
 verifySignatureProof :: Signature
                      -> SignedBlock
                      -> Bool
-verifySignatureProof extraSig (lastPayload, lastSig, lastPk) =
+verifySignatureProof extraSig (lastPayload, lastSig, lastPk, _) =
   let toSign = lastPayload <> serializePublicKey lastPk <> convert lastSig
    in verify lastPk toSign extraSig

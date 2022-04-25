@@ -58,14 +58,22 @@ pbToPublicKey PB.PublicKey{..} =
    in case PB.getField algorithm of
         PB.Ed25519 -> first (const "Invalid ed25519 public key") $ parseKey keyBytes
 
+pbToOptionalSignature :: PB.ExternalSig -> Either String (Crypto.Signature, PublicKey)
+pbToOptionalSignature PB.ExternalSig{..} = do
+  sig <- first (const "Invalid signature") $ Crypto.eitherCryptoError $ Crypto.signature $ PB.getField signature
+  pk  <- pbToPublicKey $ PB.getField publicKey
+  pure (sig, pk)
+
 -- | Parse a protobuf signed block into a signed biscuit block
 pbToSignedBlock :: PB.SignedBlock -> Either String Crypto.SignedBlock
 pbToSignedBlock PB.SignedBlock{..} = do
   sig <- first (const "Invalid signature") $ Crypto.eitherCryptoError $ Crypto.signature $ PB.getField signature
+  mSig <- traverse pbToOptionalSignature $ PB.getField externalSig
   pk  <- pbToPublicKey $ PB.getField nextKey
   pure ( PB.getField block
        , sig
        , pk
+       , mSig
        )
 
 publicKeyToPb :: PublicKey -> PB.PublicKey
@@ -74,11 +82,18 @@ publicKeyToPb pk = PB.PublicKey
   , key = PB.putField $ Crypto.convert pk
   }
 
+externalSigToPb :: (Crypto.Signature, PublicKey) -> PB.ExternalSig
+externalSigToPb (sig, pk) = PB.ExternalSig
+  { signature = PB.putField $ Crypto.convert sig
+  , publicKey = PB.putField $ publicKeyToPb pk
+  }
+
 signedBlockToPb :: Crypto.SignedBlock -> PB.SignedBlock
-signedBlockToPb (block, sig, pk) = PB.SignedBlock
+signedBlockToPb (block, sig, pk, eSig) = PB.SignedBlock
   { block = PB.putField block
   , signature = PB.putField $ Crypto.convert sig
   , nextKey = PB.putField $ publicKeyToPb pk
+  , externalSig = PB.putField $ externalSigToPb <$> eSig
   }
 
 pbToProof :: PB.Proof -> Either String (Either Crypto.Signature Crypto.SecretKey)
