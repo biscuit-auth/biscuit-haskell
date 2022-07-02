@@ -166,7 +166,7 @@ keepAuthorized' factGroup trustedBlocks currentBlockId =
       toBlockIds = \case
         OnlyAuthority    -> Set.singleton 0
         Previous         -> Set.fromList [0..currentBlockId]
-        BlockId (idx, _) -> Set.singleton idx
+        BlockId (idx, _) -> idx
       allBlockIds = foldMap toBlockIds scope
    in keepAuthorized factGroup $ Set.insert currentBlockId allBlockIds
 

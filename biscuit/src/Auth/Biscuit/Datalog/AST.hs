@@ -91,7 +91,8 @@ import           Control.Monad              ((<=<))
 import           Data.ByteString            (ByteString)
 import           Data.ByteString.Base16     as Hex
 import           Data.Foldable              (fold)
-import           Data.List                  (find)
+import           Data.Map.Strict            (Map)
+import qualified Data.Map.Strict            as Map
 import           Data.Set                   (Set)
 import qualified Data.Set                   as Set
 import           Data.String                (IsString)
@@ -162,7 +163,7 @@ type family SetType (inSet :: IsWithinSet) (ctx :: DatalogContext) where
 type family BlockIdType (evalCtx :: EvaluationContext) (ctx :: DatalogContext) where
   BlockIdType 'Repr 'WithSlices     = PkOrSlice
   BlockIdType 'Repr 'Representation = PublicKey
-  BlockIdType 'Eval 'Representation = (Natural, PublicKey)
+  BlockIdType 'Eval 'Representation = (Set Natural, PublicKey)
 
 -- | A single datalog item.
 -- | This can be a value, a set of items, or a slice (a value that will be injected later),
@@ -789,13 +790,16 @@ class ToEvaluation elem where
 
 translateScope :: [Maybe PublicKey] -> Set RuleScope -> Set EvalRuleScope
 translateScope ePks =
-  let indexedPks = zip [0..] ePks
-      getPkIndex bPk = (bPk <$) <$> find ((== Just bPk) . snd) indexedPks
+  let indexedPks :: Map PublicKey (Set Natural)
+      indexedPks =
+        let makeEntry (Just bPk, bId) = [(bPk, Set.singleton bId)]
+            makeEntry _               = []
+         in Map.fromListWith (<>) $ foldMap makeEntry $ zip ePks [0..]
       translateElem = \case
-        Previous      -> Just Previous
-        OnlyAuthority -> Just OnlyAuthority
-        BlockId bPk   -> BlockId <$> getPkIndex bPk
-   in foldMap (foldMap Set.singleton . translateElem)
+        Previous      -> Previous
+        OnlyAuthority -> OnlyAuthority
+        BlockId bPk   -> BlockId (fold $ Map.lookup bPk indexedPks, bPk)
+   in Set.map translateElem
 
 renderBlockIds :: Set EvalRuleScope -> Set RuleScope
 renderBlockIds =

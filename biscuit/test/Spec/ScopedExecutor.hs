@@ -135,20 +135,26 @@ thirdPartyBlocks = testCase "Third party blocks are correctly scoped" $ do
     let authority =
           [block|
             user(1234);
-            check if from3rd(true) trusting ${pkOne};
+            check if from3rd(1, true) trusting ${pkOne};
+            check if from3rd(2, true) trusting ${pkOne};
           |]
         block1 =
           [block|
-          from3rd(true);
+          from3rd(1, true);
+          |]
+        block2 =
+          [block|
+          from3rd(2, true);
           |]
         verif =
           [authorizer|
-            deny if from3rd(true);
-            allow if from3rd(true) trusting ${pkOne};
+            deny if from3rd(1, true);
+            allow if from3rd(1, true), from3rd(2, true) trusting ${pkOne};
           |]
     let result = runAuthorizerNoTimeout defaultLimits
                    (authority, "", Nothing)
                    [ (block1, "", Just pkOne)
+                   , (block2, "", Just pkOne)
                    ]
                    verif
     isRight result @?= True
