@@ -172,7 +172,7 @@ keepAuthorized' factGroup trustedBlocks currentBlockId =
 
 toScopedFacts :: FactGroup -> Set (Scoped Fact)
 toScopedFacts (FactGroup factGroups) =
-  let distributeScope scope facts = Set.map (scope,) facts
+  let distributeScope scope = Set.map (scope,)
    in foldMap (uncurry distributeScope) $ Map.toList factGroups
 
 fromScopedFacts :: Set (Scoped Fact) -> FactGroup
