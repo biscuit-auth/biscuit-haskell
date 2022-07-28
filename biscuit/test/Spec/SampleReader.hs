@@ -365,6 +365,7 @@ generateCases = do
      check if query(1,2) trusting ${ePkOne}, ${ePkTwo};
      deny if query(3);
      deny if query(1,2);
+     deny if query(0) trusting ${ePkOne};
      allow if true;
   |]
   addCases

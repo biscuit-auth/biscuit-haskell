@@ -159,8 +159,8 @@ keepAuthorized (FactGroup facts) authorizedOrigins =
   let isAuthorized k _ = k `Set.isSubsetOf` authorizedOrigins
    in FactGroup $ Map.filterWithKey isAuthorized facts
 
-keepAuthorized' :: FactGroup -> Set EvalRuleScope -> Natural -> FactGroup
-keepAuthorized' factGroup trustedBlocks currentBlockId =
+keepAuthorized' :: Natural -> FactGroup -> Set EvalRuleScope -> Natural -> FactGroup
+keepAuthorized' blockCount factGroup trustedBlocks currentBlockId =
   let scope = if null trustedBlocks then Set.singleton OnlyAuthority
                                     else trustedBlocks
       toBlockIds = \case
@@ -168,7 +168,7 @@ keepAuthorized' factGroup trustedBlocks currentBlockId =
         Previous         -> Set.fromList [0..currentBlockId]
         BlockId (idx, _) -> idx
       allBlockIds = foldMap toBlockIds scope
-   in keepAuthorized factGroup $ Set.insert currentBlockId allBlockIds
+   in keepAuthorized factGroup $ Set.insert currentBlockId $ Set.insert blockCount allBlockIds
 
 toScopedFacts :: FactGroup -> Set (Scoped Fact)
 toScopedFacts (FactGroup factGroups) =
@@ -181,25 +181,25 @@ fromScopedFacts = FactGroup . Map.fromListWith (<>) . Set.toList . Set.map (fmap
 countFacts :: FactGroup -> Int
 countFacts (FactGroup facts) = sum $ Set.size <$> Map.elems facts
 
-checkCheck :: Limits -> Natural -> FactGroup -> EvalCheck -> Validation (NonEmpty Check) ()
-checkCheck l checkBlockId facts items =
-  if any (isJust . isQueryItemSatisfied l checkBlockId facts) items
+checkCheck :: Limits -> Natural -> Natural -> FactGroup -> EvalCheck -> Validation (NonEmpty Check) ()
+checkCheck l blockCount checkBlockId facts items =
+  if any (isJust . isQueryItemSatisfied l blockCount checkBlockId facts) items
   then Success ()
   else failure (toRepresentation <$> items)
 
-checkPolicy :: Limits -> FactGroup -> EvalPolicy -> Maybe (Either MatchedQuery MatchedQuery)
-checkPolicy l facts (pType, query) =
-  let bindings = fold $ mapMaybe (isQueryItemSatisfied l 0 facts) query
+checkPolicy :: Limits -> Natural -> FactGroup -> EvalPolicy -> Maybe (Either MatchedQuery MatchedQuery)
+checkPolicy l blockCount facts (pType, query) =
+  let bindings = fold $ mapMaybe (isQueryItemSatisfied l blockCount blockCount facts) query
    in if not (null bindings)
       then Just $ case pType of
         Allow -> Right $ MatchedQuery{matchedQuery = toRepresentation <$> query, bindings}
         Deny  -> Left $ MatchedQuery{matchedQuery = toRepresentation <$> query, bindings}
       else Nothing
 
-isQueryItemSatisfied :: Limits -> Natural -> FactGroup -> QueryItem' 'Eval 'Representation -> Maybe (Set Bindings)
-isQueryItemSatisfied l blockId allFacts QueryItem{qBody, qExpressions, qScope} =
+isQueryItemSatisfied :: Limits -> Natural -> Natural -> FactGroup -> QueryItem' 'Eval 'Representation -> Maybe (Set Bindings)
+isQueryItemSatisfied l blockCount blockId allFacts QueryItem{qBody, qExpressions, qScope} =
   let removeScope = Set.map snd
-      facts = toScopedFacts $ keepAuthorized' allFacts qScope blockId
+      facts = toScopedFacts $ keepAuthorized' blockCount allFacts qScope blockId
       bindings = removeScope $ getBindingsForRuleBody l facts qBody qExpressions
    in if Set.size bindings > 0
       then Just bindings

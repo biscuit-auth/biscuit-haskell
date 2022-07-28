@@ -51,7 +51,7 @@ grandparent = testCase "Basic grandparent rule" $
                 , [fact|parent("bob", "jean-pierre")|]
                 , [fact|parent("alice", "toto")|]
                 ]
-   in runFactGeneration defaultLimits rules facts @?= Right (authGroup $ Set.fromList
+   in runFactGeneration defaultLimits 1 rules facts @?= Right (authGroup $ Set.fromList
         [ [fact|parent("alice", "bob")|]
         , [fact|parent("bob", "jean-pierre")|]
         , [fact|parent("alice", "toto")|]
@@ -69,7 +69,7 @@ ancestor = testCase "Ancestor rule" $
                 , [fact|parent("bob", "jean-pierre")|]
                 , [fact|parent("alice", "toto")|]
                 ]
-   in runFactGeneration defaultLimits rules facts @?= Right (authGroup $ Set.fromList
+   in runFactGeneration defaultLimits 1 rules facts @?= Right (authGroup $ Set.fromList
         [ [fact|parent("alice", "bob")|]
         , [fact|parent("bob", "jean-pierre")|]
         , [fact|parent("alice", "toto")|]
@@ -191,7 +191,7 @@ rulesWithConstraints = testCase "Rule with constraints" $
                    , [fact|resource("file1")|]
                    , [fact|resource("file2")|]
                    ]
-   in runFactGeneration defaultLimits rules facts @?= Right (authGroup $ Set.fromList
+   in runFactGeneration defaultLimits 1 rules facts @?= Right (authGroup $ Set.fromList
         [ [fact|time(2019-12-04T01:00:00Z)|]
         , [fact|resource("file1")|]
         , [fact|resource("file2")|]
@@ -206,7 +206,7 @@ ruleHeadWithNoVars = testCase "Rule head with no variables" $
       facts = authGroup $ Set.fromList
                    [ [fact|test("whatever", "notNothing")|]
                    ]
-   in runFactGeneration defaultLimits rules facts @?= Right (authGroup $ Set.fromList
+   in runFactGeneration defaultLimits 1 rules facts @?= Right (authGroup $ Set.fromList
         [ [fact|test("whatever", "notNothing")|]
         ])
 
@@ -226,9 +226,9 @@ limits =
       iterLimits = defaultLimits { maxIterations = 2 }
    in testGroup "Facts generation limits"
         [ testCase "max facts" $
-            runFactGeneration factLimits rules facts @?= Left Facts
+            runFactGeneration factLimits 1 rules facts @?= Left Facts
         , testCase "max iterations" $
-            runFactGeneration iterLimits rules facts @?= Left Iterations
+            runFactGeneration iterLimits 1 rules facts @?= Left Iterations
         ]
 
 scopedRules :: TestTree
@@ -248,7 +248,7 @@ scopedRules = testGroup "Rules and facts in different scopes"
                     , ([2], [ [fact|parent("toto", "toto")|]
                             ])
                     ]
-       in runFactGeneration defaultLimits (adaptRules <$> rules) facts @?= Right (FactGroup
+       in runFactGeneration defaultLimits 3 (adaptRules <$> rules) facts @?= Right (FactGroup
             [ ([0],   [ [fact|parent("alice", "bob")|]
                       , [fact|ancestor("alice", "bob")|]
                       , [fact|parent("bob", "trudy")|]
@@ -276,7 +276,7 @@ scopedRules = testGroup "Rules and facts in different scopes"
                     , ([2], [ [fact|parent("toto", "toto")|]
                             ])
                     ]
-       in runFactGeneration defaultLimits (adaptRules <$> rules) facts @?= Right (FactGroup
+       in runFactGeneration defaultLimits 3 (adaptRules <$> rules) facts @?= Right (FactGroup
             [ ([0],   [ [fact|parent("alice", "bob")|]
                       , [fact|ancestor("alice", "bob")|]
                       , [fact|parent("bob", "trudy")|]
