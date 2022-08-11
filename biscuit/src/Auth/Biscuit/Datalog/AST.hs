@@ -78,6 +78,8 @@ module Auth.Biscuit.Datalog.AST
   , fromStack
   , listSymbolsInBlock
   , listPublicKeysInBlock
+  , queryHasNoScope
+  , ruleHasNoScope
   , renderBlock
   , renderAuthorizer
   , renderFact
@@ -392,6 +394,9 @@ data QueryItem' evalCtx ctx = QueryItem
 type Query' evalCtx ctx = [QueryItem' evalCtx ctx]
 type Query = Query' 'Repr 'Representation
 
+queryHasNoScope :: Query -> Bool
+queryHasNoScope = all (Set.null . qScope)
+
 type Check' evalCtx ctx = Query' evalCtx ctx
 type Check = Check' 'Repr 'Representation
 type EvalCheck = Check' 'Eval 'Representation
@@ -504,6 +509,9 @@ deriving instance ( Lift (Predicate' 'InPredicate ctx)
 
 type Rule = Rule' 'Repr 'Representation
 type EvalRule = Rule' 'Eval 'Representation
+
+ruleHasNoScope :: Rule -> Bool
+ruleHasNoScope Rule{scope} = Set.null scope
 
 renderRule :: Rule -> Text
 renderRule Rule{rhead,body,expressions,scope} =

@@ -126,24 +126,37 @@ pbToBlock ePk PB.Block{..} = do
     bRules <- traverse (pbToRule s) $ PB.getField rules_v2
     bChecks <- traverse (pbToCheck s) $ PB.getField checks_v2
     bScope <- Set.fromList <$> traverse (pbToScope s) (PB.getField scope)
-    when (bVersion `notElem` [Just 3, Just 4]) $ Left $ "Unsupported biscuit version: " <> maybe "0" show bVersion <> ". Only versions 3 and 4 are supported"
-    pure Block{ .. }
+    let isV3 = isNothing ePk
+            && Set.null bScope
+            && all ruleHasNoScope bRules
+            && all queryHasNoScope bChecks
+    case (bVersion, isV3) of
+      (Just 4, _) -> pure Block {..}
+      (Just 3, True) -> pure Block {..}
+      (Just 3, False) ->
+        Left "Biscuit v4 fields are present, but the block version is 3."
+      _ ->
+        Left $ "Unsupported biscuit version: " <> maybe "0" show bVersion <> ". Only versions 3 and 4 are supported"
 
 -- | Turn a biscuit block into a protobuf block, for serialization,
 -- along with the newly defined symbols
-blockToPb :: Symbols -> Block -> (BlockSymbols, PB.Block)
-blockToPb existingSymbols b@Block{..} =
-  let
+blockToPb :: Bool -> Symbols -> Block -> (BlockSymbols, PB.Block)
+blockToPb hasExternalPk existingSymbols b@Block{..} =
+  let isV3 = not hasExternalPk
+            && Set.null bScope
+            && all ruleHasNoScope bRules
+            && all queryHasNoScope bChecks
       bSymbols = buildSymbolTable existingSymbols b
       s = reverseSymbols $ addFromBlock existingSymbols bSymbols
       symbols   = PB.putField $ getSymbolList bSymbols
       context   = PB.putField bContext
-      version   = PB.putField $ Just 3
       facts_v2  = PB.putField $ factToPb s <$> bFacts
       rules_v2  = PB.putField $ ruleToPb s <$> bRules
       checks_v2 = PB.putField $ checkToPb s <$> bChecks
       scope     = PB.putField $ scopeToPb s <$> Set.toList bScope
       pksTable   = PB.putField $ publicKeyToPb <$> getPkList bSymbols
+      version   = PB.putField $ if isV3 then Just 3
+                                        else Just 4
    in (bSymbols, PB.Block {..})
 
 pbToFact :: Symbols -> PB.FactV2 -> Either String Fact

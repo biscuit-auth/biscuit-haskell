@@ -232,7 +232,7 @@ mkBiscuit = mkBiscuitWith Nothing
 -- further attenuation.
 mkBiscuitWith :: Maybe Int -> SecretKey -> Block -> IO (Biscuit Open Verified)
 mkBiscuitWith rootKeyId sk authority = do
-  let (authoritySymbols, authoritySerialized) = PB.encodeBlock <$> blockToPb newSymbolTable authority
+  let (authoritySymbols, authoritySerialized) = PB.encodeBlock <$> blockToPb False newSymbolTable authority
   (signedBlock, nextSk) <- signBlock sk authoritySerialized
   pure Biscuit { rootKeyId
                , authority = toParsedSignedBlock authority signedBlock
@@ -248,7 +248,7 @@ addBlock :: Block
          -> Biscuit Open check
          -> IO (Biscuit Open check)
 addBlock block b@Biscuit{..} = do
-  let (blockSymbols, blockSerialized) = PB.encodeBlock <$> blockToPb symbols block
+  let (blockSymbols, blockSerialized) = PB.encodeBlock <$> blockToPb False symbols block
       Open p = proof
   (signedBlock, nextSk) <- signBlock p blockSerialized
   pure $ b { blocks = blocks <> [toParsedSignedBlock block signedBlock]
@@ -262,7 +262,7 @@ addSignedBlock :: SecretKey
                -> IO (Biscuit Open check)
 addSignedBlock eSk block b@Biscuit{..} = do
   let symbolsForCurrentBlock = forgetSymbols $ registerNewPublicKeys [toPublic eSk] symbols
-      (newSymbols, blockSerialized) = PB.encodeBlock <$> blockToPb symbolsForCurrentBlock block
+      (newSymbols, blockSerialized) = PB.encodeBlock <$> blockToPb True symbolsForCurrentBlock block
       lastBlock = NE.last (authority :| blocks)
       (_, _, lastPublicKey, _) = lastBlock
       Open p = proof
@@ -280,7 +280,7 @@ mkThirdPartyBlock' :: SecretKey
 mkThirdPartyBlock' eSk pkTable lastPublicKey block =
   let symbolsForCurrentBlock = registerNewPublicKeys [toPublic eSk] $
         registerNewPublicKeys pkTable newSymbolTable
-      (_, payload) = PB.encodeBlock <$> blockToPb symbolsForCurrentBlock block
+      (_, payload) = PB.encodeBlock <$> blockToPb True symbolsForCurrentBlock block
       (eSig, ePk) = sign3rdPartyBlock eSk lastPublicKey payload
    in (payload, eSig, ePk)
 
