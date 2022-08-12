@@ -233,7 +233,7 @@ mkBiscuit = mkBiscuitWith Nothing
 mkBiscuitWith :: Maybe Int -> SecretKey -> Block -> IO (Biscuit Open Verified)
 mkBiscuitWith rootKeyId sk authority = do
   let (authoritySymbols, authoritySerialized) = PB.encodeBlock <$> blockToPb False newSymbolTable authority
-  (signedBlock, nextSk) <- signBlock sk authoritySerialized
+  (signedBlock, nextSk) <- signBlock sk authoritySerialized Nothing
   pure Biscuit { rootKeyId
                , authority = toParsedSignedBlock authority signedBlock
                , blocks = []
@@ -250,7 +250,7 @@ addBlock :: Block
 addBlock block b@Biscuit{..} = do
   let (blockSymbols, blockSerialized) = PB.encodeBlock <$> blockToPb False symbols block
       Open p = proof
-  (signedBlock, nextSk) <- signBlock p blockSerialized
+  (signedBlock, nextSk) <- signBlock p blockSerialized Nothing
   pure $ b { blocks = blocks <> [toParsedSignedBlock block signedBlock]
            , symbols = addFromBlock symbols blockSymbols
            , proof = Open nextSk
@@ -308,7 +308,7 @@ applyThirdPartyBlock b@Biscuit{..} contents = do
   unless (verifyExternalSig lastPk (payload, eSig, ePk)) $
     Left "Invalid 3rd party signature"
   pure $ do
-    (signedBlock, nextSk) <- signBlock p payload
+    (signedBlock, nextSk) <- signBlock p payload (Just (eSig, ePk))
     pure $ b { blocks = blocks <> [toParsedSignedBlock block (addESig signedBlock)]
              , proof = Open nextSk
              , symbols = newSymbols

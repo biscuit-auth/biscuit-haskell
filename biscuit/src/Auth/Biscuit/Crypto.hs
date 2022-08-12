@@ -3,6 +3,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE QuasiQuotes                #-}
 {-# LANGUAGE TemplateHaskell            #-}
+{-# LANGUAGE TupleSections              #-}
 {-# LANGUAGE TypeApplications           #-}
 module Auth.Biscuit.Crypto
   ( SignedBlock
@@ -121,30 +122,23 @@ serializePublicKey pk =
 
 signBlock :: SecretKey
           -> ByteString
+          -> Maybe (Signature, PublicKey)
           -> IO (SignedBlock, SecretKey)
-signBlock sk payload = do
+signBlock sk payload eSig = do
   let pk = toPublic sk
   (nextPk, nextSk) <- (toPublic &&& id) <$> generateSecretKey
-  let toSign = payload <> serializePublicKey nextPk
+  let toSign = getToSig (payload, (), nextPk, eSig)
       sig = sign sk pk toSign
-  pure ((payload, sig, nextPk, Nothing), nextSk)
+  pure ((payload, sig, nextPk, eSig), nextSk)
 
 signExternalBlock :: SecretKey
                   -> SecretKey
                   -> PublicKey
                   -> ByteString
                   -> IO (SignedBlock, SecretKey)
-signExternalBlock sk eSk pk payload = do
-  (block, nextSk) <- signBlock sk payload
-  pure (addExternalSignature eSk pk block, nextSk)
-
-addExternalSignature :: SecretKey
-                     -> PublicKey
-                     -> SignedBlock
-                     -> SignedBlock
-addExternalSignature eSk pk (payload, sig, nextPk, _) =
-  let (eSig, ePk) = sign3rdPartyBlock eSk pk payload
-   in (payload, sig, nextPk, Just (eSig, ePk))
+signExternalBlock sk eSk pk payload =
+  let eSig = sign3rdPartyBlock eSk pk payload
+   in signBlock sk payload (Just eSig)
 
 sign3rdPartyBlock :: SecretKey
                   -> PublicKey
@@ -164,8 +158,8 @@ getSignatureProof (lastPayload, Signature lastSig, lastPk, _todo) nextSecret =
    in sign sk pk toSign
 
 getToSig :: (ByteString, a, PublicKey, Maybe (Signature, PublicKey)) -> ByteString
-getToSig (p, _, nextPk, _) =
-    p <> serializePublicKey nextPk
+getToSig (p, _, nextPk, ePk) =
+  p <> foldMap (sigBytes . fst) ePk <> serializePublicKey nextPk
 
 getSignature :: SignedBlock -> Signature
 getSignature (_, sig, _, _) = sig
@@ -186,7 +180,6 @@ verifyExternalSig :: PublicKey -> (ByteString, Signature, PublicKey) -> Bool
 verifyExternalSig previousPk (payload, eSig, ePk) =
   verify ePk (payload <> serializePublicKey previousPk) eSig
 
--- ToDo verify optional signatures as well
 verifyBlocks :: Blocks
              -> PublicKey
              -> Bool

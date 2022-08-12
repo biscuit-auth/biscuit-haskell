@@ -29,7 +29,7 @@ data SealedToken = SealedToken
 
 signToken :: ByteString -> SecretKey -> IO Token
 signToken p sk = do
-  (signedBlock, privKey) <- signBlock sk p
+  (signedBlock, privKey) <- signBlock sk p Nothing
   pure Token
     { payload = pure signedBlock
     , privKey
@@ -40,7 +40,7 @@ snocNE (h :| t) e = h :| (t <> [e])
 
 append :: Token -> ByteString -> IO Token
 append t@Token{payload} p = do
-  (signedBlock, privKey) <- signBlock (privKey t) p
+  (signedBlock, privKey) <- signBlock (privKey t) p Nothing
   pure Token
     { payload = snocNE payload signedBlock
     , privKey
