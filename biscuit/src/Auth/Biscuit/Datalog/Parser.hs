@@ -10,7 +10,7 @@
 {-# LANGUAGE NamedFieldPuns        #-}
 {-# LANGUAGE OverloadedStrings     #-}
 {-# LANGUAGE ScopedTypeVariables   #-}
-{-# LANGUAGE TemplateHaskell       #-}
+{-# LANGUAGE TemplateHaskellQuotes #-}
 {-# LANGUAGE TupleSections         #-}
 {-# LANGUAGE TypeApplications      #-}
 {-# LANGUAGE TypeFamilies          #-}
@@ -59,6 +59,8 @@ import           Language.Haskell.TH
 import           Language.Haskell.TH.Quote
 import           Language.Haskell.TH.Syntax     (Lift)
 
+import           Auth.Biscuit.Crypto            (PublicKey,
+                                                 readEd25519PublicKey)
 import           Auth.Biscuit.Datalog.AST
 
 class ConditionalParse a v where
@@ -70,24 +72,46 @@ instance ConditionalParse a Void where
 instance ConditionalParse m m where
   ifPresent _ p = p
 
-class SetParser (inSet :: IsWithinSet) (ctx :: ParsedAs) where
+class SetParser (inSet :: IsWithinSet) (ctx :: DatalogContext) where
   parseSet :: Parser (SetType inSet ctx)
 
 instance SetParser 'WithinSet ctx where
   parseSet = fail "nested sets are forbidden"
 
-instance SetParser 'NotWithinSet 'QuasiQuote where
+instance SetParser 'NotWithinSet 'WithSlices where
   parseSet = Set.fromList <$> (char '[' *> commaList0 termParser <* char ']')
 
-instance SetParser 'NotWithinSet 'RegularString where
+instance SetParser 'NotWithinSet 'Representation where
   parseSet = Set.fromList <$> (char '[' *> commaList0 termParser <* char ']')
+
+class ScopeParser (evalCtx :: EvaluationContext) (ctx :: DatalogContext) where
+  parseBlockId :: Parser (BlockIdType evalCtx ctx)
+
+instance ScopeParser 'Repr 'Representation where
+  parseBlockId = publicKeyParser
+
+instance ScopeParser 'Repr 'WithSlices where
+  parseBlockId = do
+    choice [ PkSlice <$> (string "${" *> haskellVariableParser <* char '}')
+           , Pk <$> publicKeyParser
+           ]
+
+publicKeyParser :: Parser PublicKey
+publicKeyParser =
+  let parsePk = maybe (fail "invalid publick key") pure . readEd25519PublicKey
+   in string "ed25519/" *> (hexBsParser >>= parsePk)
 
 type HasTermParsers inSet pof ctx =
-  ( ConditionalParse (SliceType 'QuasiQuote)                   (SliceType ctx)
+  ( ConditionalParse (SliceType 'WithSlices)                   (SliceType ctx)
   , ConditionalParse (VariableType 'NotWithinSet 'InPredicate) (VariableType inSet pof)
   , SetParser inSet ctx
   )
-type HasParsers pof ctx = HasTermParsers 'NotWithinSet pof ctx
+type HasTopTermParsers pof ctx = HasTermParsers 'NotWithinSet pof ctx
+type HasParsers pof evalCtx ctx =
+  ( ScopeParser evalCtx ctx
+  , Ord (BlockIdType evalCtx ctx)
+  , HasTermParsers 'NotWithinSet pof ctx
+  )
 
 -- | Parser for a datalog predicate name
 predicateNameParser :: Parser Text
@@ -125,7 +149,7 @@ commaList0 :: Parser a -> Parser [a]
 commaList0 p =
   sepBy p (skipSpace *> char ',')
 
-predicateParser :: HasParsers pof ctx => Parser (Predicate' pof ctx)
+predicateParser :: HasTopTermParsers pof ctx => Parser (Predicate' pof ctx)
 predicateParser = do
   skipSpace
   name <- predicateNameParser
@@ -133,14 +157,14 @@ predicateParser = do
   terms <- parens (commaList termParser)
   pure Predicate{name,terms}
 
-unary :: HasParsers 'InPredicate ctx => Parser (Expression' ctx)
+unary :: HasTopTermParsers 'InPredicate ctx => Parser (Expression' ctx)
 unary = choice
   [ unaryParens
   , unaryNegate
   , unaryLength
   ]
 
-unaryParens :: HasParsers 'InPredicate ctx => Parser (Expression' ctx)
+unaryParens :: HasTopTermParsers 'InPredicate ctx => Parser (Expression' ctx)
 unaryParens = do
   skipSpace
   _ <- char '('
@@ -150,14 +174,14 @@ unaryParens = do
   _ <- char ')'
   pure $ EUnary Parens e
 
-unaryNegate :: HasParsers 'InPredicate ctx => Parser (Expression' ctx)
+unaryNegate :: HasTopTermParsers 'InPredicate ctx => Parser (Expression' ctx)
 unaryNegate = do
   skipSpace
   _ <- char '!'
   skipSpace
   EUnary Negate <$> expressionParser
 
-unaryLength :: HasParsers 'InPredicate ctx => Parser (Expression' ctx)
+unaryLength :: HasTopTermParsers 'InPredicate ctx => Parser (Expression' ctx)
 unaryLength = do
   skipSpace
   e <- choice
@@ -168,13 +192,13 @@ unaryLength = do
   _ <- string ".length()"
   pure $ EUnary Length e
 
-exprTerm :: HasParsers 'InPredicate ctx => Parser (Expression' ctx)
+exprTerm :: HasTopTermParsers 'InPredicate ctx => Parser (Expression' ctx)
 exprTerm = choice
   [ unary
   , EValue <$> termParser
   ]
 
-methodParser :: HasParsers 'InPredicate ctx => Parser (Expression' ctx)
+methodParser :: HasTopTermParsers 'InPredicate ctx => Parser (Expression' ctx)
 methodParser = do
   e1 <- exprTerm
   _ <- char '.'
@@ -193,10 +217,10 @@ methodParser = do
   _ <- char ')'
   pure $ EBinary method e1 e2
 
-expressionParser :: HasParsers 'InPredicate ctx => Parser (Expression' ctx)
+expressionParser :: HasTopTermParsers 'InPredicate ctx => Parser (Expression' ctx)
 expressionParser = Expr.makeExprParser (methodParser <|> exprTerm) table
 
-table :: HasParsers 'InPredicate ctx
+table :: HasTopTermParsers 'InPredicate ctx
       => [[Expr.Operator Parser (Expression' ctx)]]
 table = [ [ binary  "*" Mul
           , binary  "/" Div
@@ -215,7 +239,7 @@ table = [ [ binary  "*" Mul
           ]
         ]
 
-binary :: HasParsers 'InPredicate ctx
+binary :: HasTopTermParsers 'InPredicate ctx
        => Text
        -> Binary
        -> Expr.Operator Parser (Expression' ctx)
@@ -271,7 +295,7 @@ termParser = skipSpace *> choice
 
 -- | same as a predicate, but allows empty
 -- | terms list
-ruleHeadParser :: HasParsers 'InPredicate ctx => Parser (Predicate' 'InPredicate ctx)
+ruleHeadParser :: HasTopTermParsers 'InPredicate ctx => Parser (Predicate' 'InPredicate ctx)
 ruleHeadParser = do
   skipSpace
   name <- predicateNameParser
@@ -279,30 +303,57 @@ ruleHeadParser = do
   terms <- parens (commaList0 termParser)
   pure Predicate{name,terms}
 
-ruleBodyParser :: HasParsers 'InPredicate ctx
-               => Parser ([Predicate' 'InPredicate ctx], [Expression' ctx])
+ruleBodyParser :: (HasParsers 'InPredicate evalCtx ctx)
+               => Parser ([Predicate' 'InPredicate ctx], [Expression' ctx], Set.Set (RuleScope' evalCtx ctx))
 ruleBodyParser = do
   let predicateOrExprParser =
             Right <$> expressionParser
         <|> Left <$> predicateParser
   elems <- sepBy1 (skipSpace *> predicateOrExprParser)
                   (skipSpace *> char ',')
-  pure $ partitionEithers elems
+  scope <- ruleScopeParser
+  let (predicates, expressions) = partitionEithers elems
+  pure (predicates, expressions, scope)
 
-ruleParser :: HasParsers 'InPredicate ctx => Parser (Rule' ctx)
+scopeParser :: forall evalCtx ctx
+             . ( ScopeParser evalCtx ctx
+               , Ord (BlockIdType evalCtx ctx)
+               )
+            => Parser (Set.Set (RuleScope' evalCtx ctx))
+scopeParser =
+  let elemParser = choice [ OnlyAuthority <$  string "authority"
+                          , Previous      <$  string "previous"
+                          , BlockId       <$> parseBlockId @evalCtx @ctx
+                          ]
+   in Set.fromList <$> sepBy1 (skipSpace *> elemParser)
+                              (skipSpace *> char ',')
+
+ruleScopeParser :: forall evalCtx ctx
+                 . ( ScopeParser evalCtx ctx
+                   , Ord (BlockIdType evalCtx ctx)
+                   )
+                => Parser (Set.Set (RuleScope' evalCtx ctx))
+ruleScopeParser = option Set.empty $ do
+  skipSpace
+  void $ string "trusting "
+  skipSpace
+  scopeParser
+
+ruleParser :: HasParsers 'InPredicate evalCtx ctx
+           => Parser (Rule' evalCtx ctx)
 ruleParser = do
   rhead <- ruleHeadParser
   skipSpace
   void $ string "<-"
-  (body, expressions) <- ruleBodyParser
-  pure Rule{rhead, body, expressions, scope = Nothing} -- todo parse scope
+  (body, expressions, scope) <- ruleBodyParser
+  pure Rule{rhead, body, expressions, scope }
 
-queryParser :: HasParsers 'InPredicate ctx => Parser (Query' ctx)
+queryParser :: HasParsers 'InPredicate evalCtx ctx => Parser (Query' evalCtx ctx)
 queryParser =
-  let mkQueryItem (qBody, qExpressions) = QueryItem { qBody, qExpressions, qScope = Nothing } -- todo parse scope
+  let mkQueryItem (qBody, qExpressions, qScope) = QueryItem { qBody, qExpressions, qScope }
    in fmap mkQueryItem <$> sepBy1 ruleBodyParser (skipSpace *> asciiCI "or" <* satisfy isSpace)
 
-checkParser :: HasParsers 'InPredicate ctx => Parser (Check' ctx)
+checkParser :: HasParsers 'InPredicate evalCtx ctx => Parser (Check' evalCtx ctx)
 checkParser = string "check if" *> queryParser
 
 commentParser :: Parser ()
@@ -315,7 +366,7 @@ commentParser = do
                 , endOfInput
                 ]
 
-blockElementParser :: HasParsers 'InPredicate ctx => Parser (BlockElement' ctx)
+blockElementParser :: HasParsers 'InPredicate evalCtx ctx => Parser (BlockElement' evalCtx ctx)
 blockElementParser = choice
   [ BlockRule    <$> ruleParser <* skipSpace <* char ';'
   , BlockFact    <$> predicateParser <* skipSpace <* char ';'
@@ -323,31 +374,47 @@ blockElementParser = choice
   , BlockComment <$  commentParser
   ]
 
-authorizerElementParser :: HasParsers 'InPredicate ctx => Parser (AuthorizerElement' ctx)
+authorizerElementParser :: HasParsers 'InPredicate evalCtx ctx => Parser (AuthorizerElement' evalCtx ctx)
 authorizerElementParser = choice
   [ AuthorizerPolicy  <$> policyParser <* skipSpace <* char ';'
   , BlockElement    <$> blockElementParser
   ]
 
-authorizerParser :: ( HasParsers 'InPredicate ctx
-                  , HasParsers 'InFact ctx
-                  , Show (AuthorizerElement' ctx)
-                  )
-               => Parser (Authorizer' ctx)
+blockScopeParser :: forall evalCtx ctx
+                  . ( ScopeParser evalCtx ctx
+                    , Ord (BlockIdType evalCtx ctx)
+                    )
+                 => Parser (Set.Set (RuleScope' evalCtx ctx))
+blockScopeParser = option Set.empty $ do
+  skipSpace
+  void $ string "trusting "
+  skipSpace
+  scope <- scopeParser
+  void $ char ';'
+  pure scope
+
+authorizerParser :: ( HasParsers 'InPredicate evalCtx ctx
+                    , HasParsers 'InFact evalCtx ctx
+                    , Show (AuthorizerElement' evalCtx ctx)
+                    )
+                 => Parser (Authorizer' evalCtx ctx)
 authorizerParser = do
+  bScope <- blockScopeParser
   elems <- many' (skipSpace *> authorizerElementParser)
-  pure $ foldMap elementToAuthorizer elems
+  let addScope a = a { vBlock = (vBlock a) { bScope = bScope } }
+  pure $ addScope $ foldMap elementToAuthorizer elems
 
-blockParser :: ( HasParsers 'InPredicate ctx
-               , HasParsers 'InFact ctx
-               , Show (BlockElement' ctx)
+blockParser :: ( HasParsers 'InPredicate evalCtx ctx
+               , HasParsers 'InFact evalCtx ctx
+               , Show (BlockElement' evalCtx ctx)
                )
-            => Parser (Block' ctx)
+            => Parser (Block' evalCtx ctx)
 blockParser = do
+  bScope <- blockScopeParser
   elems <- many' (skipSpace *> blockElementParser)
-  pure $ foldMap elementToBlock elems
+  pure $ (foldMap elementToBlock elems) { bScope = bScope }
 
-policyParser :: HasParsers 'InPredicate ctx => Parser (Policy' ctx)
+policyParser :: HasParsers 'InPredicate evalCtx ctx => Parser (Policy' evalCtx ctx)
 policyParser = do
   policy <- choice
               [ Allow <$ string "allow if"
@@ -366,7 +433,7 @@ compileParser p str = case parseOnly (p <* skipSpace <* endOfInput) (pack str) o
 -- You most likely want to directly use 'block' or 'authorizer' instead.
 rule :: QuasiQuoter
 rule = QuasiQuoter
-  { quoteExp = compileParser (ruleParser @'QuasiQuote)
+  { quoteExp = compileParser (ruleParser @'Repr @'WithSlices)
   , quotePat = error "not supported"
   , quoteType = error "not supported"
   , quoteDec = error "not supported"
@@ -378,7 +445,7 @@ rule = QuasiQuoter
 -- You most likely want to directly use 'block' or 'authorizer' instead.
 predicate :: QuasiQuoter
 predicate = QuasiQuoter
-  { quoteExp = compileParser (predicateParser @'InPredicate @'QuasiQuote)
+  { quoteExp = compileParser (predicateParser @'InPredicate @'WithSlices)
   , quotePat = error "not supported"
   , quoteType = error "not supported"
   , quoteDec = error "not supported"
@@ -390,7 +457,7 @@ predicate = QuasiQuoter
 -- You most likely want to directly use 'block' or 'authorizer' instead.
 fact :: QuasiQuoter
 fact = QuasiQuoter
-  { quoteExp = compileParser (predicateParser @'InFact @'QuasiQuote)
+  { quoteExp = compileParser (predicateParser @'InFact @'WithSlices)
   , quotePat = error "not supported"
   , quoteType = error "not supported"
   , quoteDec = error "not supported"
@@ -402,7 +469,7 @@ fact = QuasiQuoter
 -- You most likely want to directly use 'block' or 'authorizer' instead.
 check :: QuasiQuoter
 check = QuasiQuoter
-  { quoteExp = compileParser (checkParser @'QuasiQuote)
+  { quoteExp = compileParser (checkParser @'Repr @'WithSlices)
   , quotePat = error "not supported"
   , quoteType = error "not supported"
   , quoteDec = error "not supported"
@@ -422,7 +489,7 @@ check = QuasiQuoter
 -- >     |]
 block :: QuasiQuoter
 block = QuasiQuoter
-  { quoteExp = compileParser (blockParser @'QuasiQuote)
+  { quoteExp = compileParser (blockParser @'Repr @'WithSlices)
   , quotePat = error "not supported"
   , quoteType = error "not supported"
   , quoteDec = error "not supported"
@@ -447,7 +514,7 @@ block = QuasiQuoter
 -- >        |]
 authorizer :: QuasiQuoter
 authorizer = QuasiQuoter
-  { quoteExp = compileParser (authorizerParser @'QuasiQuote)
+  { quoteExp = compileParser (authorizerParser @'Repr @'WithSlices)
   , quotePat = error "not supported"
   , quoteType = error "not supported"
   , quoteDec = error "not supported"
@@ -461,7 +528,7 @@ authorizer = QuasiQuoter
 -- > [query|user($user_id) or group($group_id)|]
 query :: QuasiQuoter
 query = QuasiQuoter
-  { quoteExp = compileParser (queryParser @'QuasiQuote)
+  { quoteExp = compileParser (queryParser @'Repr @'WithSlices)
   , quotePat = error "not supported"
   , quoteType = error "not supported"
   , quoteDec = error "not supported"

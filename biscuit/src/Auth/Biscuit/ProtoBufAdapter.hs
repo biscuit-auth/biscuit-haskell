@@ -3,6 +3,7 @@
 {-# LANGUAGE NamedFieldPuns    #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards   #-}
+{-# LANGUAGE TypeApplications  #-}
 {-|
   Module      : Auth.Biscuit.Utils
   Copyright   : © Clément Delafargue, 2021
@@ -13,103 +14,149 @@
 module Auth.Biscuit.ProtoBufAdapter
   ( Symbols
   , buildSymbolTable
-  , extractSymbols
   , pbToBlock
   , blockToPb
   , pbToSignedBlock
   , signedBlockToPb
   , pbToProof
+  , pbToThirdPartyBlockRequest
+  , thirdPartyBlockRequestToPb
+  , pbToThirdPartyBlockContents
+  , thirdPartyBlockContentsToPb
   ) where
 
 import           Control.Monad            (when)
-import           Crypto.PubKey.Ed25519    (PublicKey)
-import           Data.Bifunctor           (first)
+import           Control.Monad.State      (StateT, get, lift, modify)
+import           Data.Bitraversable       (bisequence)
+import           Data.ByteString          (ByteString)
 import           Data.Int                 (Int64)
+import           Data.Maybe               (isNothing)
 import qualified Data.Set                 as Set
 import           Data.Time                (UTCTime)
 import           Data.Time.Clock.POSIX    (posixSecondsToUTCTime,
                                            utcTimeToPOSIXSeconds)
 import           Data.Void                (absurd)
+import           GHC.Records              (getField)
 
 import qualified Auth.Biscuit.Crypto      as Crypto
 import           Auth.Biscuit.Datalog.AST
 import qualified Auth.Biscuit.Proto       as PB
 import           Auth.Biscuit.Symbols
+import           Auth.Biscuit.Utils       (maybeToRight)
 
-
--- | Given existing symbols and a series of protobuf blocks,
--- compute the complete symbol mapping
-extractSymbols :: [PB.Block] -> Symbols
-extractSymbols blocks =
-  addFromBlocks (PB.getField . PB.symbols <$> blocks)
-
--- | Given existing symbols and a biscuit block, compute the
--- symbol table for the given block. Already existing symbols
--- won't be included
 buildSymbolTable :: Symbols -> Block -> BlockSymbols
 buildSymbolTable existingSymbols block =
   let allSymbols = listSymbolsInBlock block
-   in addSymbols existingSymbols allSymbols
+      allKeys = listPublicKeysInBlock block
+   in addSymbols existingSymbols allSymbols allKeys
 
-pbToPublicKey :: PB.PublicKey -> Either String PublicKey
+pbToPublicKey :: PB.PublicKey -> Either String Crypto.PublicKey
 pbToPublicKey PB.PublicKey{..} =
   let keyBytes = PB.getField key
-      parseKey = Crypto.eitherCryptoError . Crypto.publicKey
+      parseKey = Crypto.readEd25519PublicKey
    in case PB.getField algorithm of
-        PB.Ed25519 -> first (const "Invalid ed25519 public key") $ parseKey keyBytes
+        PB.Ed25519 -> maybeToRight "Invalid ed25519 public key" $ parseKey keyBytes
+
+pbToOptionalSignature :: PB.ExternalSig -> Either String (Crypto.Signature, Crypto.PublicKey)
+pbToOptionalSignature PB.ExternalSig{..} = do
+  let sig = Crypto.signature $ PB.getField signature
+  pk  <- pbToPublicKey $ PB.getField publicKey
+  pure (sig, pk)
 
 -- | Parse a protobuf signed block into a signed biscuit block
 pbToSignedBlock :: PB.SignedBlock -> Either String Crypto.SignedBlock
 pbToSignedBlock PB.SignedBlock{..} = do
-  sig <- first (const "Invalid signature") $ Crypto.eitherCryptoError $ Crypto.signature $ PB.getField signature
+  let sig = Crypto.signature $ PB.getField signature
+  mSig <- traverse pbToOptionalSignature $ PB.getField externalSig
   pk  <- pbToPublicKey $ PB.getField nextKey
   pure ( PB.getField block
        , sig
        , pk
+       , mSig
        )
 
-publicKeyToPb :: PublicKey -> PB.PublicKey
+publicKeyToPb :: Crypto.PublicKey -> PB.PublicKey
 publicKeyToPb pk = PB.PublicKey
   { algorithm = PB.putField PB.Ed25519
-  , key = PB.putField $ Crypto.convert pk
+  , key = PB.putField $ Crypto.pkBytes pk
+  }
+
+externalSigToPb :: (Crypto.Signature, Crypto.PublicKey) -> PB.ExternalSig
+externalSigToPb (sig, pk) = PB.ExternalSig
+  { signature = PB.putField $ Crypto.sigBytes sig
+  , publicKey = PB.putField $ publicKeyToPb pk
   }
 
 signedBlockToPb :: Crypto.SignedBlock -> PB.SignedBlock
-signedBlockToPb (block, sig, pk) = PB.SignedBlock
+signedBlockToPb (block, sig, pk, eSig) = PB.SignedBlock
   { block = PB.putField block
-  , signature = PB.putField $ Crypto.convert sig
+  , signature = PB.putField $ Crypto.sigBytes sig
   , nextKey = PB.putField $ publicKeyToPb pk
+  , externalSig = PB.putField $ externalSigToPb <$> eSig
   }
 
 pbToProof :: PB.Proof -> Either String (Either Crypto.Signature Crypto.SecretKey)
-pbToProof (PB.ProofSignature rawSig) = Left  <$> first (const "Invalid signature proof") (Crypto.eitherCryptoError $ Crypto.signature $ PB.getField rawSig)
-pbToProof (PB.ProofSecret    rawPk)  = Right <$> first (const "Invalid public key proof") (Crypto.eitherCryptoError $ Crypto.secretKey $ PB.getField rawPk)
+pbToProof (PB.ProofSignature rawSig) = Left  <$> Right (Crypto.signature $ PB.getField rawSig)
+pbToProof (PB.ProofSecret    rawPk)  = Right <$> maybeToRight "Invalid public key proof" (Crypto.readEd25519SecretKey $ PB.getField rawPk)
 
--- | Parse a protobuf block into a proper biscuit block
-pbToBlock :: Symbols -> PB.Block -> Either String Block
-pbToBlock s PB.Block{..} = do
+pbToBlock :: Maybe Crypto.PublicKey -> PB.Block -> StateT Symbols (Either String) Block
+pbToBlock ePk PB.Block{..} = do
+  blockPks <- lift $ traverse pbToPublicKey $ PB.getField pksTable
+  let blockSymbols = PB.getField symbols
+  -- third party blocks use an isolated symbol table,
+  -- but use the global public keys table:
+  --   symbols defined in 3rd party blocks are not visible
+  --   to following blocks, but public keys are
+  when (isNothing ePk) $ modify (registerNewSymbols blockSymbols)
+  modify (registerNewPublicKeys $ foldMap pure ePk <> blockPks)
+  currentSymbols <- get
+
+  let symbolsForCurrentBlock =
+        -- third party blocks use an isolated symbol table,
+        -- but use the global public keys table.
+        --   3rd party blocks don't see previously defined
+        --   symbols, but see previously defined public keys
+        if isNothing ePk then currentSymbols
+                         else registerNewSymbols blockSymbols $ forgetSymbols currentSymbols
   let bContext = PB.getField context
       bVersion = PB.getField version
-  bFacts <- traverse (pbToFact s) $ PB.getField facts_v2
-  bRules <- traverse (pbToRule s) $ PB.getField rules_v2
-  bChecks <- traverse (pbToCheck s) $ PB.getField checks_v2
-  let bScope = Nothing -- todo parse from protobuf
-  when (bVersion /= Just 3) $ Left $ "Unsupported biscuit version: " <> maybe "0" show bVersion <> ". Only version 3 is supported"
-  pure Block{ .. }
+  lift $ do
+    let s = symbolsForCurrentBlock
+    bFacts <- traverse (pbToFact s) $ PB.getField facts_v2
+    bRules <- traverse (pbToRule s) $ PB.getField rules_v2
+    bChecks <- traverse (pbToCheck s) $ PB.getField checks_v2
+    bScope <- Set.fromList <$> traverse (pbToScope s) (PB.getField scope)
+    let isV3 = isNothing ePk
+            && Set.null bScope
+            && all ruleHasNoScope bRules
+            && all queryHasNoScope bChecks
+    case (bVersion, isV3) of
+      (Just 4, _) -> pure Block {..}
+      (Just 3, True) -> pure Block {..}
+      (Just 3, False) ->
+        Left "Biscuit v4 fields are present, but the block version is 3."
+      _ ->
+        Left $ "Unsupported biscuit version: " <> maybe "0" show bVersion <> ". Only versions 3 and 4 are supported"
 
 -- | Turn a biscuit block into a protobuf block, for serialization,
 -- along with the newly defined symbols
-blockToPb :: Symbols -> Block -> (BlockSymbols, PB.Block)
-blockToPb existingSymbols b@Block{..} =
-  let
+blockToPb :: Bool -> Symbols -> Block -> (BlockSymbols, PB.Block)
+blockToPb hasExternalPk existingSymbols b@Block{..} =
+  let isV3 = not hasExternalPk
+            && Set.null bScope
+            && all ruleHasNoScope bRules
+            && all queryHasNoScope bChecks
       bSymbols = buildSymbolTable existingSymbols b
       s = reverseSymbols $ addFromBlock existingSymbols bSymbols
       symbols   = PB.putField $ getSymbolList bSymbols
       context   = PB.putField bContext
-      version   = PB.putField $ Just 3
       facts_v2  = PB.putField $ factToPb s <$> bFacts
       rules_v2  = PB.putField $ ruleToPb s <$> bRules
       checks_v2 = PB.putField $ checkToPb s <$> bChecks
+      scope     = PB.putField $ scopeToPb s <$> Set.toList bScope
+      pksTable   = PB.putField $ publicKeyToPb <$> getPkList bSymbols
+      version   = PB.putField $ if isV3 then Just 3
+                                        else Just 4
    in (bSymbols, PB.Block {..})
 
 pbToFact :: Symbols -> PB.FactV2 -> Either String Fact
@@ -134,10 +181,11 @@ pbToRule s pbRule = do
   let pbHead = PB.getField $ PB.head pbRule
       pbBody = PB.getField $ PB.body pbRule
       pbExpressions = PB.getField $ PB.expressions pbRule
+      pbScope = PB.getField $ getField @"scope" pbRule
   rhead       <- pbToPredicate s pbHead
   body        <- traverse (pbToPredicate s) pbBody
   expressions <- traverse (pbToExpression s) pbExpressions
-  let scope = Nothing -- todo read it from PB
+  scope       <- Set.fromList <$> traverse (pbToScope s) pbScope
   pure Rule {..}
 
 ruleToPb :: ReverseSymbols -> Rule -> PB.RuleV2
@@ -146,6 +194,7 @@ ruleToPb s Rule{..} =
     { head = PB.putField $ predicateToPb s rhead
     , body = PB.putField $ predicateToPb s <$> body
     , expressions = PB.putField $ expressionToPb s <$> expressions
+    , scope = PB.putField $ scopeToPb s <$> Set.toList scope
     }
 
 pbToCheck :: Symbols -> PB.CheckV2 -> Either String Check
@@ -165,7 +214,21 @@ checkToPb s items =
                           }
    in PB.CheckV2 { queries = PB.putField $ toQuery <$> items }
 
-pbToPredicate :: Symbols -> PB.PredicateV2 -> Either String (Predicate' 'InPredicate 'RegularString)
+pbToScope :: Symbols -> PB.Scope -> Either String RuleScope
+pbToScope s = \case
+  PB.ScType e       -> case PB.getField e of
+    PB.ScopeAuthority -> Right OnlyAuthority
+    PB.ScopePrevious  -> Right Previous
+  PB.ScBlock pkRef ->
+    BlockId <$> getPublicKey' s (PublicKeyRef $ PB.getField pkRef)
+
+scopeToPb :: ReverseSymbols -> RuleScope -> PB.Scope
+scopeToPb s = \case
+  OnlyAuthority -> PB.ScType $ PB.putField PB.ScopeAuthority
+  Previous      -> PB.ScType $ PB.putField PB.ScopePrevious
+  BlockId pk    -> PB.ScBlock $ PB.putField $ getPublicKeyCode s pk
+
+pbToPredicate :: Symbols -> PB.PredicateV2 -> Either String (Predicate' 'InPredicate 'Representation)
 pbToPredicate s pbPredicate = do
   let pbName  = PB.getField $ PB.name  pbPredicate
       pbTerms = PB.getField $ PB.terms pbPredicate
@@ -227,7 +290,7 @@ valueToPb s = \case
   Variable v  -> absurd v
   Antiquote v -> absurd v
 
-pbToSetValue :: Symbols -> PB.TermV2 -> Either String (Term' 'WithinSet 'InFact 'RegularString)
+pbToSetValue :: Symbols -> PB.TermV2 -> Either String (Term' 'WithinSet 'InFact 'Representation)
 pbToSetValue s = \case
   PB.TermInteger  f -> pure $ LInteger $ fromIntegral $ PB.getField f
   PB.TermString   f ->        LString  <$> getSymbol s (SymbolRef $ PB.getField f)
@@ -237,7 +300,7 @@ pbToSetValue s = \case
   PB.TermVariable _ -> Left "Variables can't appear in facts or sets"
   PB.TermTermSet  _ -> Left "Sets can't be nested"
 
-setValueToPb :: ReverseSymbols -> Term' 'WithinSet 'InFact 'RegularString -> PB.TermV2
+setValueToPb :: ReverseSymbols -> Term' 'WithinSet 'InFact 'Representation -> PB.TermV2
 setValueToPb s = \case
   LInteger v  -> PB.TermInteger $ PB.putField $ fromIntegral v
   LString  v  -> PB.TermString  $ PB.putField $ getSymbolRef $ getSymbolCode s v
@@ -322,3 +385,32 @@ binaryToPb = PB.OpBinary . PB.putField . \case
   Or             -> PB.Or
   Intersection   -> PB.Intersection
   Union          -> PB.Union
+
+
+pbToThirdPartyBlockRequest :: PB.ThirdPartyBlockRequest -> Either String (Crypto.PublicKey, [Crypto.PublicKey])
+pbToThirdPartyBlockRequest PB.ThirdPartyBlockRequest{previousPk, pkTable} = do
+  bisequence
+    ( pbToPublicKey $ PB.getField previousPk
+    , traverse pbToPublicKey $ PB.getField pkTable
+    )
+
+thirdPartyBlockRequestToPb :: (Crypto.PublicKey, [Crypto.PublicKey]) -> PB.ThirdPartyBlockRequest
+thirdPartyBlockRequestToPb (previousPk, pkTable) = PB.ThirdPartyBlockRequest
+  { previousPk = PB.putField $ publicKeyToPb previousPk
+  , pkTable = PB.putField $ publicKeyToPb <$> pkTable
+  }
+
+pbToThirdPartyBlockContents :: PB.ThirdPartyBlockContents -> Either String (ByteString, Crypto.Signature, Crypto.PublicKey)
+pbToThirdPartyBlockContents PB.ThirdPartyBlockContents{payload,externalSig} = do
+  (sig, pk) <- pbToOptionalSignature $ PB.getField externalSig
+  pure ( PB.getField payload
+       , sig
+       , pk
+       )
+
+thirdPartyBlockContentsToPb :: (ByteString, Crypto.Signature, Crypto.PublicKey) -> PB.ThirdPartyBlockContents
+thirdPartyBlockContentsToPb (payload, sig, pk) = PB.ThirdPartyBlockContents
+  { PB.payload = PB.putField payload
+  , PB.externalSig = PB.putField $ externalSigToPb (sig, pk)
+  }
+

@@ -47,7 +47,7 @@ import           Data.List.NonEmpty       (NonEmpty)
 import qualified Data.List.NonEmpty       as NE
 import           Data.Map.Strict          (Map, (!?))
 import qualified Data.Map.Strict          as Map
-import           Data.Maybe               (fromMaybe, isJust, mapMaybe)
+import           Data.Maybe               (isJust, mapMaybe)
 import           Data.Set                 (Set)
 import qualified Data.Set                 as Set
 import           Data.Text                (Text, isInfixOf, unpack)
@@ -159,17 +159,20 @@ keepAuthorized (FactGroup facts) authorizedOrigins =
   let isAuthorized k _ = k `Set.isSubsetOf` authorizedOrigins
    in FactGroup $ Map.filterWithKey isAuthorized facts
 
-keepAuthorized' :: FactGroup -> Maybe RuleScope -> Natural -> FactGroup
-keepAuthorized' factGroup mScope currentBlockId =
-  let scope = fromMaybe OnlyAuthority mScope
-   in case scope of
-        OnlyAuthority  -> keepAuthorized factGroup (Set.fromList [0, currentBlockId])
-        Previous       -> keepAuthorized factGroup (Set.fromList [0..currentBlockId])
-        OnlyBlocks ids -> keepAuthorized factGroup (Set.insert currentBlockId ids)
+keepAuthorized' :: Natural -> FactGroup -> Set EvalRuleScope -> Natural -> FactGroup
+keepAuthorized' blockCount factGroup trustedBlocks currentBlockId =
+  let scope = if null trustedBlocks then Set.singleton OnlyAuthority
+                                    else trustedBlocks
+      toBlockIds = \case
+        OnlyAuthority    -> Set.singleton 0
+        Previous         -> Set.fromList [0..currentBlockId]
+        BlockId (idx, _) -> idx
+      allBlockIds = foldMap toBlockIds scope
+   in keepAuthorized factGroup $ Set.insert currentBlockId $ Set.insert blockCount allBlockIds
 
 toScopedFacts :: FactGroup -> Set (Scoped Fact)
 toScopedFacts (FactGroup factGroups) =
-  let distributeScope scope facts = Set.map (scope,) facts
+  let distributeScope scope = Set.map (scope,)
    in foldMap (uncurry distributeScope) $ Map.toList factGroups
 
 fromScopedFacts :: Set (Scoped Fact) -> FactGroup
@@ -178,25 +181,25 @@ fromScopedFacts = FactGroup . Map.fromListWith (<>) . Set.toList . Set.map (fmap
 countFacts :: FactGroup -> Int
 countFacts (FactGroup facts) = sum $ Set.size <$> Map.elems facts
 
-checkCheck :: Limits -> Natural -> FactGroup -> Check -> Validation (NonEmpty Check) ()
-checkCheck l checkBlockId facts items =
-  if any (isJust . isQueryItemSatisfied l checkBlockId facts) items
+checkCheck :: Limits -> Natural -> Natural -> FactGroup -> EvalCheck -> Validation (NonEmpty Check) ()
+checkCheck l blockCount checkBlockId facts items =
+  if any (isJust . isQueryItemSatisfied l blockCount checkBlockId facts) items
   then Success ()
-  else failure items
+  else failure (toRepresentation <$> items)
 
-checkPolicy :: Limits -> FactGroup -> Policy -> Maybe (Either MatchedQuery MatchedQuery)
-checkPolicy l facts (pType, query) =
-  let bindings = fold $ mapMaybe (isQueryItemSatisfied l 0 facts) query
+checkPolicy :: Limits -> Natural -> FactGroup -> EvalPolicy -> Maybe (Either MatchedQuery MatchedQuery)
+checkPolicy l blockCount facts (pType, query) =
+  let bindings = fold $ mapMaybe (isQueryItemSatisfied l blockCount blockCount facts) query
    in if not (null bindings)
       then Just $ case pType of
-        Allow -> Right $ MatchedQuery{matchedQuery = query, bindings}
-        Deny  -> Left $ MatchedQuery{matchedQuery = query, bindings}
+        Allow -> Right $ MatchedQuery{matchedQuery = toRepresentation <$> query, bindings}
+        Deny  -> Left $ MatchedQuery{matchedQuery = toRepresentation <$> query, bindings}
       else Nothing
 
-isQueryItemSatisfied :: Limits -> Natural -> FactGroup -> QueryItem' 'RegularString -> Maybe (Set Bindings)
-isQueryItemSatisfied l blockId allFacts QueryItem{qBody, qExpressions, qScope} =
+isQueryItemSatisfied :: Limits -> Natural -> Natural -> FactGroup -> QueryItem' 'Eval 'Representation -> Maybe (Set Bindings)
+isQueryItemSatisfied l blockCount blockId allFacts QueryItem{qBody, qExpressions, qScope} =
   let removeScope = Set.map snd
-      facts = toScopedFacts $ keepAuthorized' allFacts qScope blockId
+      facts = toScopedFacts $ keepAuthorized' blockCount allFacts qScope blockId
       bindings = removeScope $ getBindingsForRuleBody l facts qBody qExpressions
    in if Set.size bindings > 0
       then Just bindings
@@ -205,7 +208,7 @@ isQueryItemSatisfied l blockId allFacts QueryItem{qBody, qExpressions, qScope} =
 -- | Given a rule and a set of available (scoped) facts, we find all fact
 -- combinations that match the rule body, and generate new facts by applying
 -- the bindings to the rule head (while keeping track of the facts origins)
-getFactsForRule :: Limits -> Set (Scoped Fact) -> Rule -> Set (Scoped Fact)
+getFactsForRule :: Limits -> Set (Scoped Fact) -> EvalRule -> Set (Scoped Fact)
 getFactsForRule l facts Rule{rhead, body, expressions} =
   let legalBindings :: Set (Scoped Bindings)
       legalBindings = getBindingsForRuleBody l facts body expressions

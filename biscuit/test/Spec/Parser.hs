@@ -1,19 +1,29 @@
 {-# LANGUAGE DataKinds         #-}
+{-# LANGUAGE OverloadedLists   #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards   #-}
 module Spec.Parser (specs) where
 
 import           Data.Attoparsec.Text        (parseOnly)
+import           Data.Maybe                  (fromJust)
 import qualified Data.Set                    as Set
 import           Data.Text                   (Text)
 import           Test.Tasty
 import           Test.Tasty.HUnit
 
+import           Auth.Biscuit                (PublicKey, parsePublicKeyHex)
 import           Auth.Biscuit.Datalog.AST
-import           Auth.Biscuit.Datalog.Parser (authorizerParser, checkParser,
-                                              expressionParser, policyParser,
-                                              predicateParser, ruleParser,
-                                              termParser)
+import           Auth.Biscuit.Datalog.Parser (authorizerParser, blockParser,
+                                              checkParser, expressionParser,
+                                              policyParser, predicateParser,
+                                              ruleParser, termParser)
+
+pk1, pk2, pk3, pk4, pk5 :: PublicKey
+pk1 = fromJust $ parsePublicKeyHex "a1b712761c609039f878edad694d762652f1548a68acccc96735b3196a240e8b"
+pk2 = fromJust $ parsePublicKeyHex "b82c748be51784a58496675752e04cc48009a7e78bcfae8cad51fba959102af1"
+pk3 = fromJust $ parsePublicKeyHex "083aae4ba29a9a3781cdee7a800f4f8ab90591f65ca983fc429687628311aedd"
+pk4 = fromJust $ parsePublicKeyHex "c6864578bc03596d52878bd70025ec966c95c60727cb6573198453e82132510d"
+pk5 = fromJust $ parsePublicKeyHex "a0d3dc7ab62a0a2732ba267e0d57894170458ec1659ca1226240b99764554a2e"
 
 parseTerm :: Text -> Either String Term
 parseTerm = parseOnly termParser
@@ -39,9 +49,13 @@ parseAuthorizer = parseOnly authorizerParser
 parsePolicy :: Text -> Either String Policy
 parsePolicy = parseOnly policyParser
 
+parseBlock :: Text -> Either String Block
+parseBlock = parseOnly blockParser
+
 specs :: TestTree
 specs = testGroup "datalog parser"
-  [ factWithDate
+  [
+    factWithDate
   , simpleFact
   , oneLetterFact
   , simpleRule
@@ -51,9 +65,11 @@ specs = testGroup "datalog parser"
   , constraints
   , constrainedRule
   , constrainedRuleOrdering
+  , ruleWithScopeParsing
   , checkParsing
   , policyParsing
   , authorizerParsing
+  , blockParsing
   ]
 
 termsGroup :: TestTree
@@ -106,7 +122,7 @@ simpleRule = testCase "Parse simple rule" $
     Right (Rule (Predicate "right" [Variable "0", LString "read"])
                 [ Predicate "resource" [Variable "0"]
                 , Predicate "operation" [LString "read"]
-                ] [] Nothing)
+                ] [] [])
 
 multilineRule :: TestTree
 multilineRule = testCase "Parse multiline rule" $
@@ -114,7 +130,7 @@ multilineRule = testCase "Parse multiline rule" $
     Right (Rule (Predicate "right" [Variable "0", LString "read"])
                 [ Predicate "resource" [Variable "0"]
                 , Predicate "operation" [LString "read"]
-                ] [] Nothing)
+                ] [] [])
 
 constrainedRule :: TestTree
 constrainedRule = testCase "Parse constained rule" $
@@ -126,7 +142,7 @@ constrainedRule = testCase "Parse constained rule" $
                 [ EBinary LessOrEqual
                     (EValue $ Variable "0")
                     (EValue $ LDate $ read "2019-12-04 09:46:41 UTC")
-                ] Nothing)
+                ] [])
 
 constrainedRuleOrdering :: TestTree
 constrainedRuleOrdering = testCase "Parse constained rule (interleaved)" $
@@ -138,7 +154,7 @@ constrainedRuleOrdering = testCase "Parse constained rule (interleaved)" $
                 [ EBinary LessOrEqual
                     (EValue $ Variable "0")
                     (EValue $ LDate $ read "2019-12-04 09:46:41 UTC")
-                ] Nothing)
+                ] [])
 
 constraints :: TestTree
 constraints = testGroup "Parse expressions"
@@ -285,11 +301,23 @@ operatorPrecedences = testGroup "mixed-precedence operators"
               )
   ]
 
+ruleWithScopeParsing :: TestTree
+ruleWithScopeParsing = testCase "Parse constained rule with scope annotation" $
+  parseRule "valid_date(\"file1\") <- time($0), resource(\"file1\"), $0 <= 2019-12-04T09:46:41+00:00 trusting previous" @?=
+    Right (Rule (Predicate "valid_date" [LString "file1"])
+                [ Predicate "time" [Variable "0"]
+                , Predicate "resource" [LString "file1"]
+                ]
+                [ EBinary LessOrEqual
+                    (EValue $ Variable "0")
+                    (EValue $ LDate $ read "2019-12-04 09:46:41 UTC")
+                ] [Previous])
+
 checkParsing :: TestTree
 checkParsing = testGroup "check blocks"
   [ testCase "Simple check" $
       parseCheck "check if true" @?=
-        Right [QueryItem [] [EValue $ LBool True] Nothing]
+        Right [QueryItem [] [EValue $ LBool True] []]
   , testCase "Multiple groups" $
       parseCheck
         "check if fact($var), $var == true or \
@@ -297,10 +325,22 @@ checkParsing = testGroup "check blocks"
           Right
             [ QueryItem [Predicate "fact" [Variable "var"]]
                         [EBinary Equal (EValue (Variable "var")) (EValue (LBool True))]
-                        Nothing
+                        []
             , QueryItem [Predicate "other" [Variable "var"]]
                         [EBinary Equal (EValue (Variable "var")) (EValue (LInteger 2))]
-                        Nothing
+                        []
+            ]
+  , testCase "Multiple groups, scoped" $
+      parseCheck
+        "check if fact($var), $var == true trusting previous or \
+        \other($var), $var == 2 trusting authority" @?=
+          Right
+            [ QueryItem [Predicate "fact" [Variable "var"]]
+                        [EBinary Equal (EValue (Variable "var")) (EValue (LBool True))]
+                        [Previous]
+            , QueryItem [Predicate "other" [Variable "var"]]
+                        [EBinary Equal (EValue (Variable "var")) (EValue (LInteger 2))]
+                        [OnlyAuthority]
             ]
   ]
 
@@ -308,10 +348,10 @@ policyParsing :: TestTree
 policyParsing = testGroup "policy blocks"
   [ testCase "Simple allow policy" $
       parsePolicy "allow if true" @?=
-        Right (Allow, [QueryItem [] [EValue $ LBool True] Nothing])
+        Right (Allow, [QueryItem [] [EValue $ LBool True] []])
   , testCase "Simple deny policy" $
       parsePolicy "deny if true" @?=
-        Right (Deny, [QueryItem [] [EValue $ LBool True] Nothing])
+        Right (Deny, [QueryItem [] [EValue $ LBool True] []])
   , testCase "Allow with multiple groups" $
       parsePolicy
         "allow if fact($var), $var == true or \
@@ -320,10 +360,10 @@ policyParsing = testGroup "policy blocks"
             ( Allow
             , [ QueryItem [Predicate "fact" [Variable "var"]]
                           [EBinary Equal (EValue (Variable "var")) (EValue (LBool True))]
-                          Nothing
+                          []
               , QueryItem [Predicate "other" [Variable "var"]]
                           [EBinary Equal (EValue (Variable "var")) (EValue (LInteger 2))]
-                          Nothing
+                          []
               ]
             )
   , testCase "Deny with multiple groups" $
@@ -334,10 +374,10 @@ policyParsing = testGroup "policy blocks"
             ( Deny
             , [ QueryItem [Predicate "fact" [Variable "var"]]
                           [EBinary Equal (EValue (Variable "var")) (EValue (LBool True))]
-                          Nothing
+                          []
               , QueryItem [Predicate "other" [Variable "var"]]
                           [EBinary Equal (EValue (Variable "var")) (EValue (LInteger 2))]
-                          Nothing
+                          []
               ]
             )
   , testCase "Deny with multiple groups, multiline" $
@@ -349,10 +389,24 @@ policyParsing = testGroup "policy blocks"
             ( Deny
             , [ QueryItem [Predicate "fact" [Variable "var"]]
                           [EBinary Equal (EValue (Variable "var")) (EValue (LBool True))]
-                          Nothing
+                          []
               , QueryItem [Predicate "other" [Variable "var"]]
                           [EBinary Equal (EValue (Variable "var")) (EValue (LInteger 2))]
-                          Nothing
+                          []
+              ]
+            )
+  , testCase "Allow with multiple groups, scoped" $
+      parsePolicy
+        "allow if fact($var), $var == true trusting previous or \
+        \other($var), $var == 2 trusting ed25519/hex:a1b712761c609039f878edad694d762652f1548a68acccc96735b3196a240e8b,ed25519/hex:083aae4ba29a9a3781cdee7a800f4f8ab90591f65ca983fc429687628311aedd,ed25519/hex:c6864578bc03596d52878bd70025ec966c95c60727cb6573198453e82132510d " @?=
+          Right
+            ( Allow
+            , [ QueryItem [Predicate "fact" [Variable "var"]]
+                          [EBinary Equal (EValue (Variable "var")) (EValue (LBool True))]
+                          [Previous]
+              , QueryItem [Predicate "other" [Variable "var"]]
+                          [EBinary Equal (EValue (Variable "var")) (EValue (LInteger 2))]
+                          [BlockId pk1, BlockId pk3, BlockId pk4]
               ]
             )
   ]
@@ -361,20 +415,21 @@ authorizerParsing :: TestTree
 authorizerParsing = testGroup "Simple authorizers"
   [ testCase "Just a deny" $
       parseAuthorizer "deny if true;" @?=
-        Right (Authorizer [(Deny, [QueryItem [] [EValue (LBool True)] Nothing])] mempty
+        Right (Authorizer [(Deny, [QueryItem [] [EValue (LBool True)] []])] mempty
               )
   , testCase "Allow and deny" $
       parseAuthorizer "allow if operation(\"read\");\n deny if true;" @?=
         Right (Authorizer
-                 [  (Allow, [QueryItem [Predicate "operation" [LString "read"]] [] Nothing])
-                 , (Deny, [QueryItem [] [EValue (LBool True)] Nothing])
+                 [  (Allow, [QueryItem [Predicate "operation" [LString "read"]] [] []])
+                 , (Deny, [QueryItem [] [EValue (LBool True)] []])
                  ]
                  mempty
               )
   , testCase "Complete authorizer" $ do
       let spec :: Text
           spec =
-            "// the owner has all rights\n\
+            " trusting previous;\n\
+            \// the owner has all rights\n\
             \right($blog_id, $article_id, $operation) <-\n\
             \    article($blog_id, $article_id),\n\
             \    operation($operation),\n\
@@ -423,13 +478,13 @@ authorizerParsing = testGroup "Simple authorizers"
                    , p "operation" [vOp]
                    , p "user" [vUserId]
                    , p "owner" [vUserId, vBlogId]
-                   ] [] Nothing
+                   ] [] []
             , Rule (p "right" [vBlogId, vArticleId, sRead])
                    [ p "article" [vBlogId, vArticleId]
                    , p "premium_readable" [vBlogId, vArticleId]
                    , p "user" [vUserId]
                    , p "premium_user" [vUserId, vBlogId]
-                   ] [] Nothing
+                   ] [] []
             , Rule (p "right" [vBlogId, vArticleId, vOp])
                    [ p "article" [vBlogId, vArticleId]
                    , p "operation" [vOp]
@@ -437,23 +492,86 @@ authorizerParsing = testGroup "Simple authorizers"
                    , p "member" [vUserId, vTeamId]
                    , p "team_role" [vTeamId, vBlogId, sContributor]
                    ] [EBinary Contains (EValue (TermSet $ Set.fromList [sRead, sWrite]))
-                                       (EValue vOp)] Nothing
+                                       (EValue vOp)] []
            ]
           bFacts = []
           bChecks = []
           bContext = Nothing
-          bScope = Nothing
+          bScope = [Previous]
           vPolicies =
             [ (Allow, [QueryItem [ p "operation" [sRead]
                                  , p "article"   [vBlogId, vArticleId]
                                  , p "readable"  [vBlogId, vArticleId]
-                                 ] [] Nothing])
+                                 ] [] []])
             , (Allow, [QueryItem [ p "blog" [vBlogId]
                                  , p "article" [vBlogId, vArticleId]
                                  , p "operation" [vOp]
                                  , p "right" [vBlogId, vArticleId, vOp]
-                                 ] [] Nothing])
-            , (Deny, [QueryItem [] [EValue (LBool True)] Nothing])
+                                 ] [] []])
+            , (Deny, [QueryItem [] [EValue (LBool True)] []])
             ]
       parseAuthorizer spec @?= Right Authorizer{vBlock = Block{..}, ..}
   ]
+
+blockParsing :: TestTree
+blockParsing = testCase "Full block" $ do
+  let spec :: Text
+      spec =
+        " trusting ed25519/hex:b82c748be51784a58496675752e04cc48009a7e78bcfae8cad51fba959102af1,ed25519/hex:083aae4ba29a9a3781cdee7a800f4f8ab90591f65ca983fc429687628311aedd,ed25519/hex:a0d3dc7ab62a0a2732ba267e0d57894170458ec1659ca1226240b99764554a2e;\n\
+        \// the owner has all rights\n\
+        \right($blog_id, $article_id, $operation) <-\n\
+        \    article($blog_id, $article_id),\n\
+        \    operation($operation),\n\
+        \    user($user_id),\n\
+        \    owner($user_id, $blog_id);\n\
+        \// premium users can access some restricted articles\n\
+        \right($blog_id, $article_id, \"read\") <-\n\
+        \  article($blog_id, $article_id),\n\
+        \  premium_readable($blog_id, $article_id),\n\
+        \  user($user_id),\n\
+        \  premium_user($user_id, $blog_id);\n\
+        \// define teams and roles\n\
+        \right($blog_id, $article_id, $operation) <-\n\
+        \  article($blog_id, $article_id),\n\
+        \  operation($operation),\n\
+        \  user($user_id),\n\
+        \  member($user_id, $team_id),\n\
+        \  team_role($team_id, $blog_id, \"contributor\"),\n\
+        \  [\"read\", \"write\"].contains($operation);\n\
+        \ "
+      p = Predicate
+      sRead = LString "read"
+      sWrite = LString "write"
+      sContributor = LString "contributor"
+      vBlogId = Variable "blog_id"
+      vArticleId = Variable "article_id"
+      vUserId = Variable "user_id"
+      vTeamId = Variable "team_id"
+      vOp = Variable "operation"
+      bRules =
+        [ Rule (p "right" [vBlogId, vArticleId, vOp])
+               [ p "article" [vBlogId, vArticleId]
+               , p "operation" [vOp]
+               , p "user" [vUserId]
+               , p "owner" [vUserId, vBlogId]
+               ] [] []
+        , Rule (p "right" [vBlogId, vArticleId, sRead])
+               [ p "article" [vBlogId, vArticleId]
+               , p "premium_readable" [vBlogId, vArticleId]
+               , p "user" [vUserId]
+               , p "premium_user" [vUserId, vBlogId]
+               ] [] []
+        , Rule (p "right" [vBlogId, vArticleId, vOp])
+               [ p "article" [vBlogId, vArticleId]
+               , p "operation" [vOp]
+               , p "user" [vUserId]
+               , p "member" [vUserId, vTeamId]
+               , p "team_role" [vTeamId, vBlogId, sContributor]
+               ] [EBinary Contains (EValue (TermSet $ Set.fromList [sRead, sWrite]))
+                                   (EValue vOp)] []
+       ]
+      bFacts = []
+      bChecks = []
+      bContext = Nothing
+      bScope = Set.fromList $ BlockId <$> [pk2,pk3,pk5]
+  parseBlock spec @?= Right Block{..}

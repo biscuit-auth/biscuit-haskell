@@ -58,6 +58,13 @@ module Auth.Biscuit
   -- ** Attenuating biscuits
   -- $attenuatingBiscuits
   , addBlock
+  -- ** Third-party blocks
+  , mkThirdPartyBlockReq
+  , mkThirdPartyBlockReqB64
+  , mkThirdPartyBlock
+  , mkThirdPartyBlockB64
+  , applyThirdPartyBlock
+  , applyThirdPartyBlockB64
   -- $sealedBiscuits
   , seal
   , fromOpen
@@ -95,20 +102,21 @@ module Auth.Biscuit
 
 import           Control.Monad                       ((<=<))
 import           Control.Monad.Identity              (runIdentity)
+import           Data.Bifunctor                      (first)
 import           Data.ByteString                     (ByteString)
 import qualified Data.ByteString.Base16              as Hex
 import qualified Data.ByteString.Base64.URL          as B64
 import           Data.Foldable                       (toList)
 import           Data.Set                            (Set)
 import qualified Data.Set                            as Set
-import           Data.Text                           (Text)
+import           Data.Text                           (Text, unpack)
 
 import           Auth.Biscuit.Crypto                 (PublicKey, SecretKey,
-                                                      convert,
                                                       generateSecretKey,
-                                                      maybeCryptoError,
-                                                      publicKey, secretKey,
-                                                      toPublic)
+                                                      pkBytes,
+                                                      readEd25519PublicKey,
+                                                      readEd25519SecretKey,
+                                                      skBytes, toPublic)
 import           Auth.Biscuit.Datalog.AST            (Authorizer, Block,
                                                       FromValue (..), Term,
                                                       Term' (..), ToTerm (..),
@@ -131,8 +139,9 @@ import           Auth.Biscuit.Token                  (AuthorizedBiscuit (..),
                                                       ParseError (..),
                                                       ParserConfig (..), Sealed,
                                                       Unverified, Verified,
-                                                      addBlock, asOpen,
-                                                      asSealed,
+                                                      addBlock,
+                                                      applyThirdPartyBlock,
+                                                      asOpen, asSealed,
                                                       authorizeBiscuit,
                                                       authorizeBiscuitWithLimits,
                                                       checkBiscuitSignatures,
@@ -140,6 +149,8 @@ import           Auth.Biscuit.Token                  (AuthorizedBiscuit (..),
                                                       getRevocationIds,
                                                       getVerifiedBiscuitPublicKey,
                                                       mkBiscuit, mkBiscuitWith,
+                                                      mkThirdPartyBlock,
+                                                      mkThirdPartyBlockReq,
                                                       parseBiscuitUnverified,
                                                       parseBiscuitWith, seal,
                                                       serializeBiscuit)
@@ -250,23 +261,23 @@ newSecret = generateSecretKey
 
 -- | Serialize a 'SecretKey' to raw bytes, without any encoding
 serializeSecretKey :: SecretKey -> ByteString
-serializeSecretKey = convert
+serializeSecretKey = skBytes
 
 -- | Serialize a 'PublicKey' to raw bytes, without any encoding
 serializePublicKey :: PublicKey -> ByteString
-serializePublicKey = convert
+serializePublicKey = pkBytes
 
 -- | Serialize a 'SecretKey' to a hex-encoded bytestring
 serializeSecretKeyHex :: SecretKey -> ByteString
-serializeSecretKeyHex = Hex.encode . convert
+serializeSecretKeyHex = Hex.encode . skBytes
 
 -- | Serialize a 'PublicKey' to a hex-encoded bytestring
 serializePublicKeyHex :: PublicKey -> ByteString
-serializePublicKeyHex = Hex.encode . convert
+serializePublicKeyHex = Hex.encode . pkBytes
 
 -- | Read a 'SecretKey' from raw bytes
 parseSecretKey :: ByteString -> Maybe SecretKey
-parseSecretKey = maybeCryptoError . secretKey
+parseSecretKey = readEd25519SecretKey
 
 -- | Read a 'SecretKey' from an hex bytestring
 parseSecretKeyHex :: ByteString -> Maybe SecretKey
@@ -274,7 +285,7 @@ parseSecretKeyHex = parseSecretKey <=< fromHex
 
 -- | Read a 'PublicKey' from raw bytes
 parsePublicKey :: ByteString -> Maybe PublicKey
-parsePublicKey = maybeCryptoError . publicKey
+parsePublicKey = readEd25519PublicKey
 
 -- | Read a 'PublicKey' from an hex bytestring
 parsePublicKeyHex :: ByteString -> Maybe PublicKey
@@ -337,6 +348,20 @@ serialize = serializeBiscuit
 -- | Serialize a biscuit to URL-compatible base 64, as recommended by the spec
 serializeB64 :: BiscuitProof p => Biscuit p Verified -> ByteString
 serializeB64 = B64.encodeBase64' . serialize
+
+mkThirdPartyBlockReqB64 :: Biscuit Open c -> ByteString
+mkThirdPartyBlockReqB64 = B64.encodeBase64' . mkThirdPartyBlockReq
+
+mkThirdPartyBlockB64 :: SecretKey -> ByteString -> Block -> Either String ByteString
+mkThirdPartyBlockB64 sk reqB64 b = do
+  req <- first unpack $ B64.decodeBase64 reqB64
+  contents <- mkThirdPartyBlock sk req b
+  pure $ B64.encodeBase64' contents
+
+applyThirdPartyBlockB64 :: Biscuit Open check -> ByteString -> Either String (IO (Biscuit Open check))
+applyThirdPartyBlockB64 b contentsB64 = do
+  contents <- first unpack $ B64.decodeBase64 contentsB64
+  applyThirdPartyBlock b contents
 
 -- $biscuitBlocks
 --

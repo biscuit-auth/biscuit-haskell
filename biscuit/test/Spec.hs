@@ -13,6 +13,7 @@ import qualified Spec.Verification   as Verification
 
 main :: IO ()
 main = do
+  SampleReader.generateCases
   sampleReader <- SampleReader.getSpecs
   defaultMain $ testGroup "biscuit-haskell"
     [

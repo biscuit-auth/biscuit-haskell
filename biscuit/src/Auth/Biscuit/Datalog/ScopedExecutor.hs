@@ -22,7 +22,7 @@ module Auth.Biscuit.Datalog.ScopedExecutor
   , FactGroup (..)
   ) where
 
-import           Control.Applicative           ((<|>))
+import Data.List (genericLength)
 import           Control.Monad                 (unless, when)
 import           Control.Monad.State           (StateT (..), evalStateT, get,
                                                 gets, lift, put)
@@ -41,6 +41,7 @@ import           Data.Text                     (Text)
 import           Numeric.Natural               (Natural)
 import           Validation                    (Validation (..))
 
+import           Auth.Biscuit.Crypto           (PublicKey)
 import           Auth.Biscuit.Datalog.AST
 import           Auth.Biscuit.Datalog.Executor (Bindings, ExecutionError (..),
                                                 FactGroup (..), Limits (..),
@@ -56,7 +57,7 @@ import           Auth.Biscuit.Datalog.Executor (Bindings, ExecutionError (..),
 import           Auth.Biscuit.Datalog.Parser   (fact)
 import           Auth.Biscuit.Timer            (timer)
 
-type BlockWithRevocationId = (Block, ByteString)
+type BlockWithRevocationId = (Block, ByteString, Maybe PublicKey)
 
 -- | A subset of 'ExecutionError' that can only happen during fact generation
 data PureExecError = Facts | Iterations | BadRule
@@ -117,14 +118,16 @@ mkRevocationIdFacts :: BlockWithRevocationId -> [BlockWithRevocationId]
                     -> Set Fact
 mkRevocationIdFacts authority blocks =
   let allIds :: [(Int, ByteString)]
-      allIds = zip [0..] $ snd <$> authority : blocks
+      allIds = zip [0..] $ snd' <$> authority : blocks
+      snd' (_,b,_) = b
       mkFact (index, rid) = [fact|revocation_id(${index}, ${rid})|]
    in Set.fromList $ mkFact <$> allIds
 
 data ComputeState
   = ComputeState
   { sLimits     :: Limits -- readonly
-  , sRules      :: Map Natural (Set Rule) -- readonly
+  , sRules      :: Map Natural (Set EvalRule) -- readonly
+  , sBlockCount :: Natural
   -- state
   , sIterations :: Int -- elapsed iterations
   , sFacts      :: FactGroup -- facts generated so far
@@ -133,16 +136,21 @@ data ComputeState
 
 mkInitState :: Limits -> BlockWithRevocationId -> [BlockWithRevocationId] -> Authorizer -> ComputeState
 mkInitState limits authority blocks authorizer =
-  let revocationWorld = (mempty, FactGroup $ Map.singleton (Set.singleton 0) $ mkRevocationIdFacts authority blocks)
-      firstBlock = fst authority <> vBlock authorizer
-      otherBlocks = fst <$> blocks
-      allBlocks = firstBlock : otherBlocks
-      (sRules, sFacts) = revocationWorld <> fold (zipWith collectWorld [0..] allBlocks)
+  let fst' (a,_,_) = a
+      trd' (_,_,c) = c
+      sBlockCount = 1 + genericLength blocks
+      externalKeys = Nothing : (trd' <$> blocks)
+      revocationWorld = (mempty, FactGroup $ Map.singleton (Set.singleton sBlockCount) $ mkRevocationIdFacts authority blocks)
+      firstBlock = fst' authority
+      otherBlocks = fst' <$> blocks
+      allBlocks = zip [0..] (firstBlock : otherBlocks) <> [(sBlockCount, vBlock authorizer)]
+      (sRules, sFacts) = revocationWorld <> fold (uncurry collectWorld . fmap (toEvaluation externalKeys) <$> allBlocks)
    in ComputeState
         { sLimits = limits
         , sRules
-        , sFacts
+        , sBlockCount
         , sIterations = 0
+        , sFacts
         }
 
 runAuthorizerNoTimeout :: Limits
@@ -151,16 +159,24 @@ runAuthorizerNoTimeout :: Limits
                        -> Authorizer
                        -> Either ExecutionError AuthorizationSuccess
 runAuthorizerNoTimeout limits authority blocks authorizer = do
-  let initState = mkInitState limits authority blocks authorizer
+  let fst' (a,_,_) = a
+      trd' (_,_,c) = c
+      blockCount = 1 + genericLength blocks
+      externalKeys = Nothing : (trd' <$> blocks)
+      (<$$>) = fmap . fmap
+      (<$$$>) = fmap . fmap . fmap
+      initState = mkInitState limits authority blocks authorizer
       toExecutionError = \case
         Facts      -> TooManyFacts
         Iterations -> TooManyIterations
         BadRule    -> InvalidRule
   allFacts <- first toExecutionError $ computeAllFacts initState
-  let checks = zip [0..] $ bChecks <$> ((fst authority <> vBlock authorizer) : (fst <$> blocks))
+  let checks = bChecks <$$> ( zip [0..] (fst' <$> authority : blocks)
+                           <> [(blockCount,vBlock authorizer)]
+                            )
       policies = vPolicies authorizer
-      checkResults = checkChecks limits allFacts checks
-      policyResults = checkPolicies limits allFacts policies
+      checkResults = checkChecks limits blockCount allFacts (checkToEvaluation externalKeys <$$$> checks)
+      policyResults = checkPolicies limits blockCount allFacts (policyToEvaluation externalKeys <$> policies)
   case (checkResults, policyResults) of
     (Success (), Left Nothing)  -> Left $ ResultError $ NoPoliciesMatched []
     (Success (), Left (Just p)) -> Left $ ResultError $ DenyRuleMatched [] p
@@ -174,10 +190,10 @@ runAuthorizerNoTimeout limits authority blocks authorizer = do
 
 runStep :: StateT ComputeState (Either PureExecError) Int
 runStep = do
-  state@ComputeState{sLimits,sFacts,sRules,sIterations} <- get
+  state@ComputeState{sLimits,sFacts,sRules,sBlockCount,sIterations} <- get
   let Limits{maxFacts, maxIterations} = sLimits
       previousCount = countFacts sFacts
-      newFacts = sFacts <> extend sLimits sRules sFacts
+      newFacts = sFacts <> extend sLimits sBlockCount sRules sFacts
       newCount = countFacts newFacts
       -- counting the facts returned by `extend` is not equivalent to
       -- comparing complete counts, as `extend` may return facts that
@@ -191,7 +207,7 @@ runStep = do
   return addedFactsCount
 
 -- | Check if every variable from the head is present in the body
-checkRuleHead :: Rule -> Bool
+checkRuleHead :: EvalRule -> Bool
 checkRuleHead Rule{rhead, body} =
   let headVars = extractVariables [rhead]
       bodyVars = extractVariables body
@@ -211,36 +227,36 @@ computeAllFacts initState@ComputeState{sRules} = do
 
 -- | Small helper used in tests to directly provide rules and facts without creating
 -- a biscuit token
-runFactGeneration :: Limits -> Map Natural (Set Rule) -> FactGroup -> Either PureExecError FactGroup
-runFactGeneration sLimits sRules sFacts =
+runFactGeneration :: Limits -> Natural -> Map Natural (Set EvalRule) -> FactGroup -> Either PureExecError FactGroup
+runFactGeneration sLimits sBlockCount sRules sFacts =
   let initState = ComputeState{sIterations = 0, ..}
    in computeAllFacts initState
 
-checkChecks :: Limits -> FactGroup -> [(Natural, [Check])] -> Validation (NonEmpty Check) ()
-checkChecks limits allFacts =
-  traverse_ (uncurry $ checkChecksForGroup limits allFacts)
+checkChecks :: Limits -> Natural -> FactGroup -> [(Natural, [EvalCheck])] -> Validation (NonEmpty Check) ()
+checkChecks limits blockCount allFacts =
+  traverse_ (uncurry $ checkChecksForGroup limits blockCount allFacts)
 
-checkChecksForGroup :: Limits -> FactGroup -> Natural -> [Check] -> Validation (NonEmpty Check) ()
-checkChecksForGroup limits allFacts checksBlockId =
-  traverse_ (checkCheck limits checksBlockId allFacts)
+checkChecksForGroup :: Limits -> Natural -> FactGroup -> Natural -> [EvalCheck] -> Validation (NonEmpty Check) ()
+checkChecksForGroup limits blockCount allFacts checksBlockId =
+  traverse_ (checkCheck limits blockCount checksBlockId allFacts)
 
-checkPolicies :: Limits -> FactGroup -> [Policy] -> Either (Maybe MatchedQuery) MatchedQuery
-checkPolicies limits allFacts policies =
-  let results = mapMaybe (checkPolicy limits allFacts) policies
+checkPolicies :: Limits -> Natural -> FactGroup -> [EvalPolicy] -> Either (Maybe MatchedQuery) MatchedQuery
+checkPolicies limits blockCount allFacts policies =
+  let results = mapMaybe (checkPolicy limits blockCount allFacts) policies
    in case results of
         p : _ -> first Just p
         []    -> Left Nothing
 
 -- | Generate new facts by applying rules on existing facts
-extend :: Limits -> Map Natural (Set Rule) -> FactGroup -> FactGroup
-extend l rules facts =
-  let buildFacts :: Natural -> Set Rule -> FactGroup -> Set (Scoped Fact)
+extend :: Limits -> Natural -> Map Natural (Set EvalRule) -> FactGroup -> FactGroup
+extend l blockCount rules facts =
+  let buildFacts :: Natural -> Set EvalRule -> FactGroup -> Set (Scoped Fact)
       buildFacts ruleBlockId ruleGroup factGroup =
-        let extendRule :: Rule -> Set (Scoped Fact)
-            extendRule r@Rule{scope} = getFactsForRule l (toScopedFacts $ keepAuthorized' factGroup scope ruleBlockId) r
+        let extendRule :: EvalRule -> Set (Scoped Fact)
+            extendRule r@Rule{scope} = getFactsForRule l (toScopedFacts $ keepAuthorized' blockCount factGroup scope ruleBlockId) r
          in foldMap extendRule ruleGroup
 
-      extendRuleGroup :: Natural -> Set Rule -> FactGroup
+      extendRuleGroup :: Natural -> Set EvalRule -> FactGroup
       extendRuleGroup ruleBlockId ruleGroup =
             -- todo pre-filter facts based on the weakest rule scope to avoid passing too many facts
             -- to buildFacts
@@ -251,11 +267,11 @@ extend l rules facts =
    in foldMap (uncurry extendRuleGroup) $ Map.toList rules
 
 
-collectWorld :: Natural -> Block -> (Map Natural (Set Rule), FactGroup)
+collectWorld :: Natural -> EvalBlock -> (Map Natural (Set EvalRule), FactGroup)
 collectWorld blockId Block{..} =
   let -- a block can define a default scope for its rule
       -- which is used unless the rule itself has defined a scope
-      applyScope r@Rule{scope} = r { scope = scope <|> bScope }
+      applyScope r@Rule{scope} = r { scope = if null scope then bScope else scope }
    in ( Map.singleton blockId $ Set.map applyScope $ Set.fromList bRules
       , FactGroup $ Map.singleton (Set.singleton blockId) $ Set.fromList bFacts
       )

@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedLists   #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes       #-}
 module Spec.Quasiquoter (specs) where
@@ -34,7 +35,7 @@ basicRule = testCase "Basic rule" $
     Rule (Predicate "right" [Variable "0", LString "read"])
          [ Predicate "resource" [Variable "0"]
          , Predicate "operation" [LString "read"]
-         ] [] Nothing
+         ] [] []
 
 antiquotedFact :: TestTree
 antiquotedFact = testCase "Sliced fact" $
@@ -57,4 +58,4 @@ antiquotedRule = testCase "Sliced rule" $
     Rule (Predicate "right" [Variable "0", LString "read"])
          [ Predicate "resource" [Variable "0"]
          , Predicate "operation" [LString "read", LString "test"]
-         ] [] Nothing
+         ] [] []

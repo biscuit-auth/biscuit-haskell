@@ -16,8 +16,11 @@ module Auth.Biscuit.Proto
   , SignedBlock (..)
   , PublicKey (..)
   , Algorithm (..)
+  , ExternalSig (..)
   , Proof (..)
   , Block (..)
+  , Scope (..)
+  , ScopeType (..)
   , FactV2 (..)
   , RuleV2 (..)
   , CheckV2 (..)
@@ -32,12 +35,18 @@ module Auth.Biscuit.Proto
   , BinaryKind (..)
   , OpTernary (..)
   , TernaryKind (..)
+  , ThirdPartyBlockContents (..)
+  , ThirdPartyBlockRequest (..)
   , getField
   , putField
   , decodeBlockList
   , decodeBlock
   , encodeBlockList
   , encodeBlock
+  , decodeThirdPartyBlockRequest
+  , decodeThirdPartyBlockContents
+  , encodeThirdPartyBlockRequest
+  , encodeThirdPartyBlockContents
   ) where
 
 import           Data.ByteString      (ByteString)
@@ -61,10 +70,18 @@ data Proof =
   deriving (Generic, Show)
   deriving anyclass (Decode, Encode)
 
+data ExternalSig = ExternalSig
+  { signature :: Required 1 (Value ByteString)
+  , publicKey :: Required 2 (Message PublicKey)
+  }
+  deriving (Generic, Show)
+  deriving anyclass (Decode, Encode)
+
 data SignedBlock = SignedBlock
-  { block     :: Required 1 (Value ByteString)
-  , nextKey   :: Required 2 (Message PublicKey)
-  , signature :: Required 3 (Value ByteString)
+  { block       :: Required 1 (Value ByteString)
+  , nextKey     :: Required 2 (Message PublicKey)
+  , signature   :: Required 3 (Value ByteString)
+  , externalSig :: Optional 4 (Message ExternalSig)
   }
   deriving (Generic, Show)
   deriving anyclass (Decode, Encode)
@@ -86,7 +103,20 @@ data Block = Block {
   , facts_v2  :: Repeated 4 (Message FactV2)
   , rules_v2  :: Repeated 5 (Message RuleV2)
   , checks_v2 :: Repeated 6 (Message CheckV2)
-  } deriving (Generic, Show)
+  , scope     :: Repeated 7 (Message Scope)
+  , pksTable  :: Repeated 8 (Message PublicKey)
+  } deriving stock (Generic, Show)
+    deriving anyclass (Decode, Encode)
+
+data ScopeType =
+    ScopeAuthority
+  | ScopePrevious
+  deriving stock (Show, Enum, Bounded)
+
+data Scope =
+    ScType  (Required 1 (Enumeration ScopeType))
+  | ScBlock (Required 2 (Value Int64))
+    deriving stock (Generic, Show)
     deriving anyclass (Decode, Encode)
 
 newtype FactV2 = FactV2
@@ -98,6 +128,7 @@ data RuleV2 = RuleV2
   { head        :: Required 1 (Message PredicateV2)
   , body        :: Repeated 2 (Message PredicateV2)
   , expressions :: Repeated 3 (Message ExpressionV2)
+  , scope       :: Repeated 4 (Message Scope)
   } deriving stock (Generic, Show)
     deriving anyclass (Decode, Encode)
 
@@ -126,77 +157,6 @@ data TermV2 =
 
 newtype TermSet = TermSet
   { set :: Repeated 1 (Message TermV2)
-  } deriving stock (Generic, Show)
-    deriving anyclass (Decode, Encode)
-
-type CV2Id = Required 1 (Value Int32)
-data ConstraintV2 =
-    CV2Int    CV2Id (Required 2 (Message IntConstraintV2))
-  | CV2String CV2Id (Required 3 (Message StringConstraintV2))
-  | CV2Date   CV2Id (Required 4 (Message DateConstraintV2))
-  | CV2Symbol CV2Id (Required 5 (Message SymbolConstraintV2))
-  | CV2Bytes  CV2Id (Required 6 (Message BytesConstraintV2))
-    deriving stock (Generic, Show)
-    deriving anyclass (Decode, Encode)
-
-data IntConstraintV2 =
-    ICV2LessThan       (Required 1 (Value Int64))
-  | ICV2GreaterThan    (Required 2 (Value Int64))
-  | ICV2LessOrEqual    (Required 3 (Value Int64))
-  | ICV2GreaterOrEqual (Required 4 (Value Int64))
-  | ICV2Equal          (Required 5 (Value Int64))
-  | ICV2InSet          (Required 6 (Message IntSet))
-  | ICV2NotInSet       (Required 7 (Message IntSet))
-    deriving stock (Generic, Show)
-    deriving anyclass (Decode, Encode)
-
-newtype IntSet = IntSet
-  { set :: Packed 7 (Value Int64)
-  } deriving stock (Generic, Show)
-    deriving anyclass (Decode, Encode)
-
-data StringConstraintV2 =
-    SCV2Prefix   (Required 1 (Value Text))
-  | SCV2Suffix   (Required 2 (Value Text))
-  | SCV2Equal    (Required 3 (Value Text))
-  | SCV2InSet    (Required 4 (Message StringSet))
-  | SCV2NotInSet (Required 5 (Message StringSet))
-  | SCV2Regex    (Required 6 (Value Text))
-    deriving stock (Generic, Show)
-    deriving anyclass (Decode, Encode)
-
-newtype StringSet = StringSet
-  { set :: Repeated 1 (Value Text)
-  } deriving stock (Generic, Show)
-    deriving anyclass (Decode, Encode)
-
-data DateConstraintV2 =
-    DCV2Before (Required 1 (Value Int64))
-  | DCV2After  (Required 2 (Value Int64))
-    deriving stock (Generic, Show)
-    deriving anyclass (Decode, Encode)
-
-data SymbolConstraintV2 =
-    SyCV2InSet    (Required 1 (Message SymbolSet))
-  | SyCV2NotInSet (Required 2 (Message SymbolSet))
-    deriving stock (Generic, Show)
-    deriving anyclass (Decode, Encode)
-
-newtype SymbolSet = SymbolSet
-  { set :: Packed 1 (Value Int64)
-  } deriving stock (Generic, Show)
-    deriving anyclass (Decode, Encode)
-
-
-data BytesConstraintV2 =
-    BCV2Equal    (Required 1 (Value ByteString))
-  | BCV2InSet    (Required 2 (Message BytesSet))
-  | BCV2NotInSet (Required 3 (Message BytesSet))
-    deriving stock (Generic, Show)
-    deriving anyclass (Decode, Encode)
-
-newtype BytesSet = BytesSet
-  { set :: Repeated 1 (Value ByteString)
   } deriving stock (Generic, Show)
     deriving anyclass (Decode, Encode)
 
@@ -267,3 +227,29 @@ encodeBlockList = runPut . encodeMessage
 
 encodeBlock :: Block -> ByteString
 encodeBlock = runPut . encodeMessage
+
+encodeThirdPartyBlockRequest :: ThirdPartyBlockRequest -> ByteString
+encodeThirdPartyBlockRequest = runPut . encodeMessage
+
+encodeThirdPartyBlockContents :: ThirdPartyBlockContents -> ByteString
+encodeThirdPartyBlockContents = runPut . encodeMessage
+
+decodeThirdPartyBlockRequest :: ByteString -> Either String ThirdPartyBlockRequest
+decodeThirdPartyBlockRequest = runGet decodeMessage
+
+decodeThirdPartyBlockContents :: ByteString -> Either String ThirdPartyBlockContents
+decodeThirdPartyBlockContents = runGet decodeMessage
+
+data ThirdPartyBlockRequest
+  = ThirdPartyBlockRequest
+  { previousPk :: Required 1 (Message PublicKey)
+  , pkTable    :: Repeated 2 (Message PublicKey)
+  } deriving stock (Generic, Show)
+    deriving anyclass (Decode, Encode)
+
+data ThirdPartyBlockContents
+  = ThirdPartyBlockContents
+  { payload     :: Required 1 (Value ByteString)
+  , externalSig :: Required 2 (Message ExternalSig)
+  } deriving stock (Generic, Show)
+    deriving anyclass (Decode, Encode)
