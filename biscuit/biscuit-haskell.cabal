@@ -16,6 +16,8 @@ build-type:     Simple
 extra-source-files:
     README.md
     ChangeLog.md
+data-files: test/samples/v2/samples.json
+          , test/samples/v2/*.bc
 
 source-repository head
   type: git
@@ -79,6 +81,8 @@ test-suite biscuit-haskell-test
       Spec.ScopedExecutor
       Spec.Verification
       Paths_biscuit_haskell
+  autogen-modules:
+      Paths_biscuit_haskell
   hs-source-dirs:
       test
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
@@ -94,6 +98,8 @@ test-suite biscuit-haskell-test
     , cereal
     , containers
     , cryptonite
+    , directory
+    , filepath
     , lens
     , lens-aeson
     , mtl

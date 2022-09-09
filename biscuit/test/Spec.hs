@@ -13,8 +13,8 @@ import qualified Spec.Verification   as Verification
 
 main :: IO ()
 main = do
-  SampleReader.generateCases
-  sampleReader <- SampleReader.getSpecs
+  sampleFiles <- SampleReader.generateCases
+  sampleReader <- SampleReader.getSpecs sampleFiles
   defaultMain $ testGroup "biscuit-haskell"
     [
       NewCrypto.specs

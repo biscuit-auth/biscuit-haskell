@@ -14,7 +14,7 @@ module Spec.SampleReader where
 
 import           Control.Arrow                 ((&&&))
 import           Control.Lens                  ((^?))
-import           Control.Monad                 (join, void, when)
+import           Control.Monad                 (join, void, when, (<=<))
 import           Data.Aeson
 import           Data.Aeson.Lens               (key)
 import           Data.Aeson.Types              (typeMismatch, unexpected)
@@ -34,6 +34,10 @@ import           Data.Text                     (Text, pack, unpack)
 import           Data.Text.Encoding            (decodeUtf8, encodeUtf8)
 import           Data.Traversable              (for)
 import           GHC.Generics                  (Generic)
+import           System.Directory              (createDirectory,
+                                                getTemporaryDirectory)
+import           System.FilePath               (isRelative)
+import           System.Random                 (randomRIO)
 
 import           Test.Tasty                    hiding (Timeout)
 import           Test.Tasty.HUnit
@@ -44,6 +48,7 @@ import           Auth.Biscuit.Datalog.Executor (ExecutionError (..),
                                                 ResultError (..))
 import           Auth.Biscuit.Datalog.Parser   (authorizerParser, blockParser)
 import           Auth.Biscuit.Token
+import           Paths_biscuit_haskell         (getDataFileName)
 
 getB :: ParsedSignedBlock -> Block
 getB ((_, b), _, _, _) = b
@@ -169,11 +174,17 @@ data WorldDesc
 
 readBiscuits :: SampleFile FilePath -> IO (SampleFile (FilePath, ByteString))
 readBiscuits =
-   traverse $ traverse (BS.readFile . ("test/samples/v2/" <>)) . join (&&&) id
+  let pickFile f =
+        if isRelative f
+        then
+          getDataFileName ("test/samples/v2/" <> f)
+        else
+          pure f
+   in traverse $ traverse (BS.readFile <=< pickFile) . join (&&&) id
 
-readSamplesFile :: IO (SampleFile (FilePath, ByteString))
-readSamplesFile = do
-  f <- either fail pure =<< eitherDecodeFileStrict' "test/samples/v2/samples-new.json"
+readSamplesFile :: FilePath -> IO (SampleFile (FilePath, ByteString))
+readSamplesFile tempFile = do
+  f <- either fail pure =<< eitherDecodeFileStrict' tempFile
   readBiscuits f
 
 checkTokenBlocks :: (String -> IO ())
@@ -266,22 +277,24 @@ processValidation step b (name, ValidationR{..}) = do
   revocation_ids @?= revocationIds
 
 
-runTests :: (String -> IO ())
+runTests :: FilePath
+         -> (String -> IO ())
          -> Assertion
-runTests step = do
+runTests sampleFiles step = do
   step "Parsing sample file"
-  SampleFile{..} <- readSamplesFile
+  SampleFile{..} <- readSamplesFile sampleFiles
   traverse_ (processTestCase step root_public_key) testcases
 
 mkTestCase :: PublicKey -> TestCase (FilePath, ByteString) -> TestTree
 mkTestCase root_public_key tc@TestCase{filename} =
   testCaseSteps (fst filename) (\step -> processTestCase step root_public_key tc)
 
-getSpecs :: IO TestTree
-getSpecs = do
-  SampleFile{..} <- readSamplesFile
+getSpecs :: FilePath -> IO TestTree
+getSpecs sampleFiles = do
+  SampleFile{..} <- readSamplesFile sampleFiles
   pure $ testGroup "Biscuit samples - compliance checks"
        $ mkTestCase root_public_key <$> testcases
+
 mkTestCaseFromBiscuit
   :: String
   -> FilePath
@@ -308,26 +321,42 @@ mkTestCaseFromBiscuit title filename biscuit authorizers = do
           , authorizer_code = authorizer
           , revocation_ids = decodeUtf8 . Hex.encode <$> toList (getRevocationIds biscuit)
           }
-  BS.writeFile ("test/samples/v2/" <> filename) (serialize biscuit)
+  BS.writeFile filename (serialize biscuit)
   let token = mkBlockDesc <$> getAuthority biscuit :| getBlocks biscuit
   validations <- Map.fromList <$> traverse (traverse mkValidation) authorizers
 
   pure TestCase{..}
 
-addCases :: [(String, FilePath, Biscuit Open Verified, Authorizer)]
+addCases :: FilePath
+         -> [(String, FilePath, Biscuit Open Verified, Authorizer)]
          -> IO ()
-addCases cases = do
-  f <- either fail pure =<< eitherDecodeFileStrict' "test/samples/v2/samples.json"
+addCases tempFile cases = do
+  f <- readSamples
   newCases <- for cases $ \(name, path, biscuit, auth) -> do
     mkTestCaseFromBiscuit name path biscuit [("", auth)]
   let newF = f { testcases = testcases f <> newCases }
   putStrLn "writing new"
-  encodeFile "test/samples/v2/samples-new.json" newF
+  encodeFile tempFile newF
 
-generateCases :: IO ()
+getTempDir :: IO FilePath
+getTempDir = do
+  suffix <- randomRIO (10000 :: Int, 99999)
+  directory <- getTemporaryDirectory
+  let tempDir = directory <> "/biscuit-haskell-tests-" <> show suffix
+  createDirectory tempDir
+  pure tempDir
+
+readSamples =
+  either fail pure =<< eitherDecodeFileStrict' @(SampleFile FilePath) =<< getDataFileName "test/samples/v2/samples.json"
+
+generateCases :: IO FilePath
 generateCases = do
   putStrLn "generating new"
-  SampleFile{root_private_key} <- either fail pure =<< eitherDecodeFileStrict' @(SampleFile FilePath) "test/samples/v2/samples.json"
+  tempDir <- getTempDir
+  let samplesFile = tempDir <> "/" <> "samples-new.json"
+  putStrLn "step 2"
+  print =<< getDataFileName "test/samples/v2/samples.json"
+  SampleFile{root_private_key} <- readSamples
   let (eSkOne, ePkOne) = (id &&& toPublic) $ fromJust $ parseSecretKeyHex "0932c942ef3535daac4b34eaff9ab6a848b730adbb49dfb24714d1f67c26a49b"
   let (eSkTwo, ePkTwo) = (id &&& toPublic) $ fromJust $ parseSecretKeyHex "c520e19539e88fea4ccb388ad242ac962cafe8158a3a9da04c17159281c668fc"
   let (eSkThree, ePkThree) = (id &&& toPublic) $ fromJust $ parseSecretKeyHex "d547622fe6f3afeb83200b5dcc4a8efcb8fd53cde9833da313a9bdf6c12a035c"
@@ -368,7 +397,8 @@ generateCases = do
      deny if query(0) trusting ${ePkOne};
      allow if true;
   |]
-  addCases
-    [ ("third-party block", "test24_third_party.bc", b1, a1)
-    , ("third-party blocks keys", "test25_third_party_keys.bc", b2, a2)
+  addCases samplesFile
+    [ ("third-party block", tempDir <> "/test24_third_party.bc", b1, a1)
+    , ("third-party blocks keys", tempDir <> "/test25_third_party_keys.bc", b2, a2)
     ]
+  pure samplesFile
