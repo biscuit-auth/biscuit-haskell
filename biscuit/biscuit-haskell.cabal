@@ -16,6 +16,8 @@ build-type:     Simple
 extra-source-files:
     README.md
     ChangeLog.md
+    test/samples/v2/samples.json
+    test/samples/v2/*.bc
 
 source-repository head
   type: git
