@@ -256,6 +256,11 @@ addBlock block b@Biscuit{..} = do
            , proof = Open nextSk
            }
 
+-- | Add a block to an existing biscuit, with an external signature attached.
+-- Only 'Open' biscuits can be attenuated; the newly created biscuit is 'Open' as well.
+-- Only trusted third parties should be given direct access to the token.
+-- 'mkThirdPartyBlockReq', 'mkThirdPartyBlock' and 'applyThirdPartyBlock' are available
+-- for letting a non-trusted third party create a signed block.
 addSignedBlock :: SecretKey
                -> Block
                -> Biscuit Open check
@@ -272,6 +277,14 @@ addSignedBlock eSk block b@Biscuit{..} = do
            , proof = Open nextSk
            }
 
+-- | Create a third-party block request from an 'Open' biscuit. This request contains
+-- information needed to properly serialize a block without access to the original
+-- token. See 'mkThirdPartyBlockReqB64' if you need the request to be base64-encoded.
+mkThirdPartyBlockReq :: Biscuit Open check -> ByteString
+mkThirdPartyBlockReq Biscuit{authority,blocks,symbols} =
+  let (_, _ , lastPk, _) = NE.last $ authority :| blocks
+   in PB.encodeThirdPartyBlockRequest $ thirdPartyBlockRequestToPb (lastPk, getPkTable symbols)
+
 mkThirdPartyBlock' :: SecretKey
                    -> [PublicKey]
                    -> PublicKey
@@ -284,6 +297,8 @@ mkThirdPartyBlock' eSk pkTable lastPublicKey block =
       (eSig, ePk) = sign3rdPartyBlock eSk lastPublicKey payload
    in (payload, eSig, ePk)
 
+-- | Create a third-party block from a block request and a parsed datalog block.
+-- See 'mkThirdPartyBlockB64' if you need base64-encoded requests and contents.
 mkThirdPartyBlock :: SecretKey
                   -> ByteString
                   -> Block
@@ -292,11 +307,8 @@ mkThirdPartyBlock eSk req block = do
   (previousPk, pkTable) <- pbToThirdPartyBlockRequest =<< PB.decodeThirdPartyBlockRequest req
   pure $ PB.encodeThirdPartyBlockContents . thirdPartyBlockContentsToPb $ mkThirdPartyBlock' eSk pkTable previousPk block
 
-mkThirdPartyBlockReq :: Biscuit proof check -> ByteString
-mkThirdPartyBlockReq Biscuit{authority,blocks,symbols} =
-  let (_, _ , lastPk, _) = NE.last $ authority :| blocks
-   in PB.encodeThirdPartyBlockRequest $ thirdPartyBlockRequestToPb (lastPk, getPkTable symbols)
-
+-- | Append a signed third-party block to an 'Open' 'Biscuit'.
+-- See 'applyThirdPartyBlockB64' if you have base64-encoded contents.
 applyThirdPartyBlock :: Biscuit Open check -> ByteString -> Either String (IO (Biscuit Open check))
 applyThirdPartyBlock b@Biscuit{..} contents = do
   (payload, eSig, ePk) <- pbToThirdPartyBlockContents =<< PB.decodeThirdPartyBlockContents contents
