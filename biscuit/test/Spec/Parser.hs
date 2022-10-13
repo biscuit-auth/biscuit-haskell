@@ -317,31 +317,76 @@ checkParsing :: TestTree
 checkParsing = testGroup "check blocks"
   [ testCase "Simple check" $
       parseCheck "check if true" @?=
-        Right [QueryItem [] [EValue $ LBool True] []]
+        Right Check
+          { cQueries = [QueryItem [] [EValue $ LBool True] []]
+          , cKind = One
+          }
+  , testCase "Simple check all" $
+      parseCheck "check all true" @?=
+        Right Check
+          { cQueries = [QueryItem [] [EValue $ LBool True] []]
+          , cKind = All
+          }
   , testCase "Multiple groups" $
       parseCheck
         "check if fact($var), $var == true or \
         \other($var), $var == 2" @?=
-          Right
-            [ QueryItem [Predicate "fact" [Variable "var"]]
-                        [EBinary Equal (EValue (Variable "var")) (EValue (LBool True))]
-                        []
-            , QueryItem [Predicate "other" [Variable "var"]]
-                        [EBinary Equal (EValue (Variable "var")) (EValue (LInteger 2))]
-                        []
-            ]
+          Right Check
+            { cQueries =
+                [ QueryItem [Predicate "fact" [Variable "var"]]
+                            [EBinary Equal (EValue (Variable "var")) (EValue (LBool True))]
+                            []
+                , QueryItem [Predicate "other" [Variable "var"]]
+                            [EBinary Equal (EValue (Variable "var")) (EValue (LInteger 2))]
+                            []
+                ]
+            , cKind = One
+            }
+  , testCase "Multiple check all groups" $
+      parseCheck
+        "check all fact($var), $var == true or \
+        \other($var), $var == 2" @?=
+          Right Check
+            { cQueries =
+                [ QueryItem [Predicate "fact" [Variable "var"]]
+                            [EBinary Equal (EValue (Variable "var")) (EValue (LBool True))]
+                            []
+                , QueryItem [Predicate "other" [Variable "var"]]
+                            [EBinary Equal (EValue (Variable "var")) (EValue (LInteger 2))]
+                            []
+                ]
+            , cKind = All
+            }
   , testCase "Multiple groups, scoped" $
       parseCheck
         "check if fact($var), $var == true trusting previous or \
         \other($var), $var == 2 trusting authority" @?=
-          Right
-            [ QueryItem [Predicate "fact" [Variable "var"]]
-                        [EBinary Equal (EValue (Variable "var")) (EValue (LBool True))]
-                        [Previous]
-            , QueryItem [Predicate "other" [Variable "var"]]
-                        [EBinary Equal (EValue (Variable "var")) (EValue (LInteger 2))]
-                        [OnlyAuthority]
-            ]
+          Right Check
+            { cQueries =
+                [ QueryItem [Predicate "fact" [Variable "var"]]
+                            [EBinary Equal (EValue (Variable "var")) (EValue (LBool True))]
+                            [Previous]
+                , QueryItem [Predicate "other" [Variable "var"]]
+                            [EBinary Equal (EValue (Variable "var")) (EValue (LInteger 2))]
+                            [OnlyAuthority]
+                ]
+            , cKind = One
+            }
+  , testCase "Multiple check all groups, scoped" $
+      parseCheck
+        "check all fact($var), $var == true trusting previous or \
+        \other($var), $var == 2 trusting authority" @?=
+          Right Check
+            { cQueries =
+                [ QueryItem [Predicate "fact" [Variable "var"]]
+                            [EBinary Equal (EValue (Variable "var")) (EValue (LBool True))]
+                            [Previous]
+                , QueryItem [Predicate "other" [Variable "var"]]
+                            [EBinary Equal (EValue (Variable "var")) (EValue (LInteger 2))]
+                            [OnlyAuthority]
+                ]
+            , cKind = All
+            }
   ]
 
 policyParsing :: TestTree

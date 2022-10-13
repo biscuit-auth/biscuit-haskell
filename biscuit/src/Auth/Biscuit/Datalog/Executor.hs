@@ -181,11 +181,15 @@ fromScopedFacts = FactGroup . Map.fromListWith (<>) . Set.toList . Set.map (fmap
 countFacts :: FactGroup -> Int
 countFacts (FactGroup facts) = sum $ Set.size <$> Map.elems facts
 
+-- todo handle Check All
 checkCheck :: Limits -> Natural -> Natural -> FactGroup -> EvalCheck -> Validation (NonEmpty Check) ()
-checkCheck l blockCount checkBlockId facts items =
-  if any (isJust . isQueryItemSatisfied l blockCount checkBlockId facts) items
-  then Success ()
-  else failure (toRepresentation <$> items)
+checkCheck l blockCount checkBlockId facts c@Check{cQueries,cKind} =
+  let isQueryItemOk = case cKind of
+        One -> isQueryItemSatisfied l blockCount checkBlockId facts
+        All -> isQueryItemSatisfiedForAllMatches l blockCount checkBlockId facts
+   in if any (isJust . isQueryItemOk) cQueries
+      then Success ()
+      else failure (toRepresentation c)
 
 checkPolicy :: Limits -> Natural -> FactGroup -> EvalPolicy -> Maybe (Either MatchedQuery MatchedQuery)
 checkPolicy l blockCount facts (pType, query) =
@@ -203,6 +207,26 @@ isQueryItemSatisfied l blockCount blockId allFacts QueryItem{qBody, qExpressions
       bindings = removeScope $ getBindingsForRuleBody l facts qBody qExpressions
    in if Set.size bindings > 0
       then Just bindings
+      else Nothing
+
+-- | Given a set of scoped facts and a rule body, we generate a set of variable
+-- bindings that satisfy the rule clauses (predicates match, and expression constraints
+-- are fulfilled), and ensure that all bindings where predicates match also fulfill
+-- expression constraints. This is the behaviour of `check all`.
+isQueryItemSatisfiedForAllMatches :: Limits -> Natural -> Natural -> FactGroup -> QueryItem' 'Eval 'Representation -> Maybe (Set Bindings)
+isQueryItemSatisfiedForAllMatches l blockCount blockId allFacts QueryItem{qBody, qExpressions, qScope} =
+  let removeScope = Set.map snd
+      facts = toScopedFacts $ keepAuthorized' blockCount allFacts qScope blockId
+      allVariables = extractVariables qBody
+      -- bindings that match facts
+      candidateBindings = getCandidateBindings facts qBody
+      -- bindings that unify correctly (each variable has a single possible match)
+      legalBindingsForFacts = reduceCandidateBindings allVariables candidateBindings
+      -- bindings that fulfill the constraints
+      constraintFulfillingBindings = Set.filter (\b -> all (satisfies l b) qExpressions) legalBindingsForFacts
+   in if Set.size constraintFulfillingBindings > 0 -- there is at least one match that fulfills the constraints
+      && constraintFulfillingBindings == legalBindingsForFacts -- all matches fulfill the constraints
+      then Just $ removeScope constraintFulfillingBindings
       else Nothing
 
 -- | Given a rule and a set of available (scoped) facts, we find all fact

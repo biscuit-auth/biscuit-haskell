@@ -11,7 +11,7 @@ import           Test.Tasty
 import           Test.Tasty.HUnit
 
 import           Auth.Biscuit
-import           Auth.Biscuit.Datalog.AST      (Expression' (..), Query,
+import           Auth.Biscuit.Datalog.AST      (Expression' (..), Query, Check, CheckKind (..), Check' (..),
                                                 QueryItem' (..), Term' (..))
 import           Auth.Biscuit.Datalog.Executor (MatchedQuery (..),
                                                 ResultError (..))
@@ -21,6 +21,7 @@ import           Auth.Biscuit.Datalog.Parser   (check, fact, query)
 specs :: TestTree
 specs = testGroup "Datalog checks"
   [ singleBlock
+  , checkAll
   , errorAccumulation
   , unboundVarRule
   , symbolRestrictions
@@ -38,8 +39,14 @@ ifFalse = MatchedQuery
   , bindings = Set.singleton mempty
   }
 
-ifFalse' :: Query
-ifFalse' = matchedQuery ifFalse
+ifFalse' :: Check
+ifFalse' = Check
+  { cQueries = matchedQuery ifFalse
+  , cKind = One
+  }
+
+checkAll' :: Check
+checkAll' = [check|check all fact($value), $value|]
 
 singleBlock :: TestTree
 singleBlock = testCase "Single block" $ do
@@ -47,6 +54,13 @@ singleBlock = testCase "Single block" $ do
   biscuit <- mkBiscuit secret [block|right("file1", "read");|]
   res <- authorizeBiscuit biscuit [authorizer|check if right("file1", "read");allow if true;|]
   matchedAllowQuery . authorizationSuccess <$> res @?= Right ifTrue
+
+checkAll :: TestTree
+checkAll = testCase "Check all" $ do
+  secret <- newSecret
+  biscuit <- mkBiscuit secret [block|fact(true); fact(false);|]
+  res <- authorizeBiscuit biscuit [authorizer|check all fact($value), $value;allow if true;|]
+  res @?= Left (ResultError $ FailedChecks $ pure checkAll')
 
 errorAccumulation :: TestTree
 errorAccumulation = testGroup "Error accumulation"

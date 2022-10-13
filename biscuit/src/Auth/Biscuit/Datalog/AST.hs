@@ -28,9 +28,10 @@ module Auth.Biscuit.Datalog.AST
   , EvalBlock
   , Block' (..)
   , BlockElement' (..)
+  , CheckKind (..)
   , Check
   , EvalCheck
-  , Check'
+  , Check' (..)
   , Expression
   , Expression' (..)
   , Fact
@@ -80,6 +81,7 @@ module Auth.Biscuit.Datalog.AST
   , listPublicKeysInBlock
   , queryHasNoScope
   , ruleHasNoScope
+  , isCheckOne
   , renderBlock
   , renderAuthorizer
   , renderFact
@@ -397,9 +399,28 @@ type Query = Query' 'Repr 'Representation
 queryHasNoScope :: Query -> Bool
 queryHasNoScope = all (Set.null . qScope)
 
-type Check' evalCtx ctx = Query' evalCtx ctx
+data CheckKind = One | All
+  deriving (Eq, Show, Ord, Lift)
+
+data Check' evalCtx ctx = Check
+  { cQueries :: Query' evalCtx ctx
+  , cKind :: CheckKind
+  }
+deriving instance ( Eq (QueryItem' evalCtx ctx)
+                  ) => Eq (Check' evalCtx ctx)
+deriving instance ( Ord (QueryItem' evalCtx ctx)
+                  ) => Ord (Check' evalCtx ctx)
+deriving instance ( Show (QueryItem' evalCtx ctx)
+                  ) => Show (Check' evalCtx ctx)
+deriving instance ( Lift (QueryItem' evalCtx ctx)
+                  ) => Lift (Check' evalCtx ctx)
+
 type Check = Check' 'Repr 'Representation
 type EvalCheck = Check' 'Eval 'Representation
+
+isCheckOne :: Check' evalCtx ctx -> Bool
+isCheckOne Check{cKind} = cKind == One
+
 data PolicyType = Allow | Deny
   deriving (Eq, Show, Ord, Lift)
 type Policy' evalCtx ctx = (PolicyType, Query' evalCtx ctx)
@@ -440,8 +461,12 @@ renderQueryItem QueryItem{..} =
                    else " trusting " <> renderRuleScope qScope
 
 renderCheck :: Check -> Text
-renderCheck is = "check if " <>
-  intercalate "\n or " (renderQueryItem <$> is)
+renderCheck Check{..} =
+  let kindToken = case cKind of
+        One -> "if"
+        All -> "all"
+   in "check " <> kindToken <> " " <>
+      intercalate "\n or " (renderQueryItem <$> cQueries)
 
 listSymbolsInQueryItem :: QueryItem' evalCtx 'Representation -> Set.Set Text
 listSymbolsInQueryItem QueryItem{..} =
@@ -454,15 +479,14 @@ listSymbolsInQueryItem QueryItem{..} =
 
 listSymbolsInCheck :: Check -> Set.Set Text
 listSymbolsInCheck =
-  foldMap listSymbolsInQueryItem
+  foldMap listSymbolsInQueryItem . cQueries
 
 listPublicKeysInQueryItem :: QueryItem' 'Repr 'Representation -> Set.Set PublicKey
 listPublicKeysInQueryItem QueryItem{qScope} =
   listPublicKeysInScope qScope
 
 listPublicKeysInCheck :: Check -> Set.Set PublicKey
-listPublicKeysInCheck = foldMap listPublicKeysInQueryItem
-
+listPublicKeysInCheck = foldMap listPublicKeysInQueryItem . cQueries
 
 type RuleScope = RuleScope' 'Repr 'Representation
 type EvalRuleScope = RuleScope' 'Eval 'Representation
@@ -825,6 +849,10 @@ instance ToEvaluation QueryItem' where
   toEvaluation ePks qi = qi{ qScope = translateScope ePks $ qScope qi}
   toRepresentation qi  = qi { qScope = renderBlockIds $ qScope qi}
 
+instance ToEvaluation Check' where
+  toEvaluation ePks c =  c { cQueries = fmap (toEvaluation ePks) (cQueries c) }
+  toRepresentation c  =  c { cQueries = fmap toRepresentation (cQueries c) }
+
 instance ToEvaluation Block' where
   toEvaluation ePks b = b
     { bScope = translateScope ePks $ bScope b
@@ -834,7 +862,7 @@ instance ToEvaluation Block' where
   toRepresentation b  = b
     { bScope = renderBlockIds $ bScope b
     , bRules = toRepresentation <$> bRules b
-    , bChecks = fmap toRepresentation <$> bChecks b
+    , bChecks = toRepresentation <$> bChecks b
     }
 
 instance ToEvaluation Authorizer' where
@@ -848,7 +876,7 @@ instance ToEvaluation Authorizer' where
     }
 
 checkToEvaluation :: [Maybe PublicKey] -> Check -> EvalCheck
-checkToEvaluation = fmap . toEvaluation
+checkToEvaluation = toEvaluation
 
 policyToEvaluation :: [Maybe PublicKey] -> Policy -> EvalPolicy
 policyToEvaluation ePks = fmap (fmap (toEvaluation ePks))

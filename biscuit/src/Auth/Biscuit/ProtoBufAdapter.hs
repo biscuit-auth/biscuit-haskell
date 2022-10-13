@@ -129,7 +129,8 @@ pbToBlock ePk PB.Block{..} = do
     let isV3 = isNothing ePk
             && Set.null bScope
             && all ruleHasNoScope bRules
-            && all queryHasNoScope bChecks
+            && all queryHasNoScope (cQueries <$> bChecks)
+            && all isCheckOne bChecks
     case (bVersion, isV3) of
       (Just 4, _) -> pure Block {..}
       (Just 3, True) -> pure Block {..}
@@ -145,7 +146,8 @@ blockToPb hasExternalPk existingSymbols b@Block{..} =
   let isV3 = not hasExternalPk
             && Set.null bScope
             && all ruleHasNoScope bRules
-            && all queryHasNoScope bChecks
+            && all queryHasNoScope (cQueries <$> bChecks)
+            && all isCheckOne bChecks
       bSymbols = buildSymbolTable existingSymbols b
       s = reverseSymbols $ addFromBlock existingSymbols bSymbols
       symbols   = PB.putField $ getSymbolList bSymbols
@@ -198,13 +200,18 @@ ruleToPb s Rule{..} =
     }
 
 pbToCheck :: Symbols -> PB.CheckV2 -> Either String Check
-pbToCheck s PB.CheckV2{queries} = do
+pbToCheck s PB.CheckV2{queries,kind} = do
   let toCheck Rule{body,expressions,scope} = QueryItem{qBody = body, qExpressions = expressions, qScope = scope}
   rules <- traverse (pbToRule s) $ PB.getField queries
-  pure $ toCheck <$> rules
+  let cQueries = toCheck <$> rules
+  let cKind = case PB.getField kind of
+        Just PB.All -> All
+        Just PB.One -> One
+        Nothing -> One
+  pure Check{..}
 
 checkToPb :: ReverseSymbols -> Check -> PB.CheckV2
-checkToPb s items =
+checkToPb s Check{..} =
   let dummyHead = Predicate "query" []
       toQuery QueryItem{..} =
         ruleToPb s $ Rule { rhead = dummyHead
@@ -212,7 +219,12 @@ checkToPb s items =
                           , expressions = qExpressions
                           , scope = qScope
                           }
-   in PB.CheckV2 { queries = PB.putField $ toQuery <$> items }
+      pbKind = case cKind of
+        One -> Nothing
+        All -> Just PB.All
+   in PB.CheckV2 { queries = PB.putField $ toQuery <$> cQueries
+                 , kind = PB.putField $ pbKind
+                 }
 
 pbToScope :: Symbols -> PB.Scope -> Either String RuleScope
 pbToScope s = \case
