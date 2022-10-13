@@ -102,6 +102,8 @@ module Auth.Biscuit
   ) where
 
 import           Control.Monad                       ((<=<))
+import           Control.Monad.Except                (ExceptT (..), liftEither,
+                                                      runExceptT)
 import           Control.Monad.Identity              (runIdentity)
 import           Data.Bifunctor                      (first)
 import           Data.ByteString                     (ByteString)
@@ -358,10 +360,10 @@ mkThirdPartyBlockReqB64 = B64.encodeBase64' . mkThirdPartyBlockReq
 
 -- | Create a third-party block from a block request and a parsed datalog block.
 -- See 'mkThirdPartyBlock' if you need raw bytes for requests and contents.
-mkThirdPartyBlockB64 :: SecretKey -> ByteString -> Block -> Either String ByteString
-mkThirdPartyBlockB64 sk reqB64 b = do
-  req <- first unpack $ B64.decodeBase64 reqB64
-  contents <- mkThirdPartyBlock sk req b
+mkThirdPartyBlockB64 :: SecretKey -> ByteString -> Block -> IO (Either String ByteString)
+mkThirdPartyBlockB64 sk reqB64 b = runExceptT $ do
+  req <- liftEither $ first unpack $ B64.decodeBase64 reqB64
+  contents <- ExceptT $ mkThirdPartyBlock sk req b
   pure $ B64.encodeBase64' contents
 
 -- | Append a signed third-party block to an 'Open' 'Biscuit'.

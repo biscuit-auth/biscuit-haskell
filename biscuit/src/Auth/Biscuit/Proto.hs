@@ -86,7 +86,9 @@ data SignedBlock = SignedBlock
   deriving (Generic, Show)
   deriving anyclass (Decode, Encode)
 
-data Algorithm = Ed25519
+data Algorithm
+  = Ed25519
+  | P256
   deriving stock (Show, Enum, Bounded)
 
 data PublicKey = PublicKey

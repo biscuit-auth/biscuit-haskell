@@ -75,7 +75,7 @@ roundtrip'' direct (s,p) i@(authority' :| blocks') = do
             addSignedBlock sk block biscuit
           else do
             let req = mkThirdPartyBlockReq biscuit
-            thirdPartyBlock <- either (fail . ("req " <>)) pure $ mkThirdPartyBlock sk req block
+            thirdPartyBlock <- either (fail . ("req " <>)) pure =<< mkThirdPartyBlock sk req block
             either (fail . ("apply " <>)) id $ applyThirdPartyBlock biscuit thirdPartyBlock
       addBlocks bs biscuit = case bs of
         ((Just sk, b):rest) -> addBlocks rest =<< addSignedBlock' sk b biscuit

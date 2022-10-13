@@ -289,23 +289,23 @@ mkThirdPartyBlock' :: SecretKey
                    -> [PublicKey]
                    -> PublicKey
                    -> Block
-                   -> (ByteString, Signature, PublicKey)
-mkThirdPartyBlock' eSk pkTable lastPublicKey block =
+                   -> IO (ByteString, Signature, PublicKey)
+mkThirdPartyBlock' eSk pkTable lastPublicKey block = do
   let symbolsForCurrentBlock = registerNewPublicKeys [toPublic eSk] $
         registerNewPublicKeys pkTable newSymbolTable
       (_, payload) = PB.encodeBlock <$> blockToPb True symbolsForCurrentBlock block
-      (eSig, ePk) = sign3rdPartyBlock eSk lastPublicKey payload
-   in (payload, eSig, ePk)
+  (eSig, ePk) <- sign3rdPartyBlock eSk lastPublicKey payload
+  pure (payload, eSig, ePk)
 
 -- | Create a third-party block from a block request and a parsed datalog block.
 -- See 'mkThirdPartyBlockB64' if you need base64-encoded requests and contents.
 mkThirdPartyBlock :: SecretKey
                   -> ByteString
                   -> Block
-                  -> Either String ByteString
-mkThirdPartyBlock eSk req block = do
+                  -> IO (Either String ByteString)
+mkThirdPartyBlock eSk req block = sequenceA $ do
   (previousPk, pkTable) <- pbToThirdPartyBlockRequest =<< PB.decodeThirdPartyBlockRequest req
-  pure $ PB.encodeThirdPartyBlockContents . thirdPartyBlockContentsToPb $ mkThirdPartyBlock' eSk pkTable previousPk block
+  pure (PB.encodeThirdPartyBlockContents . thirdPartyBlockContentsToPb <$> mkThirdPartyBlock' eSk pkTable previousPk block)
 
 -- | Append a signed third-party block to an 'Open' 'Biscuit'.
 -- See 'applyThirdPartyBlockB64' if you have base64-encoded contents.
@@ -328,12 +328,12 @@ applyThirdPartyBlock b@Biscuit{..} contents = do
 
 -- | Turn an 'Open' biscuit into a 'Sealed' one, preventing it from being attenuated
 -- further. A 'Sealed' biscuit cannot be turned into an 'Open' one.
-seal :: Biscuit Open check -> Biscuit Sealed check
-seal b@Biscuit{..} =
+seal :: Biscuit Open check -> IO (Biscuit Sealed check)
+seal b@Biscuit{..} = do
   let Open sk = proof
       ((lastPayload, _), lastSig, lastPk, eSig) = NE.last $ authority :| blocks
-      newProof = Sealed $ getSignatureProof (lastPayload, lastSig, lastPk, eSig) sk
-   in b { proof = newProof }
+  newProof <- Sealed <$> getSignatureProof (lastPayload, lastSig, lastPk, eSig) sk
+  pure $ b { proof = newProof }
 
 -- | Serialize a biscuit to a raw bytestring
 serializeBiscuit :: BiscuitProof p => Biscuit p Verified -> ByteString
@@ -386,7 +386,8 @@ parseBiscuitWrapper bs = do
   let rootKeyId = fromEnum <$> PB.getField (PB.rootKeyId blockList)
   signedAuthority <- first (InvalidProtobuf True) $ pbToSignedBlock $ PB.getField $ PB.authority blockList
   signedBlocks    <- first (InvalidProtobuf True) $ traverse pbToSignedBlock $ PB.getField $ PB.blocks blockList
-  proof         <- first (InvalidProtobuf True) $ pbToProof $ PB.getField $ PB.proof blockList
+  let (_, _, lastPublicKey, _) = NE.last $ signedAuthority :| signedBlocks
+  proof           <- first (InvalidProtobuf True) $ pbToProof lastPublicKey $ PB.getField $ PB.proof blockList
 
   pure $ BiscuitWrapper
     { wAuthority = signedAuthority
