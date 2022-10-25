@@ -492,7 +492,8 @@ parseBiscuitWith ParserConfig{..} bs =
 
 -- | Extract the list of revocation ids from a biscuit.
 -- To reject revoked biscuits, please use 'parseWith' instead. This function
--- should only be used for debugging purposes.
+-- should only be used for inspecting biscuits, not for deciding whether to
+-- reject them or not.
 getRevocationIds :: Biscuit proof check -> NonEmpty ByteString
 getRevocationIds Biscuit{authority, blocks} =
   let allBlocks = authority :| blocks
