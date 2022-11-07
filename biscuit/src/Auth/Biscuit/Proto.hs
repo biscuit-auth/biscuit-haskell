@@ -23,6 +23,7 @@ module Auth.Biscuit.Proto
   , ScopeType (..)
   , FactV2 (..)
   , RuleV2 (..)
+  , CheckKind (..)
   , CheckV2 (..)
   , PredicateV2 (..)
   , TermV2 (..)
@@ -132,8 +133,14 @@ data RuleV2 = RuleV2
   } deriving stock (Generic, Show)
     deriving anyclass (Decode, Encode)
 
-newtype CheckV2 = CheckV2
+data CheckKind =
+    One
+  | All
+  deriving stock (Show, Enum, Bounded)
+
+data CheckV2 = CheckV2
   { queries :: Repeated 1 (Message RuleV2)
+  , kind    :: Optional 2 (Enumeration CheckKind)
   } deriving stock (Generic, Show)
     deriving anyclass (Decode, Encode)
 

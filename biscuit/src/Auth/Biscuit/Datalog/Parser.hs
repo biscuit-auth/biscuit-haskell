@@ -1,3 +1,4 @@
+{-# LANGUAGE RecordWildCards#-}
 {-# LANGUAGE AllowAmbiguousTypes   #-}
 {-# LANGUAGE ConstraintKinds       #-}
 {-# LANGUAGE DataKinds             #-}
@@ -354,7 +355,11 @@ queryParser =
    in fmap mkQueryItem <$> sepBy1 ruleBodyParser (skipSpace *> asciiCI "or" <* satisfy isSpace)
 
 checkParser :: HasParsers 'InPredicate evalCtx ctx => Parser (Check' evalCtx ctx)
-checkParser = string "check if" *> queryParser
+checkParser = do
+  cKind <- string "check if"  $> One
+       <|> string "check all" $> All
+  cQueries <- queryParser
+  pure Check{..}
 
 commentParser :: Parser ()
 commentParser = do
