@@ -577,6 +577,9 @@ data Binary =
   | Or
   | Intersection
   | Union
+  | BitwiseAnd
+  | BitwiseOr
+  | BitwiseXor
   deriving (Eq, Ord, Show, Lift)
 
 data Expression' (ctx :: DatalogContext) =
@@ -655,6 +658,9 @@ renderExpression =
         EBinary Div e e'            -> rOp "/" e e'
         EBinary And e e'            -> rOp "&&" e e'
         EBinary Or e e'             -> rOp "||" e e'
+        EBinary BitwiseAnd e e'     -> rOp "&" e e'
+        EBinary BitwiseOr e e'      -> rOp "|" e e'
+        EBinary BitwiseXor e e'     -> rOp "^" e e'
 
 -- | A biscuit block, containing facts, rules and checks.
 --

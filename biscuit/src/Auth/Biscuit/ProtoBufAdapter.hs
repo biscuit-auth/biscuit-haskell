@@ -377,6 +377,9 @@ pbToBinary PB.OpBinary{kind} = case PB.getField kind of
   PB.Or             -> Or
   PB.Intersection   -> Intersection
   PB.Union          -> Union
+  PB.BitwiseAnd     -> BitwiseAnd
+  PB.BitwiseOr      -> BitwiseOr
+  PB.BitwiseXor     -> BitwiseXor
 
 binaryToPb :: Binary -> PB.OpBinary
 binaryToPb = PB.OpBinary . PB.putField . \case
@@ -397,6 +400,9 @@ binaryToPb = PB.OpBinary . PB.putField . \case
   Or             -> PB.Or
   Intersection   -> PB.Intersection
   Union          -> PB.Union
+  BitwiseAnd     -> PB.BitwiseAnd
+  BitwiseOr      -> PB.BitwiseOr
+  BitwiseXor     -> PB.BitwiseXor
 
 
 pbToThirdPartyBlockRequest :: PB.ThirdPartyBlockRequest -> Either String (Crypto.PublicKey, [Crypto.PublicKey])

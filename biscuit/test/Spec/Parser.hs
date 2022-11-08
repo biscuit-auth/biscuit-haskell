@@ -299,6 +299,21 @@ operatorPrecedences = testGroup "mixed-precedence operators"
                  )
                  (EValue $ LInteger 3)
               )
+  , testCase "+ & | *" $
+      parseExpression "1 + 2 | 4 * 3 & 4" @?=
+        Right (EBinary BitwiseOr
+                  (EBinary Add
+                    (EValue $ LInteger 1)
+                    (EValue $ LInteger 2)
+                  )
+                  (EBinary BitwiseAnd
+                    (EBinary Mul
+                      (EValue $ LInteger 4)
+                      (EValue $ LInteger 3)
+                    )
+                    (EValue $ LInteger 4)
+                  )
+              )
   ]
 
 ruleWithScopeParsing :: TestTree
