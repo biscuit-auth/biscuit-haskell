@@ -223,7 +223,7 @@ checkToPb s Check{..} =
         One -> Nothing
         All -> Just PB.All
    in PB.CheckV2 { queries = PB.putField $ toQuery <$> cQueries
-                 , kind = PB.putField $ pbKind
+                 , kind = PB.putField pbKind
                  }
 
 pbToScope :: Symbols -> PB.Scope -> Either String RuleScope
