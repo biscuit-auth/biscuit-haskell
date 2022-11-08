@@ -23,7 +23,7 @@ import           Data.ByteString               (ByteString)
 import qualified Data.ByteString               as BS
 import qualified Data.ByteString.Base16        as Hex
 import qualified Data.ByteString.Lazy          as LBS
-import           Data.Foldable                 (traverse_)
+import           Data.Foldable                 (fold, traverse_)
 import           Data.List.NonEmpty            (NonEmpty (..), toList)
 import           Data.Map.Strict               (Map)
 import qualified Data.Map.Strict               as Map
@@ -161,6 +161,17 @@ data WorldDesc
   deriving stock (Eq, Show, Generic)
   deriving anyclass (FromJSON, ToJSON)
 
+instance Semigroup WorldDesc where
+  a <> b = WorldDesc
+    { facts = facts a <> facts b
+    , rules = rules a <> rules b
+    , checks = checks a <> checks b
+    , policies = policies a <> policies b
+    }
+
+instance Monoid WorldDesc where
+  mempty = WorldDesc [] [] [] []
+
 readBiscuits :: SampleFile FilePath -> IO (SampleFile (FilePath, ByteString))
 readBiscuits =
    traverse $ traverse (BS.readFile . ("test/samples/v2/" <>)) . join (&&&) id
@@ -251,7 +262,7 @@ processValidation :: (String -> IO ())
                   -> Assertion
 processValidation step b (name, ValidationR{..}) = do
   when (name /= "") $ step ("Checking " <> name)
-  w    <- maybe (assertFailure "missing authorizer contents") pure world
+  let w = fold world
   pols <- either (assertFailure . show) pure $ parseAuthorizer $ foldMap (<> ";") (policies w)
   res <- authorizeBiscuit b (authorizer_code <> pols)
   checkResult compareExecErrors result res
