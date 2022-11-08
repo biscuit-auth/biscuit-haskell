@@ -17,8 +17,8 @@ tested-with:    GHC ==8.10.7 || == 9.0.2 || ==9.2.4
 extra-source-files:
     README.md
     ChangeLog.md
-    test/samples/v2/samples.json
-    test/samples/v2/*.bc
+    test/samples/current/samples.json
+    test/samples/current/*.bc
 
 source-repository head
   type: git
