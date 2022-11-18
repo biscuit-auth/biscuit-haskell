@@ -131,6 +131,8 @@ pbToBlock ePk PB.Block{..} = do
             && all ruleHasNoScope bRules
             && all queryHasNoScope (cQueries <$> bChecks)
             && all isCheckOne bChecks
+            && all ruleHasNoV4Operators bRules
+            && all queryHasNoV4Operators (cQueries <$> bChecks)
     case (bVersion, isV3) of
       (Just 4, _) -> pure Block {..}
       (Just 3, True) -> pure Block {..}
@@ -148,6 +150,8 @@ blockToPb hasExternalPk existingSymbols b@Block{..} =
             && all ruleHasNoScope bRules
             && all queryHasNoScope (cQueries <$> bChecks)
             && all isCheckOne bChecks
+            && all ruleHasNoV4Operators bRules
+            && all queryHasNoV4Operators (cQueries <$> bChecks)
       bSymbols = buildSymbolTable existingSymbols b
       s = reverseSymbols $ addFromBlock existingSymbols bSymbols
       symbols   = PB.putField $ getSymbolList bSymbols
