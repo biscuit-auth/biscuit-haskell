@@ -53,9 +53,9 @@ buildSymbolTable existingSymbols block =
 pbToPublicKey :: PB.PublicKey -> Either String Crypto.PublicKey
 pbToPublicKey PB.PublicKey{..} =
   let keyBytes = PB.getField key
-      parseKey = Crypto.readEd25519PublicKey
    in case PB.getField algorithm of
-        PB.Ed25519 -> maybeToRight "Invalid ed25519 public key" $ parseKey keyBytes
+        PB.Ed25519 -> maybeToRight "Invalid ed25519 public key" $ Crypto.readEd25519PublicKey keyBytes
+        PB.P256    -> maybeToRight "Invalid P256 public key" $ Crypto.readECDSAP256PublicKey keyBytes
 
 pbToOptionalSignature :: PB.ExternalSig -> Either String (Crypto.Signature, Crypto.PublicKey)
 pbToOptionalSignature PB.ExternalSig{..} = do
@@ -76,8 +76,12 @@ pbToSignedBlock PB.SignedBlock{..} = do
        )
 
 publicKeyToPb :: Crypto.PublicKey -> PB.PublicKey
-publicKeyToPb pk = PB.PublicKey
+publicKeyToPb pk@(Crypto.Ed25519PublicKey _) = PB.PublicKey
   { algorithm = PB.putField PB.Ed25519
+  , key = PB.putField $ Crypto.pkBytes pk
+  }
+publicKeyToPb pk@(Crypto.ECDSAP256PublicKey _) = PB.PublicKey
+  { algorithm = PB.putField PB.P256
   , key = PB.putField $ Crypto.pkBytes pk
   }
 
@@ -95,9 +99,13 @@ signedBlockToPb (block, sig, pk, eSig) = PB.SignedBlock
   , externalSig = PB.putField $ externalSigToPb <$> eSig
   }
 
-pbToProof :: PB.Proof -> Either String (Either Crypto.Signature Crypto.SecretKey)
-pbToProof (PB.ProofSignature rawSig) = Left  <$> Right (Crypto.signature $ PB.getField rawSig)
-pbToProof (PB.ProofSecret    rawPk)  = Right <$> maybeToRight "Invalid public key proof" (Crypto.readEd25519SecretKey $ PB.getField rawPk)
+pbToProof :: Crypto.PublicKey -> PB.Proof -> Either String (Either Crypto.Signature Crypto.SecretKey)
+pbToProof _ (PB.ProofSignature rawSig) = Left  <$> Right (Crypto.signature $ PB.getField rawSig)
+pbToProof lastPublic (PB.ProofSecret    rawPk)  =
+  let readSk = case lastPublic of
+        Crypto.Ed25519PublicKey _   -> Crypto.readEd25519SecretKey
+        Crypto.ECDSAP256PublicKey _ -> Crypto.readECDSAP256SecretKey
+   in Right <$> maybeToRight "Invalid secret key proof" (readSk $ PB.getField rawPk)
 
 pbToBlock :: Maybe Crypto.PublicKey -> PB.Block -> StateT Symbols (Either String) Block
 pbToBlock ePk PB.Block{..} = do

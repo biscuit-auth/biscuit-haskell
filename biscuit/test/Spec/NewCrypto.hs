@@ -55,11 +55,12 @@ appendSigned t@Token{payload} eSk p = do
     , privKey
     }
 
-seal :: Token -> SealedToken
-seal Token{payload,privKey} =
+seal :: Token -> IO SealedToken
+seal Token{payload,privKey} = do
   let lastBlock = NE.last payload
-   in SealedToken
-        { sig = getSignatureProof lastBlock privKey
+  sig <- getSignatureProof lastBlock privKey
+  pure  SealedToken
+        { sig = sig
         , payload
         }
 
@@ -142,8 +143,8 @@ invalidExternalSig = testCase "Invalid external signature" $ do
       content = "content"
   token <- signToken content sk
   attenuated <- appendSigned token eSk "block1"
-  let bogusSignature = sign eSk ePk ("yolo yolo" :: ByteString)
-      replaceExternalSig :: SignedBlock -> SignedBlock
+  bogusSignature <- sign eSk ("yolo yolo" :: ByteString)
+  let replaceExternalSig :: SignedBlock -> SignedBlock
       replaceExternalSig (p, s, pk, Just (_, ePk)) = (p, s, pk, Just (bogusSignature, ePk))
       replaceExternalSig sb = sb
       tamper :: Blocks -> Blocks
@@ -198,7 +199,7 @@ singleBlockRoundtripSealed = testCase "Single block roundtrip" $ do
   sk <- generateSecretKey
   let pk = toPublic sk
       content = "content"
-  token <- seal <$> signToken content sk
+  token <- seal =<< signToken content sk
   let res = verifySealedToken token pk
   res @?= True
 
@@ -208,7 +209,7 @@ multiBlockRoundtripSealed = testCase "Multi block roundtrip" $ do
   let pk = toPublic sk
       content = "content"
   token <- signToken content sk
-  attenuated <- seal <$> append token "block1"
+  attenuated <- seal =<< append token "block1"
   let res = verifySealedToken attenuated pk
   res @?= True
 
@@ -223,7 +224,7 @@ tamperedAuthoritySealed = testCase "Tampered authority" $ do
   let pk = toPublic sk
       content = "content"
   token <- signToken content sk
-  attenuated <- seal <$> append token "block1"
+  attenuated <- seal =<< append token "block1"
   let tamper ((_, s, pk, eS) :| o) = ("tampered", s, pk, eS) :| o
       tampered = alterPayloadSealed tamper attenuated
   let res = verifySealedToken tampered pk
@@ -235,7 +236,7 @@ tamperedBlockSealed = testCase "Tampered block" $ do
   let pk = toPublic sk
       content = "content"
   token <- signToken content sk
-  attenuated <- seal <$> append token "block1"
+  attenuated <- seal =<< append token "block1"
   let tamper (h :| ((_, s, pk, eS): t)) = h :| (("tampered", s, pk, eS) : t)
       tampered = alterPayloadSealed tamper attenuated
   let res = verifySealedToken tampered pk
@@ -247,7 +248,7 @@ removedBlockSealed = testCase "Removed block" $ do
   let pk = toPublic sk
       content = "content"
   token <- signToken content sk
-  attenuated <- seal <$> append token "block1"
+  attenuated <- seal =<< append token "block1"
   let tamper (h :| _) = h :| []
       tampered = alterPayloadSealed tamper attenuated
   let res = verifySealedToken tampered pk

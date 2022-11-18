@@ -58,19 +58,20 @@ module Auth.Biscuit
   -- ** Attenuating biscuits
   -- $attenuatingBiscuits
   , addBlock
-  -- ** Third-party blocks
-  , mkThirdPartyBlockReq
-  , mkThirdPartyBlockReqB64
-  , mkThirdPartyBlock
-  , mkThirdPartyBlockB64
-  , applyThirdPartyBlock
-  , applyThirdPartyBlockB64
   -- $sealedBiscuits
   , seal
   , fromOpen
   , fromSealed
   , asOpen
   , asSealed
+  -- ** Third-party blocks
+  -- $thirdPartyBlocks
+  , mkThirdPartyBlockReq
+  , mkThirdPartyBlockReqB64
+  , mkThirdPartyBlock
+  , mkThirdPartyBlockB64
+  , applyThirdPartyBlock
+  , applyThirdPartyBlockB64
 
   -- * Verifying a biscuit
   -- $verifying
@@ -101,6 +102,8 @@ module Auth.Biscuit
   ) where
 
 import           Control.Monad                       ((<=<))
+import           Control.Monad.Except                (ExceptT (..), liftEither,
+                                                      runExceptT)
 import           Control.Monad.Identity              (runIdentity)
 import           Data.Bifunctor                      (first)
 import           Data.ByteString                     (ByteString)
@@ -349,15 +352,22 @@ serialize = serializeBiscuit
 serializeB64 :: BiscuitProof p => Biscuit p Verified -> ByteString
 serializeB64 = B64.encodeBase64' . serialize
 
+-- | Create a third-party block request from an 'Open' biscuit. This request contains
+-- information needed to properly serialize a block without access to the original
+-- token. See 'mkThirdPartyBlockReq' if you need the request to be raw bytes.
 mkThirdPartyBlockReqB64 :: Biscuit Open c -> ByteString
 mkThirdPartyBlockReqB64 = B64.encodeBase64' . mkThirdPartyBlockReq
 
-mkThirdPartyBlockB64 :: SecretKey -> ByteString -> Block -> Either String ByteString
-mkThirdPartyBlockB64 sk reqB64 b = do
-  req <- first unpack $ B64.decodeBase64 reqB64
-  contents <- mkThirdPartyBlock sk req b
+-- | Create a third-party block from a block request and a parsed datalog block.
+-- See 'mkThirdPartyBlock' if you need raw bytes for requests and contents.
+mkThirdPartyBlockB64 :: SecretKey -> ByteString -> Block -> IO (Either String ByteString)
+mkThirdPartyBlockB64 sk reqB64 b = runExceptT $ do
+  req <- liftEither $ first unpack $ B64.decodeBase64 reqB64
+  contents <- ExceptT $ mkThirdPartyBlock sk req b
   pure $ B64.encodeBase64' contents
 
+-- | Append a signed third-party block to an 'Open' 'Biscuit'.
+-- See 'applyThirdPartyBlock' if you have raw bytes contents.
 applyThirdPartyBlockB64 :: Biscuit Open check -> ByteString -> Either String (IO (Biscuit Open check))
 applyThirdPartyBlockB64 b contentsB64 = do
   contents <- first unpack $ B64.decodeBase64 contentsB64
@@ -389,6 +399,25 @@ applyThirdPartyBlockB64 b contentsB64 = do
 -- when you're verifying a biscuit, you're not caring about whether it can be extended further
 -- or not). 'authorizeBiscuit' does not care whether a biscuit is 'Open' or 'Sealed' and can be
 -- used with both. 'addBlock' and 'seal' only work with 'Open' biscuits.
+
+-- $thirdPartyBlocks
+--
+-- Biscuits can be /attenuated/ by adding blocks. Such blocks can only restrict what a biscuit
+-- token can do, because they cannot be trusted: they are not signed by a trusted keypair.
+-- Third-party blocks are like regular blocks, but they can be signed by a trusted keypair, and
+-- as such their contents can be used for more than attenuation. They can carry proofs from
+-- third parties (hence their name).
+--
+-- In practice, a third-party block can be created for a given bisuit token by first creating a
+-- third-party block request from a 'Biscuit', with 'mkThirdPartyBlockReq'. This request
+-- provides the third party with enough information to serialize and sign a third party block,
+-- with 'mkThirdPartyBlock', and the resulting block can then be appended to a token with
+-- 'applyThirdPartyBlock'. All these functions have @B64@ variants that deal with base64-encoded
+-- payloads suitable for transfer over textual channels.
+--
+-- Facts originating from third-party blocks signed by trusted keypairs can be accessed from
+-- within datalog with the special scoping syntax @ trusting {keypair}@, available on /rules/,
+-- /checks/ and /policies/.
 
 -- $verifying
 --

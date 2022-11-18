@@ -16,12 +16,14 @@ module Auth.Biscuit.Crypto
   , verifySignatureProof
   , getSignatureProof
   , verifyExternalSig
-  , PublicKey
+  , PublicKey (..)
   , pkBytes
   , readEd25519PublicKey
-  , SecretKey
+  , readECDSAP256PublicKey
+  , SecretKey (..)
   , skBytes
   , readEd25519SecretKey
+  , readECDSAP256SecretKey
   , Signature
   , sigBytes
   , signature
@@ -30,8 +32,12 @@ module Auth.Biscuit.Crypto
   , sign
   ) where
 
+import           Auth.Biscuit.Utils         (rightToMaybe)
 import           Control.Arrow              ((&&&))
+import           Crypto.ECC                 (Curve_P256R1)
 import           Crypto.Error               (maybeCryptoError)
+import           Crypto.Hash.Algorithms     (SHA256 (..))
+import qualified Crypto.PubKey.ECDSA        as ECDSA
 import qualified Crypto.PubKey.Ed25519      as Ed25519
 import           Data.ByteArray             (convert)
 import           Data.ByteString            (ByteString)
@@ -40,14 +46,17 @@ import           Data.Int                   (Int32)
 import           Data.List.NonEmpty         (NonEmpty (..))
 import qualified Data.List.NonEmpty         as NE
 import           Data.Maybe                 (catMaybes, fromJust)
+import           Data.Proxy                 (Proxy (..))
 import           Instances.TH.Lift          ()
 import           Language.Haskell.TH.Syntax
 
 import qualified Auth.Biscuit.Proto         as PB
 import qualified Data.Serialize             as PB
 
-newtype PublicKey = PublicKey Ed25519.PublicKey
-  deriving newtype (Eq, Show)
+data PublicKey
+  = Ed25519PublicKey Ed25519.PublicKey
+  | ECDSAP256PublicKey (ECDSA.PublicKey Curve_P256R1)
+  deriving stock (Eq, Show)
 
 instance Ord PublicKey where
   compare = compare `on` serializePublicKey
@@ -60,8 +69,10 @@ instance Lift PublicKey where
   liftTyped = unsafeTExpCoerce . lift
 #endif
 
-newtype SecretKey = SecretKey Ed25519.SecretKey
-  deriving newtype (Eq, Show)
+data SecretKey
+  = Ed25519SecretKey Ed25519.SecretKey
+  | ECDSAP256SecretKey (ECDSA.PrivateKey Curve_P256R1)
+  deriving stock (Eq, Show)
 newtype Signature = Signature ByteString
   deriving newtype (Eq, Show)
 
@@ -72,35 +83,64 @@ sigBytes :: Signature -> ByteString
 sigBytes (Signature b) = b
 
 readEd25519PublicKey :: ByteString -> Maybe PublicKey
-readEd25519PublicKey bs = PublicKey <$> maybeCryptoError (Ed25519.publicKey bs)
+readEd25519PublicKey bs = Ed25519PublicKey <$> maybeCryptoError (Ed25519.publicKey bs)
 
 readEd25519SecretKey :: ByteString -> Maybe SecretKey
-readEd25519SecretKey bs = SecretKey <$> maybeCryptoError (Ed25519.secretKey bs)
+readEd25519SecretKey bs = Ed25519SecretKey <$> maybeCryptoError (Ed25519.secretKey bs)
 
 readEd25519Signature :: Signature -> Maybe Ed25519.Signature
 readEd25519Signature (Signature bs) = maybeCryptoError (Ed25519.signature bs)
 
+readECDSAP256PublicKey :: ByteString -> Maybe PublicKey
+readECDSAP256PublicKey bs = ECDSAP256PublicKey <$> error "todo" bs
+
+readECDSAP256SecretKey :: ByteString -> Maybe SecretKey
+readECDSAP256SecretKey bs = ECDSAP256SecretKey <$> error "todo" bs
+
 toPublic :: SecretKey -> PublicKey
-toPublic (SecretKey sk) = PublicKey $ Ed25519.toPublic sk
+toPublic (Ed25519SecretKey sk) = Ed25519PublicKey $ Ed25519.toPublic sk
+toPublic (ECDSAP256SecretKey sk) = ECDSAP256PublicKey $ ECDSA.toPublic @Curve_P256R1 Proxy sk
 
 generateSecretKey :: IO SecretKey
-generateSecretKey = SecretKey <$> Ed25519.generateSecretKey
+generateSecretKey = Ed25519SecretKey <$> Ed25519.generateSecretKey
 
-sign :: SecretKey -> PublicKey -> ByteString -> Signature
-sign (SecretKey sk) (PublicKey pk) payload =
-  Signature . convert $ Ed25519.sign sk pk payload
+readECDSAP256Signature :: Signature -> Maybe (ECDSA.Signature Curve_P256R1)
+readECDSAP256Signature (Signature bs) = do
+  let parser = (,) <$> PB.getInt32be <*> PB.getInt32be
+  (r,s) <- rightToMaybe $ PB.runGet parser bs
+  maybeCryptoError $ ECDSA.signatureFromIntegers Proxy (fromIntegral r, fromIntegral s)
+
+writeECDSAP256Signature :: ECDSA.Signature Curve_P256R1 -> Signature
+writeECDSAP256Signature sig =
+  let (r, s) = ECDSA.signatureToIntegers Proxy sig
+   in Signature $
+        PB.runPut (PB.putInt32be $ fromInteger r) <>
+        PB.runPut (PB.putInt32be $ fromInteger s)
+
+sign :: SecretKey -> ByteString -> IO Signature
+sign (Ed25519SecretKey sk) payload =
+  let pk = Ed25519.toPublic sk
+   in pure . Signature . convert $ Ed25519.sign sk pk payload
+sign (ECDSAP256SecretKey sk) payload =
+   writeECDSAP256Signature <$> ECDSA.sign @Curve_P256R1 Proxy sk SHA256 payload
 
 verify :: PublicKey -> ByteString -> Signature -> Bool
-verify (PublicKey pk) payload sig =
+verify (Ed25519PublicKey pk) payload sig =
   case readEd25519Signature sig of
     Just sig' -> Ed25519.verify pk payload sig'
     Nothing   -> False
+verify (ECDSAP256PublicKey pk) payload sig =
+  case readECDSAP256Signature sig of
+    Just sig' -> ECDSA.verify @Curve_P256R1 Proxy SHA256 pk sig' payload
+    Nothing   -> False
 
 pkBytes :: PublicKey -> ByteString
-pkBytes (PublicKey pk) = convert pk
+pkBytes (Ed25519PublicKey pk)   = convert pk
+pkBytes (ECDSAP256PublicKey pk) = error "todo" pk
 
 skBytes :: SecretKey -> ByteString
-skBytes (SecretKey sk) = convert sk
+skBytes (Ed25519SecretKey sk)   = convert sk
+skBytes (ECDSAP256SecretKey sk) = error "todo" sk
 
 type SignedBlock = (ByteString, Signature, PublicKey, Maybe (Signature, PublicKey))
 type Blocks = NonEmpty SignedBlock
@@ -125,10 +165,9 @@ signBlock :: SecretKey
           -> Maybe (Signature, PublicKey)
           -> IO (SignedBlock, SecretKey)
 signBlock sk payload eSig = do
-  let pk = toPublic sk
   (nextPk, nextSk) <- (toPublic &&& id) <$> generateSecretKey
   let toSign = getToSig (payload, (), nextPk, eSig)
-      sig = sign sk pk toSign
+  sig <- sign sk toSign
   pure ((payload, sig, nextPk, eSig), nextSk)
 
 signExternalBlock :: SecretKey
@@ -136,26 +175,25 @@ signExternalBlock :: SecretKey
                   -> PublicKey
                   -> ByteString
                   -> IO (SignedBlock, SecretKey)
-signExternalBlock sk eSk pk payload =
-  let eSig = sign3rdPartyBlock eSk pk payload
-   in signBlock sk payload (Just eSig)
+signExternalBlock sk eSk pk payload = do
+  eSig <- sign3rdPartyBlock eSk pk payload
+  signBlock sk payload (Just eSig)
 
 sign3rdPartyBlock :: SecretKey
                   -> PublicKey
                   -> ByteString
-                  -> (Signature, PublicKey)
-sign3rdPartyBlock eSk nextPk payload =
+                  -> IO (Signature, PublicKey)
+sign3rdPartyBlock eSk nextPk payload = do
   let toSign = payload <> serializePublicKey nextPk
       ePk = toPublic eSk
-      eSig = sign eSk ePk toSign
-   in (eSig, ePk)
+  eSig <- sign eSk toSign
+  pure (eSig, ePk)
 
-getSignatureProof :: SignedBlock -> SecretKey -> Signature
+getSignatureProof :: SignedBlock -> SecretKey -> IO Signature
 getSignatureProof (lastPayload, Signature lastSig, lastPk, _todo) nextSecret =
   let sk = nextSecret
-      pk = toPublic nextSecret
       toSign = lastPayload <> serializePublicKey lastPk <> lastSig
-   in sign sk pk toSign
+   in sign sk toSign
 
 getToSig :: (ByteString, a, PublicKey, Maybe (Signature, PublicKey)) -> ByteString
 getToSig (p, _, nextPk, ePk) =
