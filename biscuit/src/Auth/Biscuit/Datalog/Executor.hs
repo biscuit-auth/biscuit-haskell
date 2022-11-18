@@ -40,6 +40,7 @@ module Auth.Biscuit.Datalog.Executor
 
 import           Control.Monad            (join, mfilter, zipWithM)
 import           Data.Bitraversable       (bitraverse)
+import           Data.Bits                (xor, (.&.), (.|.))
 import qualified Data.ByteString          as ByteString
 import           Data.Foldable            (fold)
 import           Data.Functor.Compose     (Compose (..))
@@ -421,6 +422,13 @@ evalBinary _ Mul _ _ = Left "Only integers support multiplication"
 evalBinary _ Div (LInteger _) (LInteger 0) = Left "Divide by 0"
 evalBinary _ Div (LInteger i) (LInteger i') = pure $ LInteger (i `div` i')
 evalBinary _ Div _ _ = Left "Only integers support division"
+-- bitwise operations
+evalBinary _ BitwiseAnd (LInteger i) (LInteger i') = pure $ LInteger (i .&. i')
+evalBinary _ BitwiseAnd _ _ = Left "Only integers support bitwise and"
+evalBinary _ BitwiseOr  (LInteger i) (LInteger i') = pure $ LInteger (i .|. i')
+evalBinary _ BitwiseOr _ _ = Left "Only integers support bitwise or"
+evalBinary _ BitwiseXor (LInteger i) (LInteger i') = pure $ LInteger (i `xor` i')
+evalBinary _ BitwiseXor _ _ = Left "Only integers support bitwise xor"
 -- boolean operations
 evalBinary _ And (LBool b) (LBool b') = pure $ LBool (b && b')
 evalBinary _ And _ _ = Left "Only booleans support &&"

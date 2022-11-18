@@ -229,6 +229,9 @@ table = [ [ binary  "*" Mul
         , [ binary  "+" Add
           , binary  "-" Sub
           ]
+        , [ binary  "&" BitwiseAnd ]
+        , [ binary  "|" BitwiseOr  ]
+        , [ binary  "^" BitwiseXor ]
         , [ binary  "<=" LessOrEqual
           , binary  ">=" GreaterOrEqual
           , binary  "<"  LessThan

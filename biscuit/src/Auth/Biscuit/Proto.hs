@@ -205,6 +205,9 @@ data BinaryKind =
   | Or
   | Intersection
   | Union
+  | BitwiseAnd
+  | BitwiseOr
+  | BitwiseXor
   deriving stock (Show, Enum, Bounded)
 
 newtype OpBinary = OpBinary

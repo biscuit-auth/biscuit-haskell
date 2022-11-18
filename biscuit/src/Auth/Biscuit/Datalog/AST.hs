@@ -80,7 +80,9 @@ module Auth.Biscuit.Datalog.AST
   , listSymbolsInBlock
   , listPublicKeysInBlock
   , queryHasNoScope
+  , queryHasNoV4Operators
   , ruleHasNoScope
+  , ruleHasNoV4Operators
   , isCheckOne
   , renderBlock
   , renderAuthorizer
@@ -399,6 +401,10 @@ type Query = Query' 'Repr 'Representation
 queryHasNoScope :: Query -> Bool
 queryHasNoScope = all (Set.null . qScope)
 
+queryHasNoV4Operators :: Query -> Bool
+queryHasNoV4Operators =
+  all (all expressionHasNoV4Operators . qExpressions)
+
 data CheckKind = One | All
   deriving (Eq, Show, Ord, Lift)
 
@@ -537,6 +543,18 @@ type EvalRule = Rule' 'Eval 'Representation
 ruleHasNoScope :: Rule -> Bool
 ruleHasNoScope Rule{scope} = Set.null scope
 
+expressionHasNoV4Operators :: Expression -> Bool
+expressionHasNoV4Operators = \case
+  EBinary BitwiseAnd _ _ -> False
+  EBinary BitwiseOr _ _  -> False
+  EBinary BitwiseXor _ _ -> False
+  EBinary _ l r -> expressionHasNoV4Operators l && expressionHasNoV4Operators r
+  _ -> True
+
+ruleHasNoV4Operators :: Rule -> Bool
+ruleHasNoV4Operators Rule{expressions} =
+  all expressionHasNoV4Operators expressions
+
 renderRule :: Rule -> Text
 renderRule Rule{rhead,body,expressions,scope} =
      renderPredicate rhead <> " <- "
@@ -577,6 +595,9 @@ data Binary =
   | Or
   | Intersection
   | Union
+  | BitwiseAnd
+  | BitwiseOr
+  | BitwiseXor
   deriving (Eq, Ord, Show, Lift)
 
 data Expression' (ctx :: DatalogContext) =
@@ -655,6 +676,9 @@ renderExpression =
         EBinary Div e e'            -> rOp "/" e e'
         EBinary And e e'            -> rOp "&&" e e'
         EBinary Or e e'             -> rOp "||" e e'
+        EBinary BitwiseAnd e e'     -> rOp "&" e e'
+        EBinary BitwiseOr e e'      -> rOp "|" e e'
+        EBinary BitwiseXor e e'     -> rOp "^" e e'
 
 -- | A biscuit block, containing facts, rules and checks.
 --
