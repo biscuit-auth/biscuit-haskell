@@ -241,9 +241,8 @@ table = [ [ binary  "*" Mul
           , binary  ">"  GreaterThan
           , binary  "==" Equal
           ]
-        , [ binary  "&&" And
-          , binary  "||" Or
-          ]
+        , [ binary  "&&" And ]
+        , [ binary  "||" Or ]
         ]
 
 binary :: HasTopTermParsers 'InPredicate ctx

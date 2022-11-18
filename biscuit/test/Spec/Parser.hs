@@ -328,6 +328,24 @@ operatorPrecedences = testGroup "mixed-precedence operators"
                    (EValue $ Variable "4")
                  )
               )
+  , testCase "&& ||" $
+      parseExpression "$0 || $1 && $2" @?=
+        Right (EBinary Or
+                 (EValue $ Variable "0")
+                 (EBinary And
+                   (EValue $ Variable "1")
+                   (EValue $ Variable "2")
+                 )
+              )
+  , testCase "&&" $
+      parseExpression "$0 && $1 && $2" @?=
+        Right (EBinary And
+                 (EBinary And
+                   (EValue $ Variable "0")
+                   (EValue $ Variable "1")
+                 )
+                 (EValue $ Variable "2")
+              )
   , testCase "!false && true" $
       parseExpression "!false && true" @?=
         Right (EBinary And
