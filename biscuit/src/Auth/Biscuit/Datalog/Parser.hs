@@ -161,7 +161,6 @@ predicateParser = do
 unary :: HasTopTermParsers 'InPredicate ctx => Parser (Expression' ctx)
 unary = choice
   [ unaryParens
-  , unaryNegate
   , unaryLength
   ]
 
@@ -180,7 +179,11 @@ unaryNegate = do
   skipSpace
   _ <- char '!'
   skipSpace
-  EUnary Negate <$> expressionParser
+  e <- choice
+         [ methodParser
+         , exprTerm
+         ]
+  pure $ EUnary Negate e
 
 unaryLength :: HasTopTermParsers 'InPredicate ctx => Parser (Expression' ctx)
 unaryLength = do
@@ -219,7 +222,7 @@ methodParser = do
   pure $ EBinary method e1 e2
 
 expressionParser :: HasTopTermParsers 'InPredicate ctx => Parser (Expression' ctx)
-expressionParser = Expr.makeExprParser (methodParser <|> exprTerm) table
+expressionParser = Expr.makeExprParser (unaryNegate <|> methodParser <|> exprTerm) table
 
 table :: HasTopTermParsers 'InPredicate ctx
       => [[Expr.Operator Parser (Expression' ctx)]]

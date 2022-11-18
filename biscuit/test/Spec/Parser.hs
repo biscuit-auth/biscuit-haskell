@@ -314,6 +314,43 @@ operatorPrecedences = testGroup "mixed-precedence operators"
                     (EValue $ LInteger 4)
                   )
               )
+  , testCase "! && || ==" $
+      parseExpression "$0 && $1 || !$3 == $4" @?=
+        Right (EBinary Or
+                 (EBinary And
+                   (EValue $ Variable "0")
+                   (EValue $ Variable "1")
+                 )
+                 (EBinary Equal
+                   (EUnary Negate
+                     (EValue $ Variable "3")
+                   )
+                   (EValue $ Variable "4")
+                 )
+              )
+  , testCase "!false && true" $
+      parseExpression "!false && true" @?=
+        Right (EBinary And
+                (EUnary Negate
+                  (EValue $ LBool False)
+                )
+                (EValue $ LBool True)
+              )
+  , testCase "!$2.length()" $
+      parseExpression "!$2.length()" @?=
+        Right (EUnary Negate
+                (EUnary Length
+                  (EValue $ Variable "2")
+                )
+              )
+  , testCase "!$0.starts_with($1)" $
+      parseExpression "!$0.starts_with($1)" @?=
+        Right (EUnary Negate
+                (EBinary Prefix
+                  (EValue $ Variable "0")
+                  (EValue $ Variable "1")
+                )
+              )
   ]
 
 ruleWithScopeParsing :: TestTree
