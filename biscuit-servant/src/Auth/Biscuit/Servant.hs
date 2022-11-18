@@ -176,7 +176,7 @@ import           Servant.Server.Experimental.Auth
 -- >
 -- > handler3 :: WithAuthorizer Handler Int
 -- > handler3 = withAuthorizer
--- >   [authorizer|allow if right("three");|]
+-- >   [authorizer|deny if true;|]
 -- >   (pure 3)
 -- >
 -- > server :: Biscuit OpenOrSealed Verified -> Server ProtectedAPI
