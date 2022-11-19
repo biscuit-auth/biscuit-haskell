@@ -211,7 +211,7 @@ pbToCheck s PB.CheckV2{queries,kind} = do
   let cKind = case PB.getField kind of
         Just PB.All -> All
         Just PB.One -> One
-        Nothing -> One
+        Nothing     -> One
   pure Check{..}
 
 checkToPb :: ReverseSymbols -> Check -> PB.CheckV2

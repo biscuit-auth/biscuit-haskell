@@ -414,7 +414,7 @@ data CheckKind = One | All
 
 data Check' evalCtx ctx = Check
   { cQueries :: Query' evalCtx ctx
-  , cKind :: CheckKind
+  , cKind    :: CheckKind
   }
 deriving instance ( Eq (QueryItem' evalCtx ctx)
                   ) => Eq (Check' evalCtx ctx)

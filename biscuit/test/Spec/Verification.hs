@@ -11,7 +11,9 @@ import           Test.Tasty
 import           Test.Tasty.HUnit
 
 import           Auth.Biscuit
-import           Auth.Biscuit.Datalog.AST      (Expression' (..), Query, Check, CheckKind (..), Check' (..),
+import           Auth.Biscuit.Datalog.AST      (Check, Check' (..),
+                                                CheckKind (..),
+                                                Expression' (..), Query,
                                                 QueryItem' (..), Term' (..))
 import           Auth.Biscuit.Datalog.Executor (MatchedQuery (..),
                                                 ResultError (..))

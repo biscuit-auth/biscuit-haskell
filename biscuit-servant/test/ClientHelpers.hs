@@ -12,9 +12,9 @@ import           Network.HTTP.Client      (defaultManagerSettings, newManager)
 import qualified Network.Wai.Handler.Warp as Warp
 import           Servant
 import           Servant.Client
+import qualified Servant.Client.Core      as ClientCore
 import           Servant.Client.Core      (AuthClientData, AuthenticatedRequest,
                                            mkAuthenticatedRequest)
-import qualified Servant.Client.Core      as ClientCore
 
 protect :: Text -> AuthenticatedRequest (AuthProtect "biscuit")
 protect b = mkAuthenticatedRequest b (ClientCore.addHeader "Authorization" . ("Bearer " <>))
