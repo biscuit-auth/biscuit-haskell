@@ -436,7 +436,7 @@ evalBinary _ Or (LBool b) (LBool b') = pure $ LBool (b || b')
 evalBinary _ Or _ _ = Left "Only booleans support ||"
 -- set operations
 evalBinary _ Contains (TermSet t) (TermSet t') = pure $ LBool (Set.isSubsetOf t' t)
-evalBinary _ Contains (TermSet t) t' = case toSetTerm t' of
+evalBinary _ Contains (TermSet t) t' = case valueToSetTerm t' of
     Just t'' -> pure $ LBool (Set.member t'' t)
     Nothing  -> Left "Sets cannot contain nested sets nor variables"
 evalBinary _ Contains (LString t) (LString t') = pure $ LBool (t' `isInfixOf` t)
