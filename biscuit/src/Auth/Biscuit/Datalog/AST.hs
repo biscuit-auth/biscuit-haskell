@@ -75,10 +75,13 @@ module Auth.Biscuit.Datalog.AST
   , Authorizer' (..)
   , AuthorizerElement' (..)
   , ToEvaluation (..)
+  , makeRule
+  , makeQueryItem
   , checkToEvaluation
   , policyToEvaluation
   , elementToBlock
   , elementToAuthorizer
+  , extractVariables
   , fromStack
   , listSymbolsInBlock
   , listPublicKeysInBlock
@@ -111,9 +114,11 @@ import           Control.Monad              ((<=<))
 import           Data.ByteString            (ByteString)
 import           Data.ByteString.Base16     as Hex
 import           Data.Foldable              (fold, toList)
-import           Data.List.NonEmpty         (NonEmpty)
+import           Data.Function              (on)
+import           Data.List.NonEmpty         (NonEmpty, nonEmpty)
 import           Data.Map.Strict            (Map)
 import qualified Data.Map.Strict            as Map
+import           Data.Maybe                 (mapMaybe)
 import           Data.Set                   (Set)
 import qualified Data.Set                   as Set
 import           Data.String                (IsString)
@@ -125,7 +130,7 @@ import           Instances.TH.Lift          ()
 import           Language.Haskell.TH
 import           Language.Haskell.TH.Syntax
 import           Numeric.Natural            (Natural)
-import           Validation                 (Validation, failure)
+import           Validation                 (Validation (..), failure)
 
 import           Auth.Biscuit.Crypto        (PublicKey, pkBytes)
 
@@ -434,6 +439,19 @@ queryHasNoV4Operators :: Query -> Bool
 queryHasNoV4Operators =
   all (all expressionHasNoV4Operators . qExpressions)
 
+makeQueryItem :: [Predicate' 'InPredicate ctx]
+              -> [Expression' ctx]
+              -> Set (RuleScope' 'Repr ctx)
+              -> Validation (NonEmpty Text) (QueryItem' 'Repr ctx)
+makeQueryItem qBody qExpressions qScope =
+  let boundVariables = extractVariables qBody
+      exprVariables = foldMap extractExprVariables qExpressions
+      unboundVariables = exprVariables `Set.difference` boundVariables
+   in case nonEmpty (Set.toList unboundVariables) of
+        Nothing -> pure QueryItem{..}
+        Just vs -> Failure vs
+
+
 data CheckKind = One | All
   deriving (Eq, Show, Ord, Lift)
 
@@ -599,6 +617,38 @@ listSymbolsInRule Rule{..} =
 
 listPublicKeysInRule :: Rule -> Set.Set PublicKey
 listPublicKeysInRule Rule{scope} = listPublicKeysInScope scope
+
+extractVariables :: [Predicate' 'InPredicate ctx] -> Set Text
+extractVariables predicates =
+  let keepVariable = \case
+        Variable name -> Just name
+        _             -> Nothing
+      extractVariables' Predicate{terms} = mapMaybe keepVariable terms
+   in Set.fromList $ extractVariables' =<< predicates
+
+extractExprVariables :: Expression' ctx -> Set Text
+extractExprVariables =
+  let keepVariable = \case
+        Variable name -> Set.singleton name
+        _             -> Set.empty
+   in \case
+        EValue t       -> keepVariable t
+        EUnary _ e     -> extractExprVariables e
+        EBinary _ e e' -> ((<>) `on` extractExprVariables) e e'
+
+makeRule :: Predicate' 'InPredicate ctx
+         -> [Predicate' 'InPredicate ctx]
+         -> [Expression' ctx]
+         -> Set (RuleScope' 'Repr ctx)
+         -> Validation (NonEmpty Text) (Rule' 'Repr ctx)
+makeRule rhead body expressions scope =
+  let boundVariables = extractVariables body
+      exprVariables = foldMap extractExprVariables expressions
+      headVariables = extractVariables [rhead]
+      unboundVariables = (headVariables `Set.union` exprVariables) `Set.difference` boundVariables
+   in case nonEmpty (Set.toList unboundVariables) of
+        Nothing -> pure Rule{..}
+        Just vs -> Failure vs
 
 data Unary =
     Negate

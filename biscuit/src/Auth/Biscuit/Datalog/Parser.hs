@@ -24,6 +24,7 @@ import qualified Data.ByteString.Char8          as C8
 import           Data.Char
 import           Data.Either                    (partitionEithers)
 import           Data.List.NonEmpty             (NonEmpty)
+import qualified Data.List.NonEmpty             as NE
 import           Data.Map.Strict                (Map)
 import           Data.Maybe                     (isJust)
 import           Data.Set                       (Set)
@@ -39,7 +40,8 @@ import           Language.Haskell.TH.Syntax     (Lift)
 import           Text.Megaparsec
 import qualified Text.Megaparsec.Char           as C
 import qualified Text.Megaparsec.Char.Lexer     as L
-import           Validation                     (Validation, validationToEither)
+import           Validation                     (Validation (..),
+                                                 validationToEither)
 
 type Parser = Parsec SemanticError Text
 
@@ -51,6 +53,7 @@ data SemanticError =
   | NestedSet Span
   | InvalidBs Text Span
   | InvalidPublicKey Text Span
+  | UnboundVariables (NonEmpty Text) Span
   deriving stock (Eq, Ord)
 
 instance ShowErrorComponent SemanticError where
@@ -60,6 +63,7 @@ instance ShowErrorComponent SemanticError where
     NestedSet _          -> "Sets cannot be nested"
     InvalidBs e _        -> "Invalid bytestring literal: " <> T.unpack e
     InvalidPublicKey e _ -> "Invalid public key: " <> T.unpack e
+    UnboundVariables e _ -> "Unbound variables: " <> T.unpack (T.intercalate ", " $ NE.toList e)
 
 run :: Parser a -> Text -> Either String a
 run p = first errorBundlePretty . runParser (l (pure ()) *> l p <* eof) ""
@@ -285,10 +289,14 @@ exprTerm = choice
 
 ruleParser :: Parser (Rule' 'Repr 'WithSlices)
 ruleParser = do
+  begin <- getOffset
   rhead <- l predicateParser
   _ <- l $ chunk "<-"
   (body, expressions, scope) <- ruleBodyParser
-  pure Rule{rhead, body, expressions, scope }
+  end <- getOffset
+  case makeRule rhead body expressions scope of
+    Failure vs -> registerError (UnboundVariables vs) (begin, end)
+    Success r  -> pure r
 
 ruleBodyParser :: Parser ([Predicate' 'InPredicate 'WithSlices], [Expression' 'WithSlices], Set.Set (RuleScope' 'Repr 'WithSlices))
 ruleBodyParser = do
@@ -314,10 +322,16 @@ scopeParser = do
    in Set.fromList <$> sepBy1 (l elemParser)
                               (l $ C.char ',')
 
+queryItemParser :: Parser (QueryItem' 'Repr 'WithSlices)
+queryItemParser = do
+  (sp, (predicates, expressions, scope)) <- getSpan ruleBodyParser
+  case makeQueryItem predicates expressions scope of
+    Failure e  -> registerError (UnboundVariables e) sp
+    Success qi -> pure qi
+
 queryParser :: Parser [QueryItem' 'Repr 'WithSlices]
 queryParser =
-  let mkQueryItem (qBody, qExpressions, qScope) = QueryItem { qBody, qExpressions, qScope }
-   in fmap mkQueryItem <$> sepBy1 ruleBodyParser (l $ C.string' "or" <* C.space)
+   sepBy1 queryItemParser (l $ C.string' "or" <* C.space)
 
 checkParser :: Parser (Check' 'Repr 'WithSlices)
 checkParser = do

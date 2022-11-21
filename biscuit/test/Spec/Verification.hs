@@ -11,10 +11,12 @@ import           Test.Tasty
 import           Test.Tasty.HUnit
 
 import           Auth.Biscuit
-import           Auth.Biscuit.Datalog.AST      (Check, Check' (..),
+import           Auth.Biscuit.Datalog.AST      (Block' (..), Check, Check' (..),
                                                 CheckKind (..),
-                                                Expression' (..), Query,
-                                                QueryItem' (..), Term' (..))
+                                                Expression' (..),
+                                                Predicate' (..), Query,
+                                                QueryItem' (..), Rule' (..),
+                                                Term' (..))
 import           Auth.Biscuit.Datalog.Executor (MatchedQuery (..),
                                                 ResultError (..))
 import qualified Auth.Biscuit.Datalog.Executor as Executor
@@ -87,7 +89,27 @@ unboundVarRule :: TestTree
 unboundVarRule = testCase "Rule with unbound variable" $ do
   secret <- newSecret
   b1 <- mkBiscuit secret [block|check if operation("read");|]
-  b2 <- addBlock [block|operation($unbound, "read") <- operation($any1, $any2);|] b1
+  -- rules with unbound variables don't parse, so we have
+  -- to manually construct a broken rule
+  let brokenRuleBlock = Block {
+        bRules = [Rule{
+          rhead = Predicate{
+            name = "operation",
+            terms = [Variable"unbound", LString "read"]
+          },
+          body = [Predicate{
+            name = "operation",
+            terms = Variable <$> ["any1", "any2"]
+          }],
+          expressions = mempty,
+          scope = mempty
+        }],
+        bFacts = mempty,
+        bChecks = mempty,
+        bScope = mempty,
+        bContext = mempty
+  }
+  b2 <- addBlock brokenRuleBlock b1
   res <- authorizeBiscuit b2 [authorizer|operation("write");allow if true;|]
   res @?= Left InvalidRule
 
