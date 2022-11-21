@@ -1,5 +1,6 @@
 {-# LANGUAGE DerivingStrategies         #-}
 {-# LANGUAGE DuplicateRecordFields      #-}
+{-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase                 #-}
 {-# LANGUAGE NamedFieldPuns             #-}
@@ -22,13 +23,13 @@ module Auth.Biscuit.Datalog.ScopedExecutor
   , FactGroup (..)
   ) where
 
-import Data.List (genericLength)
 import           Control.Monad                 (unless, when)
 import           Control.Monad.State           (StateT (..), evalStateT, get,
                                                 gets, lift, put)
 import           Data.Bifunctor                (first)
 import           Data.ByteString               (ByteString)
 import           Data.Foldable                 (fold, traverse_)
+import           Data.List                     (genericLength)
 import           Data.List.NonEmpty            (NonEmpty)
 import qualified Data.List.NonEmpty            as NE
 import           Data.Map                      (Map)

@@ -6,6 +6,7 @@
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase                 #-}
+{-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE NamedFieldPuns             #-}
 {-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE RecordWildCards            #-}
@@ -88,7 +89,7 @@ module Auth.Biscuit.Datalog.AST
   , renderAuthorizer
   , renderFact
   , renderRule
-  , toSetTerm
+  , valueToSetTerm
   , toStack
   ) where
 
@@ -96,7 +97,7 @@ import           Control.Applicative        ((<|>))
 import           Control.Monad              ((<=<))
 import           Data.ByteString            (ByteString)
 import           Data.ByteString.Base16     as Hex
-import           Data.Foldable              (fold)
+import           Data.Foldable              (fold, toList)
 import           Data.Map.Strict            (Map)
 import qualified Data.Map.Strict            as Map
 import           Data.Set                   (Set)
@@ -238,7 +239,7 @@ instance  ( Lift (VariableType inSet pof)
 
 -- | This class describes how to turn a haskell value into a datalog value.
 -- | This is used when slicing a haskell variable in a datalog expression
-class ToTerm t where
+class ToTerm t inSet pof where
   -- | How to turn a value into a datalog item
   toTerm :: t -> Term' inSet pof 'Representation
 
@@ -246,54 +247,57 @@ class ToTerm t where
 class FromValue t where
   fromValue :: Value -> Maybe t
 
-instance ToTerm Int where
+instance ToTerm Int inSet pof where
   toTerm = LInteger
 
 instance FromValue Int where
   fromValue (LInteger v) = Just v
   fromValue _            = Nothing
 
-instance ToTerm Integer where
+instance ToTerm Integer inSet pof where
   toTerm = LInteger . fromIntegral
 
 instance FromValue Integer where
   fromValue (LInteger v) = Just (fromIntegral v)
   fromValue _            = Nothing
 
-instance ToTerm Text where
+instance ToTerm Text inSet pof where
   toTerm = LString
 
 instance FromValue Text where
   fromValue (LString t) = Just t
   fromValue _           = Nothing
 
-instance ToTerm Bool where
+instance ToTerm Bool inSet pof where
   toTerm = LBool
 
 instance FromValue Bool where
   fromValue (LBool b) = Just b
   fromValue _         = Nothing
 
-instance ToTerm ByteString where
+instance ToTerm ByteString inSet pof where
   toTerm = LBytes
 
 instance FromValue ByteString where
   fromValue (LBytes bs) = Just bs
   fromValue _           = Nothing
 
-instance ToTerm UTCTime where
+instance ToTerm UTCTime inSet pof where
   toTerm = LDate
 
 instance FromValue UTCTime where
   fromValue (LDate t) = Just t
   fromValue _         = Nothing
 
+instance (Foldable f, ToTerm a 'WithinSet 'InFact) => ToTerm (f a) 'NotWithinSet pof where
+  toTerm vs = TermSet . Set.fromList $ toTerm <$> toList vs
+
 instance FromValue Value where
   fromValue = Just
 
-toSetTerm :: Value
-          -> Maybe (Term' 'WithinSet 'InFact 'Representation)
-toSetTerm = \case
+valueToSetTerm :: Value
+               -> Maybe (Term' 'WithinSet 'InFact 'Representation)
+valueToSetTerm = \case
   LInteger i  -> Just $ LInteger i
   LString i   -> Just $ LString i
   LDate i     -> Just $ LDate i
@@ -410,7 +414,7 @@ data CheckKind = One | All
 
 data Check' evalCtx ctx = Check
   { cQueries :: Query' evalCtx ctx
-  , cKind :: CheckKind
+  , cKind    :: CheckKind
   }
 deriving instance ( Eq (QueryItem' evalCtx ctx)
                   ) => Eq (Check' evalCtx ctx)
