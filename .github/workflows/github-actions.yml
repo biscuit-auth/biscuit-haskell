@@ -14,8 +14,8 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
-        cabal: ["3.4.0.0"]
-        ghc: ["8.10.4"]
+        cabal: ["3.8.1.0"]
+        ghc: ["8.10.7", "9.0.2", "9.2.4"]
 
     steps:
     - uses: actions/checkout@v2
