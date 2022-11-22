@@ -104,7 +104,6 @@ import           Data.Set                   (Set)
 import qualified Data.Set                   as Set
 import           Data.String                (IsString)
 import           Data.Text                  (Text, intercalate, pack, unpack)
-import           Data.Text.Encoding         (decodeUtf8)
 import           Data.Time                  (UTCTime, defaultTimeLocale,
                                              formatTime)
 import           Data.Void                  (Void, absurd)
@@ -316,7 +315,7 @@ renderId' var set slice = \case
   LInteger int  -> pack $ show int
   LString str   -> pack $ show str
   LDate time    -> pack $ formatTime defaultTimeLocale "%FT%T%Q%EZ" time
-  LBytes bs     -> "hex:" <> decodeUtf8 (Hex.encode bs)
+  LBytes bs     -> "hex:" <> Hex.encodeBase16 bs
   LBool True    -> "true"
   LBool False   -> "false"
   TermSet terms -> set terms -- "[" <> intercalate "," (renderInnerId <$> Set.toList terms) <> "]"
@@ -745,7 +744,7 @@ renderRuleScope =
   let renderScopeElem = \case
         OnlyAuthority -> "authority"
         Previous      -> "previous"
-        BlockId bs    -> "ed25519/hex:" <> decodeUtf8 (Hex.encode $ pkBytes bs)
+        BlockId bs    -> "ed25519/hex:" <> Hex.encodeBase16 (pkBytes bs)
    in intercalate ", " . Set.toList . Set.map renderScopeElem
 
 renderBlock :: Block -> Text

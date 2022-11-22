@@ -48,7 +48,7 @@ library
   build-depends:
     base                 >= 4.7 && <5,
     async                ^>= 2.2,
-    base16-bytestring    ^>= 1.0,
+    base16               ^>= 0.3,
     bytestring           ^>= 0.11,
     text                 ^>= 2.0,
     containers           ^>= 0.6,
@@ -89,7 +89,7 @@ test-suite biscuit-haskell-test
     , aeson
     , attoparsec
     , base >=4.7 && <5
-    , base16-bytestring ^>=1.0
+    , base16 ^>=0.3
     , base64
     , biscuit-haskell
     , bytestring

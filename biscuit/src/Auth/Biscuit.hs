@@ -154,6 +154,7 @@ import           Auth.Biscuit.Token                  (AuthorizedBiscuit (..),
                                                       parseBiscuitUnverified,
                                                       parseBiscuitWith, seal,
                                                       serializeBiscuit)
+import qualified Data.Text as Text
 
 
 -- $biscuitOverview
@@ -245,7 +246,7 @@ blockContext c = mempty { bContext = Just c }
 
 -- | Decode a base16-encoded bytestring, reporting errors via `MonadFail`
 fromHex :: MonadFail m => ByteString -> m ByteString
-fromHex = either fail pure . Hex.decode
+fromHex = either (fail . Text.unpack) pure . Hex.decodeBase16
 
 -- $keypairs
 --
@@ -269,11 +270,11 @@ serializePublicKey = pkBytes
 
 -- | Serialize a 'SecretKey' to a hex-encoded bytestring
 serializeSecretKeyHex :: SecretKey -> ByteString
-serializeSecretKeyHex = Hex.encode . skBytes
+serializeSecretKeyHex = Hex.encodeBase16' . skBytes
 
 -- | Serialize a 'PublicKey' to a hex-encoded bytestring
 serializePublicKeyHex :: PublicKey -> ByteString
-serializePublicKeyHex = Hex.encode . pkBytes
+serializePublicKeyHex = Hex.encodeBase16' . pkBytes
 
 -- | Read a 'SecretKey' from raw bytes
 parseSecretKey :: ByteString -> Maybe SecretKey
