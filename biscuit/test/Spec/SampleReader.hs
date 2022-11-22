@@ -261,7 +261,7 @@ processValidation step b (name, ValidationR{..}) = do
   pols <- either (assertFailure . show) pure $ parseAuthorizer $ foldMap (<> ";") (policies w)
   res <- authorizeBiscuit b (authorizer_code <> pols)
   checkResult compareExecErrors result res
-  let revocationIds = decodeUtf8 . Hex.encode <$> toList (getRevocationIds b)
+  let revocationIds = Hex.encodeBase16 <$> toList (getRevocationIds b)
   step "Comparing revocation ids"
   revocation_ids @?= revocationIds
 
@@ -306,7 +306,7 @@ mkTestCaseFromBiscuit title filename biscuit authorizers = do
              }
           , result = Ok 0
           , authorizer_code = authorizer
-          , revocation_ids = decodeUtf8 . Hex.encode <$> toList (getRevocationIds biscuit)
+          , revocation_ids = Hex.encodeBase16 <$> toList (getRevocationIds biscuit)
           }
   BS.writeFile ("test/samples/v2/" <> filename) (serialize biscuit)
   let token = mkBlockDesc <$> getAuthority biscuit :| getBlocks biscuit

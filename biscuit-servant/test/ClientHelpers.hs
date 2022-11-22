@@ -6,7 +6,6 @@ module ClientHelpers where
 
 import           Data.Bifunctor           (first)
 import           Data.ByteString
-import           Data.ByteString.Lazy     (toStrict)
 import           Data.Text                (Text)
 import           Network.HTTP.Client      (defaultManagerSettings, newManager)
 import qualified Network.Wai.Handler.Warp as Warp
