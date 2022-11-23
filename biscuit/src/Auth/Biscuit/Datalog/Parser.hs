@@ -63,6 +63,7 @@ import           Language.Haskell.TH.Syntax     (Lift)
 import           Auth.Biscuit.Crypto            (PublicKey,
                                                  readEd25519PublicKey)
 import           Auth.Biscuit.Datalog.AST
+import qualified Data.Text as Text
 
 class ConditionalParse a v where
   ifPresent :: String -> Parser a -> Parser v
@@ -199,7 +200,7 @@ exprTerm = choice
   , EValue <$> termParser
   ]
 
-methodParser :: HasTopTermParsers 'InPredicate ctx => Parser (Expression' ctx)
+methodParser :: HasTopTermParsers 'InPredicate ctx => Parser (Expression' ctx)
 methodParser = do
   e1 <- exprTerm
   _ <- char '.'
@@ -221,7 +222,7 @@ methodParser = do
 expressionParser :: HasTopTermParsers 'InPredicate ctx => Parser (Expression' ctx)
 expressionParser = Expr.makeExprParser (methodParser <|> exprTerm) table
 
-table :: HasTopTermParsers 'InPredicate ctx
+table :: HasTopTermParsers 'InPredicate ctx
       => [[Expr.Operator Parser (Expression' ctx)]]
 table = [ [ binary  "*" Mul
           , binary  "/" Div
@@ -252,7 +253,7 @@ binary name op = Expr.InfixL  (EBinary op <$ (skipSpace *> string name))
 hexBsParser :: Parser ByteString
 hexBsParser = do
   void $ string "hex:"
-  either fail pure . Hex.decode . encodeUtf8 =<< takeWhile1 (inClass "0-9a-fA-F")
+  either (fail . Text.unpack) pure . Hex.decodeBase16 . encodeUtf8 =<< takeWhile1 (inClass "0-9a-fA-F")
 
 litStringParser :: Parser Text
 litStringParser =

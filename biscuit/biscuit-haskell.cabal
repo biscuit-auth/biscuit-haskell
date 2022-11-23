@@ -13,6 +13,7 @@ copyright:      2021 Clément Delafargue
 license:        BSD3
 license-file:   LICENSE
 build-type:     Simple
+tested-with:    GHC ==8.10.7 || == 9.0.2 || ==9.2.4
 extra-source-files:
     README.md
     ChangeLog.md
@@ -48,13 +49,13 @@ library
   build-depends:
     base                 >= 4.7 && <5,
     async                ^>= 2.2,
-    base16-bytestring    ^>= 1.0,
-    bytestring           ^>= 0.10,
-    text                 ^>= 1.2,
+    base16               ^>= 0.3,
+    bytestring           ^>= 0.11,
+    text                 ^>= 2.0,
     containers           ^>= 0.6,
-    cryptonite           >= 0.27 && < 0.30,
-    memory               >= 0.15 && < 0.17,
-    template-haskell     >= 2.16 && < 2.18,
+    cryptonite           >= 0.27 && < 0.31,
+    memory               >= 0.15 && < 0.19,
+    template-haskell     >= 2.16 && < 2.19,
     attoparsec           >= 0.13 && < 0.15,
     base64               ^>= 0.4,
     cereal               ^>= 0.5,
@@ -89,7 +90,7 @@ test-suite biscuit-haskell-test
     , aeson
     , attoparsec
     , base >=4.7 && <5
-    , base16-bytestring ^>=1.0
+    , base16 ^>=0.3
     , base64
     , biscuit-haskell
     , bytestring
