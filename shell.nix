@@ -2,7 +2,7 @@
 
 mkShell {
   buildInputs = [
-    haskell.compiler.ghc8107
+    haskell.compiler.ghc924
     pkg-config
     libsodium
     zlib
