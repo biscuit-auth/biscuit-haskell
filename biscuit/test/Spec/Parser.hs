@@ -2,21 +2,27 @@
 {-# LANGUAGE OverloadedLists   #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards   #-}
-module Spec.Parser (specs) where
+module Spec.Parser (specs, parseExpression, parseBlock, parseAuthorizer) where
 
-import           Data.Attoparsec.Text        (parseOnly)
+import           Control.Monad               ((<=<))
+import           Data.Bifunctor              (first)
+import           Data.Either                 (isLeft)
+import           Data.List.NonEmpty          (NonEmpty)
 import           Data.Maybe                  (fromJust)
 import qualified Data.Set                    as Set
 import           Data.Text                   (Text)
 import           Test.Tasty
 import           Test.Tasty.HUnit
+import           Validation                  (Validation, validationToEither)
 
 import           Auth.Biscuit                (PublicKey, parsePublicKeyHex)
 import           Auth.Biscuit.Datalog.AST
-import           Auth.Biscuit.Datalog.Parser (authorizerParser, blockParser,
-                                              checkParser, expressionParser,
-                                              policyParser, predicateParser,
-                                              ruleParser, termParser)
+import           Auth.Biscuit.Datalog.Parser (Parser, authorizerParser,
+                                              blockParser, checkParser,
+                                              expressionParser, policyParser,
+                                              predicateParser,
+                                              predicateTermParser, ruleParser,
+                                              run)
 
 pk1, pk2, pk3, pk4, pk5 :: PublicKey
 pk1 = fromJust $ parsePublicKeyHex "a1b712761c609039f878edad694d762652f1548a68acccc96735b3196a240e8b"
@@ -25,37 +31,42 @@ pk3 = fromJust $ parsePublicKeyHex "083aae4ba29a9a3781cdee7a800f4f8ab90591f65ca9
 pk4 = fromJust $ parsePublicKeyHex "c6864578bc03596d52878bd70025ec966c95c60727cb6573198453e82132510d"
 pk5 = fromJust $ parsePublicKeyHex "a0d3dc7ab62a0a2732ba267e0d57894170458ec1659ca1226240b99764554a2e"
 
+runWithNoParams :: Parser a
+                -> (a -> Validation (NonEmpty Text) b)
+                -> Text
+                -> Either String b
+runWithNoParams p s = validationToEither . first show . s <=< run p
+
 parseTerm :: Text -> Either String Term
-parseTerm = parseOnly termParser
+parseTerm = runWithNoParams predicateTermParser $ substitutePTerm mempty
 
 parseTermQQ :: Text -> Either String QQTerm
-parseTermQQ = parseOnly termParser
+parseTermQQ = run predicateTermParser
 
 parsePredicate :: Text -> Either String Predicate
-parsePredicate = parseOnly predicateParser
+parsePredicate = runWithNoParams predicateParser $ substitutePredicate mempty
 
 parseRule :: Text -> Either String Rule
-parseRule = parseOnly ruleParser
+parseRule = runWithNoParams ruleParser $ substituteRule mempty mempty
 
 parseExpression :: Text -> Either String Expression
-parseExpression = parseOnly expressionParser
+parseExpression = runWithNoParams expressionParser $ substituteExpression mempty
 
 parseCheck :: Text -> Either String Check
-parseCheck = parseOnly checkParser
+parseCheck = runWithNoParams checkParser $ substituteCheck mempty mempty
 
 parseAuthorizer :: Text -> Either String Authorizer
-parseAuthorizer = parseOnly authorizerParser
+parseAuthorizer = runWithNoParams authorizerParser $ substituteAuthorizer mempty mempty
 
 parsePolicy :: Text -> Either String Policy
-parsePolicy = parseOnly policyParser
+parsePolicy = runWithNoParams policyParser $ substitutePolicy mempty mempty
 
 parseBlock :: Text -> Either String Block
-parseBlock = parseOnly blockParser
+parseBlock = runWithNoParams blockParser $ substituteBlock mempty mempty
 
 specs :: TestTree
 specs = testGroup "datalog parser"
-  [
-    factWithDate
+  [ factWithDate
   , simpleFact
   , oneLetterFact
   , simpleRule
@@ -80,7 +91,7 @@ termsGroup = testGroup "Parse terms"
   , testCase "Date" $ parseTerm "2019-12-02T13:49:53Z" @?=
         Right (LDate $ read "2019-12-02 13:49:53 UTC")
   , testCase "Variable" $ parseTerm "$1" @?= Right (Variable "1")
-  , testCase "Antiquote" $ parseTerm "${toto}" @?= Left "Failed reading: empty"
+  , testCase "Antiquote" $ isLeft (parseTerm "${toto}") @? "Unsubstituted parameters triggers an error"
   ]
 
 termsGroupQQ :: TestTree
@@ -94,8 +105,8 @@ termsGroupQQ = testGroup "Parse terms (in a QQ setting)"
   , testGroup "Antiquote"
      [ testCase "Variable name" $ parseTermQQ "${toto2_'}" @?= Right (Antiquote "toto2_'")
      , testCase "Leading underscore" $ parseTermQQ "${_toto}" @?= Right (Antiquote "_toto")
-     , testCase "`_` is reserved" $ parseTermQQ "${_}" @?= Left "Failed reading: empty"
-     , testCase "Variables are lower-cased" $ parseTermQQ "${Toto}" @?= Left "Failed reading: empty"
+     , testCase "`_` is reserved" $ parseTermQQ "${_}" @?= Left "1:4:\n  |\n1 | ${_}\n  |    ^\nunexpected '}'\nexpecting letter\n"
+     , testCase "Variables are lower-cased" $ parseTermQQ "${Toto}" @?= Left "1:3:\n  |\n1 | ${Toto}\n  |   ^\nunexpected 'T'\nexpecting '_' or lowercase letter\n"
      , testCase "_ is lower-case" $ parseTermQQ "${_Toto}" @?= Right (Antiquote "_Toto")
      , testCase "unicode is allowed" $ parseTermQQ "${éllo}" @?= Right (Antiquote "éllo")
      ]
@@ -443,7 +454,7 @@ policyParsing = testGroup "policy blocks"
   , testCase "Deny with multiple groups, multiline" $
       parsePolicy
         "deny if\n\
-           \fact($var), $var == true or\n\
+           \fact($var), $var == true or //comment\n\
            \other($var), $var == 2" @?=
           Right
             ( Deny
@@ -458,7 +469,7 @@ policyParsing = testGroup "policy blocks"
   , testCase "Allow with multiple groups, scoped" $
       parsePolicy
         "allow if fact($var), $var == true trusting previous or \
-        \other($var), $var == 2 trusting ed25519/hex:a1b712761c609039f878edad694d762652f1548a68acccc96735b3196a240e8b,ed25519/hex:083aae4ba29a9a3781cdee7a800f4f8ab90591f65ca983fc429687628311aedd,ed25519/hex:c6864578bc03596d52878bd70025ec966c95c60727cb6573198453e82132510d " @?=
+        \other($var), $var == 2 trusting ed25519/a1b712761c609039f878edad694d762652f1548a68acccc96735b3196a240e8b,ed25519/083aae4ba29a9a3781cdee7a800f4f8ab90591f65ca983fc429687628311aedd,ed25519/c6864578bc03596d52878bd70025ec966c95c60727cb6573198453e82132510d " @?=
           Right
             ( Allow
             , [ QueryItem [Predicate "fact" [Variable "var"]]
@@ -577,7 +588,7 @@ blockParsing :: TestTree
 blockParsing = testCase "Full block" $ do
   let spec :: Text
       spec =
-        " trusting ed25519/hex:b82c748be51784a58496675752e04cc48009a7e78bcfae8cad51fba959102af1,ed25519/hex:083aae4ba29a9a3781cdee7a800f4f8ab90591f65ca983fc429687628311aedd,ed25519/hex:a0d3dc7ab62a0a2732ba267e0d57894170458ec1659ca1226240b99764554a2e;\n\
+        " trusting ed25519/b82c748be51784a58496675752e04cc48009a7e78bcfae8cad51fba959102af1,ed25519/083aae4ba29a9a3781cdee7a800f4f8ab90591f65ca983fc429687628311aedd,ed25519/a0d3dc7ab62a0a2732ba267e0d57894170458ec1659ca1226240b99764554a2e;\n\
         \// the owner has all rights\n\
         \right($blog_id, $article_id, $operation) <-\n\
         \    article($blog_id, $article_id),\n\

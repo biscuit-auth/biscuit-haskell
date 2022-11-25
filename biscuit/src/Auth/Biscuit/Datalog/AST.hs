@@ -1,3 +1,4 @@
+{-# LANGUAGE ApplicativeDo              #-}
 {-# LANGUAGE CPP                        #-}
 {-# LANGUAGE DataKinds                  #-}
 {-# LANGUAGE DeriveLift                 #-}
@@ -10,6 +11,7 @@
 {-# LANGUAGE NamedFieldPuns             #-}
 {-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE RecordWildCards            #-}
+{-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE StandaloneDeriving         #-}
 {-# LANGUAGE TemplateHaskell            #-}
 {-# LANGUAGE TypeApplications           #-}
@@ -91,6 +93,17 @@ module Auth.Biscuit.Datalog.AST
   , renderRule
   , valueToSetTerm
   , toStack
+  , substituteAuthorizer
+  , substituteBlock
+  , substituteCheck
+  , substituteExpression
+  , substituteFact
+  , substitutePolicy
+  , substitutePredicate
+  , substitutePTerm
+  , substituteQuery
+  , substituteRule
+  , substituteTerm
   ) where
 
 import           Control.Applicative        ((<|>))
@@ -98,6 +111,7 @@ import           Control.Monad              ((<=<))
 import           Data.ByteString            (ByteString)
 import           Data.ByteString.Base16     as Hex
 import           Data.Foldable              (fold, toList)
+import           Data.List.NonEmpty         (NonEmpty)
 import           Data.Map.Strict            (Map)
 import qualified Data.Map.Strict            as Map
 import           Data.Set                   (Set)
@@ -111,6 +125,7 @@ import           Instances.TH.Lift          ()
 import           Language.Haskell.TH
 import           Language.Haskell.TH.Syntax
 import           Numeric.Natural            (Natural)
+import           Validation                 (Validation, failure)
 
 import           Auth.Biscuit.Crypto        (PublicKey, pkBytes)
 
@@ -303,6 +318,17 @@ valueToSetTerm = \case
   LBytes i    -> Just $ LBytes i
   LBool i     -> Just $ LBool i
   TermSet _   -> Nothing
+  Variable v  -> absurd v
+  Antiquote v -> absurd v
+
+valueToTerm :: Value -> Term
+valueToTerm = \case
+  LInteger i  -> LInteger i
+  LString i   -> LString i
+  LDate i     -> LDate i
+  LBytes i    -> LBytes i
+  LBool i     -> LBool i
+  TermSet i   -> TermSet i
   Variable v  -> absurd v
   Antiquote v -> absurd v
 
@@ -744,7 +770,7 @@ renderRuleScope =
   let renderScopeElem = \case
         OnlyAuthority -> "authority"
         Previous      -> "previous"
-        BlockId bs    -> "ed25519/hex:" <> Hex.encodeBase16 (pkBytes bs)
+        BlockId bs    -> "ed25519/" <> Hex.encodeBase16 (pkBytes bs)
    in intercalate ", " . Set.toList . Set.map renderScopeElem
 
 renderBlock :: Block -> Text
@@ -907,3 +933,148 @@ checkToEvaluation = toEvaluation
 
 policyToEvaluation :: [Maybe PublicKey] -> Policy -> EvalPolicy
 policyToEvaluation ePks = fmap (fmap (toEvaluation ePks))
+
+substituteAuthorizer :: Map Text Value
+                     -> Map Text PublicKey
+                     -> Authorizer' 'Repr 'WithSlices
+                     -> Validation (NonEmpty Text) Authorizer
+substituteAuthorizer termMapping keyMapping Authorizer{..} = do
+  newPolicies <- traverse (substitutePolicy termMapping keyMapping) vPolicies
+  newBlock <- substituteBlock termMapping keyMapping vBlock
+  pure Authorizer{
+    vPolicies = newPolicies,
+    vBlock = newBlock
+  }
+
+substituteBlock :: Map Text Value
+                -> Map Text PublicKey
+                -> Block' 'Repr 'WithSlices
+                -> Validation (NonEmpty Text) Block
+substituteBlock termMapping keyMapping Block{..} = do
+  newRules <-  traverse (substituteRule termMapping keyMapping) bRules
+  newFacts <-  traverse (substituteFact termMapping) bFacts
+  newChecks <- traverse (substituteCheck termMapping keyMapping) bChecks
+  newScope <- Set.fromList <$> traverse (substituteScope keyMapping) (Set.toList bScope)
+  pure Block{
+   bRules = newRules,
+   bFacts = newFacts,
+   bChecks = newChecks,
+   bScope = newScope,
+   ..}
+
+substituteRule :: Map Text Value -> Map Text PublicKey
+               -> Rule' 'Repr 'WithSlices
+               -> Validation (NonEmpty Text) Rule
+substituteRule termMapping keyMapping Rule{..} = do
+  newHead <- substitutePredicate termMapping rhead
+  newBody <- traverse (substitutePredicate termMapping) body
+  newExpressions <- traverse (substituteExpression termMapping) expressions
+  newScope <- Set.fromList <$> traverse (substituteScope keyMapping) (Set.toList scope)
+  pure Rule{
+    rhead = newHead,
+    body = newBody,
+    expressions = newExpressions,
+    scope = newScope
+  }
+
+substituteCheck :: Map Text Value -> Map Text PublicKey
+                -> Check' 'Repr 'WithSlices
+                -> Validation (NonEmpty Text) Check
+substituteCheck termMapping keyMapping Check{..} = do
+  newQueries <- traverse (substituteQuery termMapping keyMapping) cQueries
+  pure Check{cQueries = newQueries, ..}
+
+substitutePolicy :: Map Text Value -> Map Text PublicKey
+                 -> Policy' 'Repr 'WithSlices
+                 -> Validation (NonEmpty Text) Policy
+substitutePolicy termMapping keyMapping =
+  traverse (traverse (substituteQuery termMapping keyMapping))
+
+substituteQuery :: Map Text Value-> Map Text PublicKey
+                -> QueryItem' 'Repr 'WithSlices
+                -> Validation (NonEmpty Text) (QueryItem' 'Repr 'Representation)
+substituteQuery termMapping keyMapping QueryItem{..} = do
+  newBody <- traverse (substitutePredicate termMapping) qBody
+  newExpressions <- traverse (substituteExpression termMapping) qExpressions
+  newScope <- Set.fromList <$> traverse (substituteScope keyMapping) (Set.toList qScope)
+  pure QueryItem{
+    qBody = newBody,
+    qExpressions = newExpressions,
+    qScope = newScope
+  }
+
+substitutePredicate :: Map Text Value
+                    -> Predicate' 'InPredicate 'WithSlices
+                    -> Validation (NonEmpty Text) (Predicate' 'InPredicate 'Representation)
+substitutePredicate termMapping Predicate{..} = do
+  newTerms <- traverse (substitutePTerm termMapping) terms
+  pure Predicate{ terms = newTerms, .. }
+
+substituteFact :: Map Text Value
+               -> Predicate' 'InFact 'WithSlices
+               -> Validation (NonEmpty Text) Fact
+substituteFact termMapping Predicate{..} = do
+  newTerms <- traverse (substituteTerm termMapping) terms
+  pure Predicate{ terms = newTerms, .. }
+
+
+substitutePTerm :: Map Text Value
+                -> Term' 'NotWithinSet 'InPredicate 'WithSlices
+                -> Validation (NonEmpty Text) (Term' 'NotWithinSet 'InPredicate 'Representation)
+substitutePTerm termMapping = \case
+  LInteger i  -> pure $ LInteger i
+  LString i   -> pure $ LString i
+  LDate i     -> pure $ LDate i
+  LBytes i    -> pure $ LBytes i
+  LBool i     -> pure $ LBool i
+  TermSet i   ->
+    TermSet . Set.fromList <$> traverse (substituteSetTerm termMapping) (Set.toList i)
+  Variable i  -> pure $ Variable i
+  Antiquote (Slice v) -> maybe (failure v) (pure . valueToTerm) $ termMapping Map.!? v
+
+substituteTerm :: Map Text Value
+               -> Term' 'NotWithinSet 'InFact 'WithSlices
+               -> Validation (NonEmpty Text) Value
+substituteTerm termMapping = \case
+  LInteger i  -> pure $ LInteger i
+  LString i   -> pure $ LString i
+  LDate i     -> pure $ LDate i
+  LBytes i    -> pure $ LBytes i
+  LBool i     -> pure $ LBool i
+  TermSet i   ->
+    TermSet . Set.fromList <$> traverse (substituteSetTerm termMapping) (Set.toList i)
+  Variable v  -> absurd v
+  Antiquote (Slice v) -> maybe (failure v) pure $ termMapping Map.!? v
+
+substituteSetTerm :: Map Text Value
+                  -> Term' 'WithinSet 'InFact 'WithSlices
+                  -> Validation (NonEmpty Text) (Term' 'WithinSet 'InFact 'Representation)
+substituteSetTerm termMapping = \case
+  LInteger i  -> pure $ LInteger i
+  LString i   -> pure $ LString i
+  LDate i     -> pure $ LDate i
+  LBytes i    -> pure $ LBytes i
+  LBool i     -> pure $ LBool i
+  TermSet v   -> absurd v
+  Variable v  -> absurd v
+  Antiquote (Slice v) ->
+    let setTerm = valueToSetTerm =<< termMapping Map.!? v
+     in maybe (failure v) pure setTerm
+
+substituteExpression :: Map Text Value
+                     -> Expression' 'WithSlices
+                     -> Validation (NonEmpty Text) Expression
+substituteExpression termMapping = \case
+  EValue v -> EValue <$> substitutePTerm termMapping v
+  EUnary op e -> EUnary op <$> substituteExpression termMapping e
+  EBinary op e e' -> EBinary op <$> substituteExpression termMapping e
+                                <*> substituteExpression termMapping e'
+
+substituteScope :: Map Text PublicKey
+                -> RuleScope' 'Repr 'WithSlices
+                -> Validation (NonEmpty Text) RuleScope
+substituteScope keyMapping = \case
+    OnlyAuthority -> pure OnlyAuthority
+    Previous      -> pure Previous
+    BlockId (Pk pk) -> pure $ BlockId pk
+    BlockId (PkSlice n) -> maybe (failure n) (pure . BlockId) $ keyMapping Map.!? n

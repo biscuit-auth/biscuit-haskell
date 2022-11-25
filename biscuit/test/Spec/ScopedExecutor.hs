@@ -4,7 +4,6 @@
 module Spec.ScopedExecutor (specs) where
 
 import           Control.Arrow                       ((&&&))
-import           Data.Attoparsec.Text                (parseOnly)
 import           Data.Either                         (isRight)
 import           Data.Map.Strict                     as Map
 import           Data.Set                            as Set
@@ -19,7 +18,7 @@ import           Auth.Biscuit.Datalog.Executor       (ExecutionError (..),
                                                       ResultError (..),
                                                       defaultLimits)
 import           Auth.Biscuit.Datalog.Parser         (authorizer, block, check,
-                                                      query)
+                                                      query, run)
 import           Auth.Biscuit.Datalog.ScopedExecutor
 
 specs :: TestTree

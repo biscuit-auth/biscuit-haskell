@@ -18,8 +18,6 @@ import           Control.Monad                 (join, void, when)
 import           Data.Aeson
 import           Data.Aeson.Lens               (key)
 import           Data.Aeson.Types              (typeMismatch, unexpected)
-import           Data.Attoparsec.Text          (endOfInput, parseOnly,
-                                                skipSpace)
 import           Data.Bifunctor                (Bifunctor (..))
 import           Data.ByteString               (ByteString)
 import qualified Data.ByteString               as BS
@@ -44,6 +42,8 @@ import           Auth.Biscuit.Datalog.Executor (ExecutionError (..),
                                                 ResultError (..))
 import           Auth.Biscuit.Datalog.Parser   (authorizerParser, blockParser)
 import           Auth.Biscuit.Token
+
+import           Spec.Parser                   (parseAuthorizer, parseBlock)
 
 getB :: ParsedSignedBlock -> Block
 getB ((_, b), _, _, _) = b
@@ -82,12 +82,6 @@ instance FromJSON Authorizer where
 
 instance ToJSON Authorizer where
   toJSON = toJSON . renderAuthorizer
-
-parseAuthorizer :: Text -> Either String Authorizer
-parseAuthorizer = parseOnly authorizerParser
-
-parseBlock :: Text -> Either String Block
-parseBlock = parseOnly (blockParser <* skipSpace <* endOfInput)
 
 data SampleFile a
   = SampleFile
