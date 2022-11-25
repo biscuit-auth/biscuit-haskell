@@ -154,7 +154,7 @@ import           Auth.Biscuit.Token                  (AuthorizedBiscuit (..),
                                                       parseBiscuitUnverified,
                                                       parseBiscuitWith, seal,
                                                       serializeBiscuit)
-import qualified Data.Text as Text
+import qualified Data.Text                           as Text
 
 
 -- $biscuitOverview

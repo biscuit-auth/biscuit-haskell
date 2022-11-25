@@ -318,7 +318,7 @@ renderId' var set slice = \case
   LBytes bs     -> "hex:" <> Hex.encodeBase16 bs
   LBool True    -> "true"
   LBool False   -> "false"
-  TermSet terms -> set terms -- "[" <> intercalate "," (renderInnerId <$> Set.toList terms) <> "]"
+  TermSet terms -> set terms
   Antiquote v   -> slice v
 
 renderSet :: (SliceType ctx -> Text)
@@ -500,7 +500,7 @@ listPublicKeysInCheck = foldMap listPublicKeysInQueryItem . cQueries
 type RuleScope = RuleScope' 'Repr 'Representation
 type EvalRuleScope = RuleScope' 'Eval 'Representation
 
-data RuleScope' (evalCtx :: EvaluationContext) (ctx :: DatalogContext) =
+data RuleScope' (evalCtx :: EvaluationContext) (ctx :: DatalogContext) =
     OnlyAuthority
   | Previous
   | BlockId (BlockIdType evalCtx ctx)
