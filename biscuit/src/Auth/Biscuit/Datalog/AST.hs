@@ -314,7 +314,7 @@ renderId' var set slice = \case
   Variable name -> var name
   LInteger int  -> pack $ show int
   LString str   -> pack $ show str
-  LDate time    -> pack $ formatTime defaultTimeLocale "%FT%T%Q%EZ" time
+  LDate time    -> pack $ formatTime defaultTimeLocale "%FT%T%Q%Ez" time
   LBytes bs     -> "hex:" <> Hex.encodeBase16 bs
   LBool True    -> "true"
   LBool False   -> "false"
