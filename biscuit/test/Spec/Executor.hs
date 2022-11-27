@@ -3,7 +3,6 @@
 {-# LANGUAGE QuasiQuotes       #-}
 module Spec.Executor (specs) where
 
-import           Data.Attoparsec.Text                (parseOnly)
 import           Data.Map.Strict                     as Map
 import           Data.Set                            as Set
 import           Data.Text                           (Text, unpack)
@@ -19,6 +18,7 @@ import           Auth.Biscuit.Datalog.Executor       (ExecutionError (..),
 import           Auth.Biscuit.Datalog.Parser         (expressionParser, fact,
                                                       rule)
 import           Auth.Biscuit.Datalog.ScopedExecutor hiding (limits)
+import           Spec.Parser                         (parseExpression)
 
 specs :: TestTree
 specs = testGroup "Datalog evaluation"
@@ -80,7 +80,7 @@ ancestor = testCase "Ancestor rule" $
         ])
 
 expr :: Text -> Expression
-expr = either error id . parseOnly expressionParser
+expr = either error id . parseExpression
 
 exprEval :: TestTree
 exprEval = do

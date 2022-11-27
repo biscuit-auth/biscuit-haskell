@@ -7,9 +7,7 @@
 {-# LANGUAGE LambdaCase         #-}
 {-# LANGUAGE NamedFieldPuns     #-}
 {-# LANGUAGE OverloadedStrings  #-}
-{-# LANGUAGE QuasiQuotes        #-}
 {-# LANGUAGE RecordWildCards    #-}
-{-# LANGUAGE TypeApplications   #-}
 module Spec.SampleReader where
 
 import           Control.Arrow                 ((&&&))
@@ -18,14 +16,12 @@ import           Control.Monad                 (join, void, when)
 import           Data.Aeson
 import           Data.Aeson.Lens               (key)
 import           Data.Aeson.Types              (typeMismatch, unexpected)
-import           Data.Attoparsec.Text          (endOfInput, parseOnly,
-                                                skipSpace)
 import           Data.Bifunctor                (Bifunctor (..))
 import           Data.ByteString               (ByteString)
 import qualified Data.ByteString               as BS
 import qualified Data.ByteString.Base16        as Hex
 import qualified Data.ByteString.Lazy          as LBS
-import           Data.Foldable                 (traverse_)
+import           Data.Foldable                 (fold, traverse_)
 import           Data.List.NonEmpty            (NonEmpty (..), toList)
 import           Data.Map.Strict               (Map)
 import qualified Data.Map.Strict               as Map
@@ -44,6 +40,8 @@ import           Auth.Biscuit.Datalog.Executor (ExecutionError (..),
                                                 ResultError (..))
 import           Auth.Biscuit.Datalog.Parser   (authorizerParser, blockParser)
 import           Auth.Biscuit.Token
+
+import           Spec.Parser                   (parseAuthorizer, parseBlock)
 
 getB :: ParsedSignedBlock -> Block
 getB ((_, b), _, _, _) = b
@@ -82,12 +80,6 @@ instance FromJSON Authorizer where
 
 instance ToJSON Authorizer where
   toJSON = toJSON . renderAuthorizer
-
-parseAuthorizer :: Text -> Either String Authorizer
-parseAuthorizer = parseOnly authorizerParser
-
-parseBlock :: Text -> Either String Block
-parseBlock = parseOnly (blockParser <* skipSpace <* endOfInput)
 
 data SampleFile a
   = SampleFile
@@ -167,13 +159,24 @@ data WorldDesc
   deriving stock (Eq, Show, Generic)
   deriving anyclass (FromJSON, ToJSON)
 
+instance Semigroup WorldDesc where
+  a <> b = WorldDesc
+    { facts = facts a <> facts b
+    , rules = rules a <> rules b
+    , checks = checks a <> checks b
+    , policies = policies a <> policies b
+    }
+
+instance Monoid WorldDesc where
+  mempty = WorldDesc [] [] [] []
+
 readBiscuits :: SampleFile FilePath -> IO (SampleFile (FilePath, ByteString))
 readBiscuits =
-   traverse $ traverse (BS.readFile . ("test/samples/v2/" <>)) . join (&&&) id
+   traverse $ traverse (BS.readFile . ("test/samples/current/" <>)) . join (&&&) id
 
 readSamplesFile :: IO (SampleFile (FilePath, ByteString))
 readSamplesFile = do
-  f <- either fail pure =<< eitherDecodeFileStrict' "test/samples/v2/samples-new.json"
+  f <- either fail pure =<< eitherDecodeFileStrict' "test/samples/current/samples.json"
   readBiscuits f
 
 checkTokenBlocks :: (String -> IO ())
@@ -257,7 +260,7 @@ processValidation :: (String -> IO ())
                   -> Assertion
 processValidation step b (name, ValidationR{..}) = do
   when (name /= "") $ step ("Checking " <> name)
-  w    <- maybe (assertFailure "missing authorizer contents") pure world
+  let w = fold world
   pols <- either (assertFailure . show) pure $ parseAuthorizer $ foldMap (<> ";") (policies w)
   res <- authorizeBiscuit b (authorizer_code <> pols)
   checkResult compareExecErrors result res
@@ -308,67 +311,8 @@ mkTestCaseFromBiscuit title filename biscuit authorizers = do
           , authorizer_code = authorizer
           , revocation_ids = Hex.encodeBase16 <$> toList (getRevocationIds biscuit)
           }
-  BS.writeFile ("test/samples/v2/" <> filename) (serialize biscuit)
+  BS.writeFile ("test/samples/current/" <> filename) (serialize biscuit)
   let token = mkBlockDesc <$> getAuthority biscuit :| getBlocks biscuit
   validations <- Map.fromList <$> traverse (traverse mkValidation) authorizers
 
   pure TestCase{..}
-
-addCases :: [(String, FilePath, Biscuit Open Verified, Authorizer)]
-         -> IO ()
-addCases cases = do
-  f <- either fail pure =<< eitherDecodeFileStrict' "test/samples/v2/samples.json"
-  newCases <- for cases $ \(name, path, biscuit, auth) -> do
-    mkTestCaseFromBiscuit name path biscuit [("", auth)]
-  let newF = f { testcases = testcases f <> newCases }
-  putStrLn "writing new"
-  encodeFile "test/samples/v2/samples-new.json" newF
-
-generateCases :: IO ()
-generateCases = do
-  putStrLn "generating new"
-  SampleFile{root_private_key} <- either fail pure =<< eitherDecodeFileStrict' @(SampleFile FilePath) "test/samples/v2/samples.json"
-  let (eSkOne, ePkOne) = (id &&& toPublic) $ fromJust $ parseSecretKeyHex "0932c942ef3535daac4b34eaff9ab6a848b730adbb49dfb24714d1f67c26a49b"
-  let (eSkTwo, ePkTwo) = (id &&& toPublic) $ fromJust $ parseSecretKeyHex "c520e19539e88fea4ccb388ad242ac962cafe8158a3a9da04c17159281c668fc"
-  let (eSkThree, ePkThree) = (id &&& toPublic) $ fromJust $ parseSecretKeyHex "d547622fe6f3afeb83200b5dcc4a8efcb8fd53cde9833da313a9bdf6c12a035c"
-  b1 <- do
-      b <- mkBiscuit root_private_key [block|right("read"); check if group("admin") trusting ${ePkOne};|]
-      addSignedBlock eSkOne [block|group("admin"); check if right("read"); |] b
-  let a1 = [authorizer|allow if true;|]
-  b2 <- do
-      b <- mkBiscuit root_private_key [block|
-                   query(0);
-                   check if true trusting previous, ${ePkOne};
-               |]
-      b' <- addSignedBlock eSkOne [block|
-                   query(1);
-                   query(1,2) <- query(1), query(2) trusting ${ePkTwo} ;
-                   check if query(2), query(3) trusting ${ePkTwo};
-                   check if query(1) trusting ${ePkOne};
-                 |] b
-      b'' <- addSignedBlock eSkTwo [block|
-                   query(2);
-                   check if query(2), query(3) trusting ${ePkTwo};
-                   check if query(1) trusting ${ePkOne};
-                 |] b'
-      b''' <- addSignedBlock eSkTwo [block|
-                   query(3);
-                   check if query(2), query(3) trusting ${ePkTwo};
-                   check if query(1) trusting ${ePkOne};
-                 |] b''
-      addBlock [block|
-           query(4);
-           check if query(2) trusting ${ePkTwo};
-           check if query(4) trusting ${ePkThree};
-         |] b'''
-  let a2 = [authorizer|
-     check if query(1,2) trusting ${ePkOne}, ${ePkTwo};
-     deny if query(3);
-     deny if query(1,2);
-     deny if query(0) trusting ${ePkOne};
-     allow if true;
-  |]
-  addCases
-    [ ("third-party block", "test24_third_party.bc", b1, a1)
-    , ("third-party blocks keys", "test25_third_party_keys.bc", b2, a2)
-    ]
