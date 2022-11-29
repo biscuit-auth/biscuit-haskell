@@ -88,6 +88,7 @@ module Auth.Biscuit
   , MatchedQuery (..)
   , query
   , queryAuthorizerFacts
+  , queryRawBiscuitFacts
   , getBindings
   , getVariableValues
   , getSingleVariableValue
@@ -130,8 +131,7 @@ import           Auth.Biscuit.Datalog.Parser         (authorizer, block, query)
 import           Auth.Biscuit.Datalog.ScopedExecutor (AuthorizationSuccess (..),
                                                       getBindings,
                                                       getSingleVariableValue,
-                                                      getVariableValues,
-                                                      queryAuthorizerFacts)
+                                                      getVariableValues)
 import           Auth.Biscuit.Token                  (AuthorizedBiscuit (..),
                                                       Biscuit,
                                                       BiscuitEncoding (..),
@@ -153,8 +153,10 @@ import           Auth.Biscuit.Token                  (AuthorizedBiscuit (..),
                                                       mkThirdPartyBlock,
                                                       mkThirdPartyBlockReq,
                                                       parseBiscuitUnverified,
-                                                      parseBiscuitWith, seal,
-                                                      serializeBiscuit)
+                                                      parseBiscuitWith,
+                                                      queryAuthorizerFacts,
+                                                      queryRawBiscuitFacts,
+                                                      seal, serializeBiscuit)
 import qualified Data.Text                           as Text
 
 
