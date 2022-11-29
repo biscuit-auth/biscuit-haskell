@@ -76,6 +76,7 @@ specs = testGroup "datalog parser"
   , constraints
   , constrainedRule
   , constrainedRuleOrdering
+  , ruleVariables
   , ruleWithScopeParsing
   , checkParsing
   , policyParsing
@@ -325,6 +326,25 @@ operatorPrecedences = testGroup "mixed-precedence operators"
                     (EValue $ LInteger 4)
                   )
               )
+  ]
+
+ruleVariables :: TestTree
+ruleVariables = testGroup "Make sure rule & query variables are correctly introduced"
+  [ testCase "Head variables are correctly introduced" $
+      parseRule "head($unbound) <- body(true)" @?=
+        Left "1:1:\n  |\n1 | head($unbound) <- body(true)\n  | ^\nUnbound variables: unbound\n"
+  , testCase "Expression variables are correctly introduced (rule)" $
+      parseRule "head(true) <- body(true), $unbound" @?=
+        Left "1:1:\n  |\n1 | head(true) <- body(true), $unbound\n  | ^\nUnbound variables: unbound\n"
+  , testCase "Expression variables are correctly introduced (check)" $
+      first mempty (parseRule "check if body(true), $unbound") @?=
+        Left ()
+  , testCase "Expression variables are correctly introduced (allow policy)" $
+      first mempty (parseRule "allow if body(true), $unbound") @?=
+        Left ()
+  , testCase "Expression variables are correctly introduced (deny policy)" $
+      first mempty (parseRule "deny if body(true), $unbound") @?=
+        Left ()
   ]
 
 ruleWithScopeParsing :: TestTree

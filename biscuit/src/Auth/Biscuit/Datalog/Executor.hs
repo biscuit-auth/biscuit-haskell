@@ -28,8 +28,6 @@ module Auth.Biscuit.Datalog.Executor
   , keepAuthorized'
   , defaultLimits
   , evaluateExpression
-  , extractVariables
-
   --
   , getFactsForRule
   , checkCheck
@@ -258,15 +256,6 @@ satisfies :: Limits
           -> Expression
           -> Bool
 satisfies l b e = evaluateExpression l (snd b) e == Right (LBool True)
-
-extractVariables :: [Predicate] -> Set Name
-extractVariables predicates =
-  let keepVariable = \case
-        Variable name -> Just name
-        _             -> Nothing
-      extractVariables' Predicate{terms} = mapMaybe keepVariable terms
-   in Set.fromList $ extractVariables' =<< predicates
-
 
 applyBindings :: Predicate -> Scoped Bindings -> Maybe (Scoped Fact)
 applyBindings p@Predicate{terms} (origins, bindings) =

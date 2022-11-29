@@ -30,13 +30,16 @@ import           Control.Monad.State      (StateT, get, lift, modify)
 import           Data.Bitraversable       (bisequence)
 import           Data.ByteString          (ByteString)
 import           Data.Int                 (Int64)
+import qualified Data.List.NonEmpty       as NE
 import           Data.Maybe               (isNothing)
 import qualified Data.Set                 as Set
+import qualified Data.Text                as T
 import           Data.Time                (UTCTime)
 import           Data.Time.Clock.POSIX    (posixSecondsToUTCTime,
                                            utcTimeToPOSIXSeconds)
 import           Data.Void                (absurd)
 import           GHC.Records              (getField)
+import           Validation               (Validation (..))
 
 import qualified Auth.Biscuit.Crypto      as Crypto
 import           Auth.Biscuit.Datalog.AST
@@ -192,7 +195,9 @@ pbToRule s pbRule = do
   body        <- traverse (pbToPredicate s) pbBody
   expressions <- traverse (pbToExpression s) pbExpressions
   scope       <- Set.fromList <$> traverse (pbToScope s) pbScope
-  pure Rule {..}
+  case makeRule rhead body expressions scope of
+    Failure vs -> Left $ "Unbound variables in rule: " <> T.unpack (T.intercalate ", " $ NE.toList vs)
+    Success r  -> pure r
 
 ruleToPb :: ReverseSymbols -> Rule -> PB.RuleV2
 ruleToPb s Rule{..} =
