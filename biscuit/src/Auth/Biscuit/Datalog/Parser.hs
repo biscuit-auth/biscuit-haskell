@@ -125,7 +125,7 @@ termParser parseVar parseSet = l $ choice
   , Variable <$> parseVar
   , TermSet <$> parseSet
   , LBytes <$> (chunk "hex:" *> hexParser)
-  , LDate <$> try rfc3339DateParser
+  , LDate <$> rfc3339DateParser
   , LInteger <$> L.signed C.space L.decimal
   , LString . T.pack <$> (C.char '"' *> manyTill L.charLiteral (C.char '"'))
   , LBool <$> choice [ True <$ chunk "true"
@@ -151,25 +151,21 @@ publicKeyParser = do
 
 rfc3339DateParser :: Parser UTCTime
 rfc3339DateParser = do
-  -- get all the chars until the end of the term
-  -- a term can be terminated by
-  --  - a space (before another delimiter)
-  --  - a comma (before another term)
-  --  - a closing paren (the end of a term list)
-  --  - a closing bracket (the end of a set)
   let parseDate = parseTimeM False defaultTimeLocale "%FT%T%Q%EZ"
   input <- sequenceA [
-      pure <$> C.digitChar,
-      pure <$> C.digitChar,
-      pure <$> C.digitChar,
-      pure <$> C.digitChar,
-      pure <$> C.char '-',
-      pure <$> C.digitChar,
-      pure <$> C.digitChar,
-      pure <$> C.char '-',
-      pure <$> C.digitChar,
-      pure <$> C.digitChar,
-      pure <$> C.char 'T',
+      try (sequenceA [
+        C.digitChar,
+        C.digitChar,
+        C.digitChar,
+        C.digitChar,
+        C.char '-',
+        C.digitChar,
+        C.digitChar,
+        C.char '-',
+        C.digitChar,
+        C.digitChar,
+        C.char 'T'
+      ]),
       pure <$> C.digitChar,
       pure <$> C.digitChar,
       pure <$> C.char ':',
@@ -178,6 +174,10 @@ rfc3339DateParser = do
       pure <$> C.char ':',
       pure <$> C.digitChar,
       pure <$> C.digitChar,
+      foldMap join <$> optional (sequenceA [
+        pure <$> C.char '.',
+        some C.digitChar
+      ]),
       choice [
         pure <$> C.char 'Z',
         sequenceA [

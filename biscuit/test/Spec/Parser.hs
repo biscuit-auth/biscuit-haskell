@@ -124,8 +124,12 @@ oneLetterFact = testCase "Parse one-letter fact" $
     Right (Predicate "a" [LInteger 12])
 
 factWithDate :: TestTree
-factWithDate = testCase "Parse fact containing a date" $
+factWithDate = testCase "Parse fact containing a date" $ do
   parsePredicate "date(2019-12-02T13:49:53Z)" @?=
+    Right (Predicate "date" [LDate $ read "2019-12-02 13:49:53 UTC"])
+  parsePredicate "date(2019-12-02T13:49:53.001Z)" @?=
+    Right (Predicate "date" [LDate $ read "2019-12-02 13:49:53.001 UTC"])
+  parsePredicate "date(2019-12-02T13:49:53+00:00)" @?=
     Right (Predicate "date" [LDate $ read "2019-12-02 13:49:53 UTC"])
 
 simpleRule :: TestTree
