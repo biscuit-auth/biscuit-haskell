@@ -47,13 +47,13 @@ parsePredicate :: Text -> Either String Predicate
 parsePredicate = runWithNoParams predicateParser $ substitutePredicate mempty
 
 parseRule :: Text -> Either String Rule
-parseRule = runWithNoParams ruleParser $ substituteRule mempty mempty
+parseRule = runWithNoParams (ruleParser False) $ substituteRule mempty mempty
 
 parseExpression :: Text -> Either String Expression
 parseExpression = runWithNoParams expressionParser $ substituteExpression mempty
 
 parseCheck :: Text -> Either String Check
-parseCheck = runWithNoParams checkParser $ substituteCheck mempty mempty
+parseCheck = runWithNoParams (checkParser False) $ substituteCheck mempty mempty
 
 parseAuthorizer :: Text -> Either String Authorizer
 parseAuthorizer = runWithNoParams authorizerParser $ substituteAuthorizer mempty mempty
@@ -504,13 +504,13 @@ policyParsing = testGroup "policy blocks"
             )
   , testCase "Allow with multiple groups, scoped" $
       parsePolicy
-        "allow if fact($var), $var == true trusting previous or \
+        "allow if fact($var), $var == true trusting authority or \
         \other($var), $var == 2 trusting ed25519/a1b712761c609039f878edad694d762652f1548a68acccc96735b3196a240e8b,ed25519/083aae4ba29a9a3781cdee7a800f4f8ab90591f65ca983fc429687628311aedd,ed25519/c6864578bc03596d52878bd70025ec966c95c60727cb6573198453e82132510d " @?=
           Right
             ( Allow
             , [ QueryItem [Predicate "fact" [Variable "var"]]
                           [EBinary Equal (EValue (Variable "var")) (EValue (LBool True))]
-                          [Previous]
+                          [OnlyAuthority]
               , QueryItem [Predicate "other" [Variable "var"]]
                           [EBinary Equal (EValue (Variable "var")) (EValue (LInteger 2))]
                           [BlockId pk1, BlockId pk3, BlockId pk4]
@@ -532,10 +532,22 @@ authorizerParsing = testGroup "Simple authorizers"
                  ]
                  mempty
               )
+  , testCase "Previous is denied at the top level" $
+      parseAuthorizer "trusting previous; allow if true;" @?=
+        Left "1:10:\n  |\n1 | trusting previous; allow if true;\n  |          ^\n'previous' can't appear in an authorizer scope\n"
+  , testCase "Previous is denied in rules" $
+      parseAuthorizer "head(true) <- tail(true) trusting previous;" @?=
+        Left "1:35:\n  |\n1 | head(true) <- tail(true) trusting previous;\n  |                                   ^\n'previous' can't appear in an authorizer scope\n"
+  , testCase "Previous is denied in checks" $
+      parseAuthorizer "check if true trusting previous;" @?=
+        Left "1:24:\n  |\n1 | check if true trusting previous;\n  |                        ^\n'previous' can't appear in an authorizer scope\n"
+  , testCase "Previous is denied in policies" $
+      parseAuthorizer "allow if true trusting previous;" @?=
+        Left "1:24:\n  |\n1 | allow if true trusting previous;\n  |                        ^\n'previous' can't appear in an authorizer scope\n"
   , testCase "Complete authorizer" $ do
       let spec :: Text
           spec =
-            " trusting previous;\n\
+            " trusting authority;\n\
             \// the owner has all rights\n\
             \right($blog_id, $article_id, $operation) <-\n\
             \    article($blog_id, $article_id),\n\
@@ -604,7 +616,7 @@ authorizerParsing = testGroup "Simple authorizers"
           bFacts = []
           bChecks = []
           bContext = Nothing
-          bScope = [Previous]
+          bScope = [OnlyAuthority]
           vPolicies =
             [ (Allow, [QueryItem [ p "operation" [sRead]
                                  , p "article"   [vBlogId, vArticleId]
