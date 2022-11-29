@@ -59,6 +59,7 @@ module Auth.Biscuit
   -- $attenuatingBiscuits
   , addBlock
   -- ** Third-party blocks
+  , addSignedBlock
   , mkThirdPartyBlockReq
   , mkThirdPartyBlockReqB64
   , mkThirdPartyBlock
@@ -139,7 +140,7 @@ import           Auth.Biscuit.Token                  (AuthorizedBiscuit (..),
                                                       ParseError (..),
                                                       ParserConfig (..), Sealed,
                                                       Unverified, Verified,
-                                                      addBlock,
+                                                      addBlock, addSignedBlock,
                                                       applyThirdPartyBlock,
                                                       asOpen, asSealed,
                                                       authorizeBiscuit,
