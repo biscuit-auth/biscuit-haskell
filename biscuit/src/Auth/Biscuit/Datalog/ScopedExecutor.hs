@@ -253,7 +253,7 @@ extend l blockCount rules facts =
   let buildFacts :: Natural -> Set EvalRule -> FactGroup -> Set (Scoped Fact)
       buildFacts ruleBlockId ruleGroup factGroup =
         let extendRule :: EvalRule -> Set (Scoped Fact)
-            extendRule r@Rule{scope} = getFactsForRule l (toScopedFacts $ keepAuthorized' blockCount factGroup scope ruleBlockId) r
+            extendRule r@Rule{scope} = getFactsForRule l (toScopedFacts $ keepAuthorized' False blockCount factGroup scope ruleBlockId) r
          in foldMap extendRule ruleGroup
 
       extendRuleGroup :: Natural -> Set EvalRule -> FactGroup
