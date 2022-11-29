@@ -195,13 +195,15 @@ rfc3339DateParser = do
 predicateParser' :: Parser (Term' 'NotWithinSet pof 'WithSlices)
                  -> Parser (Predicate' pof 'WithSlices)
 predicateParser' parseTerm = l $ do
-  x      <- C.letterChar
-  xs     <- takeWhileP (Just "_, :, or any alphanumeric char") (\c -> c == '_' || c == ':' || isAlphaNum c)
-  _      <- l $ C.char '('
+  name <- try $ do
+    x      <- C.letterChar
+    xs     <- takeWhileP (Just "_, :, or any alphanumeric char") (\c -> c == '_' || c == ':' || isAlphaNum c)
+    _      <- l $ C.char '('
+    pure $ T.cons x xs
   terms  <- sepBy1 parseTerm (l $ C.char ',')
   _      <- l $ C.char ')'
   pure Predicate {
-    name = T.cons x xs,
+    name,
     terms
   }
 
@@ -290,8 +292,7 @@ exprTerm = choice
 ruleParser :: Parser (Rule' 'Repr 'WithSlices)
 ruleParser = do
   begin <- getOffset
-  rhead <- l predicateParser
-  _ <- l $ chunk "<-"
+  rhead <- try $ l predicateParser <* l (chunk "<-")
   (body, expressions, scope) <- ruleBodyParser
   end <- getOffset
   case makeRule rhead body expressions scope of
@@ -301,8 +302,8 @@ ruleParser = do
 ruleBodyParser :: Parser ([Predicate' 'InPredicate 'WithSlices], [Expression' 'WithSlices], Set.Set (RuleScope' 'Repr 'WithSlices))
 ruleBodyParser = do
   let predicateOrExprParser =
-            Right <$> expressionParser
-        <|> Left <$>  predicateParser
+            Left <$>  predicateParser
+        <|> Right <$> expressionParser
   elems <- l $ sepBy1 (l predicateOrExprParser)
                       (l $ C.char ',')
   scope <- option Set.empty scopeParser
@@ -350,14 +351,14 @@ policyParser = do
 
 blockElementParser :: Parser (BlockElement' 'Repr 'WithSlices)
 blockElementParser = choice
-  [ BlockRule    <$> try (ruleParser <* C.char ';')
-  , BlockFact    <$> try (factParser <* C.char ';')
-  , BlockCheck   <$> try (checkParser <* C.char ';')
+  [ BlockCheck   <$> checkParser <* C.char ';'
+  , BlockRule    <$> ruleParser <* C.char ';'
+  , BlockFact    <$> factParser <* C.char ';'
   ]
 
 authorizerElementParser :: Parser (AuthorizerElement' 'Repr 'WithSlices)
 authorizerElementParser = choice
-  [ AuthorizerPolicy  <$> try (policyParser <* C.char ';')
+  [ AuthorizerPolicy  <$> policyParser <* C.char ';'
   , BlockElement    <$> blockElementParser
   ]
 

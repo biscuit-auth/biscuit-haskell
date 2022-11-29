@@ -266,6 +266,18 @@ constraints = testGroup "Parse expressions"
                     (EValue (TermSet $ Set.fromList [LString "abc", LString "def"]))
                     (EValue (Variable "0"))
                     ))
+  , testCase "arithmetic operation that looks like the beginning of a RFC3339 date" $
+      parseExpression "2022-12-10==2000" @?=
+        Right (EBinary Equal
+                 (EBinary Sub
+                    (EBinary Sub
+                       (EValue $ LInteger 2022)
+                       (EValue $ LInteger 12)
+                    )
+                    (EValue $ LInteger 10)
+                 )
+                 (EValue $ LInteger 2000)
+              )
   , operatorPrecedences
   ]
 
@@ -341,14 +353,14 @@ ruleVariables = testGroup "Make sure rule & query variables are correctly introd
       parseRule "head(true) <- body(true), $unbound" @?=
         Left "1:1:\n  |\n1 | head(true) <- body(true), $unbound\n  | ^\nUnbound variables: unbound\n"
   , testCase "Expression variables are correctly introduced (check)" $
-      first mempty (parseRule "check if body(true), $unbound") @?=
-        Left ()
+      parseCheck "check if body(true), $unbound" @?=
+        Left "1:10:\n  |\n1 | check if body(true), $unbound\n  |          ^\nUnbound variables: unbound\n"
   , testCase "Expression variables are correctly introduced (allow policy)" $
-      first mempty (parseRule "allow if body(true), $unbound") @?=
-        Left ()
+      parsePolicy "allow if body(true), $unbound" @?=
+        Left "1:10:\n  |\n1 | allow if body(true), $unbound\n  |          ^\nUnbound variables: unbound\n"
   , testCase "Expression variables are correctly introduced (deny policy)" $
-      first mempty (parseRule "deny if body(true), $unbound") @?=
-        Left ()
+      parsePolicy "deny if body(true), $unbound" @?=
+        Left "1:9:\n  |\n1 | deny if body(true), $unbound\n  |         ^\nUnbound variables: unbound\n"
   ]
 
 ruleWithScopeParsing :: TestTree
