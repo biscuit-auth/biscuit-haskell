@@ -92,7 +92,7 @@ termsGroup = testGroup "Parse terms"
   , testCase "Date" $ parseTerm "2019-12-02T13:49:53Z" @?=
         Right (LDate $ read "2019-12-02 13:49:53 UTC")
   , testCase "Variable" $ parseTerm "$1" @?= Right (Variable "1")
-  , testCase "Antiquote" $ isLeft (parseTerm "${toto}") @? "Unsubstituted parameters triggers an error"
+  , testCase "Antiquote" $ isLeft (parseTerm "{toto}") @? "Unsubstituted parameters triggers an error"
   ]
 
 termsGroupQQ :: TestTree
@@ -104,12 +104,12 @@ termsGroupQQ = testGroup "Parse terms (in a QQ setting)"
         Right (LDate $ read "2019-12-02 13:49:53 UTC")
   , testCase "Variable" $ parseTermQQ "$1" @?= Right (Variable "1")
   , testGroup "Antiquote"
-     [ testCase "Variable name" $ parseTermQQ "${toto2_'}" @?= Right (Antiquote "toto2_'")
-     , testCase "Leading underscore" $ parseTermQQ "${_toto}" @?= Right (Antiquote "_toto")
-     , testCase "`_` is reserved" $ parseTermQQ "${_}" @?= Left "1:4:\n  |\n1 | ${_}\n  |    ^\nunexpected '}'\nexpecting letter\n"
-     , testCase "Variables are lower-cased" $ parseTermQQ "${Toto}" @?= Left "1:3:\n  |\n1 | ${Toto}\n  |   ^\nunexpected 'T'\nexpecting '_' or lowercase letter\n"
-     , testCase "_ is lower-case" $ parseTermQQ "${_Toto}" @?= Right (Antiquote "_Toto")
-     , testCase "unicode is allowed" $ parseTermQQ "${éllo}" @?= Right (Antiquote "éllo")
+     [ testCase "Variable name" $ parseTermQQ "{toto2_'}" @?= Right (Antiquote "toto2_'")
+     , testCase "Leading underscore" $ parseTermQQ "{_toto}" @?= Right (Antiquote "_toto")
+     , testCase "`_` is reserved" $ parseTermQQ "{_}" @?= Left "1:3:\n  |\n1 | {_}\n  |   ^\nunexpected '}'\nexpecting letter\n"
+     , testCase "Variables are lower-cased" $ parseTermQQ "{Toto}" @?= Left "1:2:\n  |\n1 | {Toto}\n  |  ^\nunexpected 'T'\nexpecting '_' or lowercase letter\n"
+     , testCase "_ is lower-case" $ parseTermQQ "{_Toto}" @?= Right (Antiquote "_Toto")
+     , testCase "unicode is allowed" $ parseTermQQ "{éllo}" @?= Right (Antiquote "éllo")
      ]
   ]
 

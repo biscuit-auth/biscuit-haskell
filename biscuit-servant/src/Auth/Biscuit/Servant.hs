@@ -134,11 +134,11 @@ import           Servant.Server.Experimental.Auth
 -- >                // the biscuit can decide if it's still valid
 -- >                // this show how to run an effectful check with
 -- >                // checkBiscuitM (getting the current time is an effect)
--- >                time(${now});
+-- >                time({now});
 -- >                // only allow biscuits granting access to the endpoint tagged "two"
 -- >                // AND for the provided int value. This shows how the checks can depend
 -- >                // on the http request contents.
--- >                allow if right("two", ${value});
+-- >                allow if right("two", {value});
 -- >              |]
 -- >   checkBiscuitM biscuit authorizer
 -- >     (pure 2)
@@ -171,7 +171,7 @@ import           Servant.Server.Experimental.Auth
 -- >
 -- > handler2 :: Int -> WithAuthorizer Handler Int
 -- > handler2 value = withAuthorizer
--- >   [authorizer|allow if right("two", ${value});|]
+-- >   [authorizer|allow if right("two", {value});|]
 -- >   (pure 2)
 -- >
 -- > handler3 :: WithAuthorizer Handler Int
@@ -183,7 +183,7 @@ import           Servant.Server.Experimental.Auth
 -- > server biscuit =
 -- >  let nowFact = do
 -- >        now <- liftIO getCurrentTime
--- >        pure [authorizer|time(${now});|]
+-- >        pure [authorizer|time({now});|]
 -- >      handleAuth :: WithAuthorizer Handler x -> Handler x
 -- >      handleAuth =
 -- >          handleBiscuit biscuit

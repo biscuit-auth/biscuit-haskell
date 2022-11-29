@@ -42,7 +42,7 @@ antiquotedFact = testCase "Sliced fact" $
   let toto2' :: Text
       toto2' = "test"
       actual :: Fact
-      actual = [fact|right(${toto2'}, "read")|]
+      actual = [fact|right({toto2'}, "read")|]
    in actual @?=
     Predicate "right" [ LString "test"
                       , LString "read"
@@ -53,7 +53,7 @@ antiquotedRule = testCase "Sliced rule" $
   let toto :: Text
       toto = "test"
       actual :: Rule
-      actual = [rule|right($0, "read") <- resource( $0), operation("read", ${toto})|]
+      actual = [rule|right($0, "read") <- resource( $0), operation("read", {toto})|]
    in actual @?=
     Rule (Predicate "right" [Variable "0", LString "read"])
          [ Predicate "resource" [Variable "0"]

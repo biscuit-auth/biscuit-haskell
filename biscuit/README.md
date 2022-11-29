@@ -47,7 +47,7 @@ verification serialized = do
   -- verifiers are defined inline, directly in datalog, through the `verifier`
   -- quasiquoter. datalog parsing and validation happens at compile time, but
   -- can still reference haskell variables.
-  let authorizer' = [authorizer|time(${now});
+  let authorizer' = [authorizer|time({now});
                                 allow if true;
                                |]
   -- `authorizeBiscuit` only works on valid biscuits, and runs the datalog verifications

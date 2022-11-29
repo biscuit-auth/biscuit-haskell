@@ -44,7 +44,7 @@ userListHandler = withAuthorizer [authorizer|allow if right("userList")|]
 
 singleUserHandler :: Int -> AppM User
 singleUserHandler uid =
-  withAuthorizer [authorizer|allow if right("getUser", ${uid})|] $
+  withAuthorizer [authorizer|allow if right("getUser", {uid})|] $
   let user = find (\user -> userId user == uid) allUsers
    in maybe (throwError error404) (\user -> pure user) user
 ```

@@ -68,11 +68,11 @@ mkE1Biscuit :: SecretKey -> IO (Biscuit Open Verified)
 mkE1Biscuit sk = mkBiscuit sk [block|right("one");|]
 
 mkE2Biscuit :: Int -> SecretKey -> IO (Biscuit Open Verified)
-mkE2Biscuit v sk = mkBiscuit sk [block|right("two", ${v});|]
+mkE2Biscuit v sk = mkBiscuit sk [block|right("two", {v});|]
 
 mkE4Biscuit :: Int -> SecretKey -> IO (Biscuit Open Verified)
-mkE4Biscuit v sk = mkBiscuit sk [block|user(${v});|]
+mkE4Biscuit v sk = mkBiscuit sk [block|user({v});|]
 
 addTtl :: UTCTime -> Biscuit Open Verified -> IO (Biscuit Open Verified)
 addTtl expiration =
-  addBlock [block|check if time($now), $now < ${expiration};|]
+  addBlock [block|check if time($now), $now < {expiration};|]

@@ -220,8 +220,8 @@ import qualified Data.Text                           as Text
 -- >       now <- getCurrentTime
 -- >       let verif = [authorizer|
 -- >                // the datalog snippets can reference haskell variables
--- >                // with the ${variableName} syntax
--- >                time(${now});
+-- >                // with the {variableName} syntax
+-- >                time({now});
 -- >
 -- >                // policies are tried in order. The first matching policy
 -- >                // will decide if the token is valid or not. If no policies

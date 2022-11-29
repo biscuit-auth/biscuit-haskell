@@ -22,8 +22,8 @@ creation = do
       networkLocal = "192.168.0.1" :: Text
   let authority = [block|
        // this is a comment
-       right("file1", ${allowedOperations});
-       check if source_ip($source_ip), ["127.0.0.1", ${networkLocal}].contains($source_ip);
+       right("file1", {allowedOperations});
+       check if source_ip($source_ip), ["127.0.0.1", {networkLocal}].contains($source_ip);
        |]
   biscuit <- mkBiscuit privateKey' authority
   let block1 = [block|check if time($time), $time < 2025-05-08T00:00:00Z;|]
@@ -35,7 +35,7 @@ verification serialized = do
   now <- getCurrentTime
   biscuit <- either (fail . show) pure $ parseB64 publicKey' serialized
   let authorizer' = [authorizer|
-        time(${now});
+        time({now});
         source_ip("127.0.0.1");
         allow if right("file1", $ops), $ops.contains("read");
       |]

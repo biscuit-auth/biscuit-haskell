@@ -166,22 +166,22 @@ thirdPartyBlocks r =
                    right("file1", "read");
                    right("file2", "read");
                    right("file1", "write");
-                   check if true trusting previous, ${pkOne};
+                   check if true trusting previous, {pkOne};
                |]) :|
                [ (Just sk1, [block|
                    query("block1");
-                   check if right("file2", "read") trusting ${pkTwo};
-                   check if right("file3", "read") trusting ${pkOne};
+                   check if right("file2", "read") trusting {pkTwo};
+                   check if right("file3", "read") trusting {pkOne};
                  |])
                , (Just sk2, [block|
                    query("block2");
-                   check if right("file2", "read") trusting ${pkTwo};
-                   check if right("file3", "read") trusting ${pkOne};
+                   check if right("file2", "read") trusting {pkTwo};
+                   check if right("file3", "read") trusting {pkOne};
                  |])
                , (Nothing, [block|
                    query("block3");
-                   check if right("file2", "read") trusting ${pkTwo};
-                   check if right("file3", "read") trusting ${pkThree};
+                   check if right("file2", "read") trusting {pkTwo};
+                   check if right("file3", "read") trusting {pkThree};
                  |])
                ]
    in testGroup "Third party blocks"
