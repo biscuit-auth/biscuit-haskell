@@ -124,8 +124,12 @@ oneLetterFact = testCase "Parse one-letter fact" $
     Right (Predicate "a" [LInteger 12])
 
 factWithDate :: TestTree
-factWithDate = testCase "Parse fact containing a date" $
+factWithDate = testCase "Parse fact containing a date" $ do
   parsePredicate "date(2019-12-02T13:49:53Z)" @?=
+    Right (Predicate "date" [LDate $ read "2019-12-02 13:49:53 UTC"])
+  parsePredicate "date(2019-12-02T13:49:53.001Z)" @?=
+    Right (Predicate "date" [LDate $ read "2019-12-02 13:49:53.001 UTC"])
+  parsePredicate "date(2019-12-02T13:49:53+00:00)" @?=
     Right (Predicate "date" [LDate $ read "2019-12-02 13:49:53 UTC"])
 
 simpleRule :: TestTree
@@ -262,6 +266,18 @@ constraints = testGroup "Parse expressions"
                     (EValue (TermSet $ Set.fromList [LString "abc", LString "def"]))
                     (EValue (Variable "0"))
                     ))
+  , testCase "arithmetic operation that looks like the beginning of a RFC3339 date" $
+      parseExpression "2022-12-10==2000" @?=
+        Right (EBinary Equal
+                 (EBinary Sub
+                    (EBinary Sub
+                       (EValue $ LInteger 2022)
+                       (EValue $ LInteger 12)
+                    )
+                    (EValue $ LInteger 10)
+                 )
+                 (EValue $ LInteger 2000)
+              )
   , operatorPrecedences
   ]
 
@@ -337,14 +353,14 @@ ruleVariables = testGroup "Make sure rule & query variables are correctly introd
       parseRule "head(true) <- body(true), $unbound" @?=
         Left "1:1:\n  |\n1 | head(true) <- body(true), $unbound\n  | ^\nUnbound variables: unbound\n"
   , testCase "Expression variables are correctly introduced (check)" $
-      first mempty (parseRule "check if body(true), $unbound") @?=
-        Left ()
+      parseCheck "check if body(true), $unbound" @?=
+        Left "1:10:\n  |\n1 | check if body(true), $unbound\n  |          ^\nUnbound variables: unbound\n"
   , testCase "Expression variables are correctly introduced (allow policy)" $
-      first mempty (parseRule "allow if body(true), $unbound") @?=
-        Left ()
+      parsePolicy "allow if body(true), $unbound" @?=
+        Left "1:10:\n  |\n1 | allow if body(true), $unbound\n  |          ^\nUnbound variables: unbound\n"
   , testCase "Expression variables are correctly introduced (deny policy)" $
-      first mempty (parseRule "deny if body(true), $unbound") @?=
-        Left ()
+      parsePolicy "deny if body(true), $unbound" @?=
+        Left "1:9:\n  |\n1 | deny if body(true), $unbound\n  |         ^\nUnbound variables: unbound\n"
   ]
 
 ruleWithScopeParsing :: TestTree

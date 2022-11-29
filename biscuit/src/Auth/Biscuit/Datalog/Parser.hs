@@ -121,16 +121,17 @@ termParser :: Parser (VariableType inSet pof)
            -> Parser (SetType inSet 'WithSlices)
            -> Parser (Term' inSet pof 'WithSlices)
 termParser parseVar parseSet = l $ choice
-  [ Antiquote . Slice <$> haskellVariableParser
-  , Variable <$> parseVar
-  , TermSet <$> parseSet
-  , LBytes <$> (chunk "hex:" *> hexParser)
-  , LDate <$> try rfc3339DateParser
-  , LInteger <$> L.signed C.space L.decimal
-  , LString . T.pack <$> (C.char '"' *> manyTill L.charLiteral (C.char '"'))
+  [ Antiquote . Slice <$> haskellVariableParser <?> "parameter (eg. ${paramName})"
+  , Variable <$> parseVar <?> "datalog variable (eg. $variable)"
+  , TermSet <$> parseSet <?> "set (eg. [1,2,3])"
+  , LBytes <$> (chunk "hex:" *> hexParser) <?> "hex-encoded bytestring (eg. hex:00ff99)"
+  , LDate <$> rfc3339DateParser <?> "RFC3339-formatted timestamp (eg. 2022-11-29T00:00:00Z)"
+  , LInteger <$> L.signed C.space L.decimal <?> "(signed) integer"
+  , LString . T.pack <$> (C.char '"' *> manyTill L.charLiteral (C.char '"')) <?> "string literal"
   , LBool <$> choice [ True <$ chunk "true"
                      , False <$ chunk "false"
                      ]
+          <?> "boolean value (eg. true or false)"
   ]
 
 hexParser :: Parser ByteString
@@ -151,25 +152,21 @@ publicKeyParser = do
 
 rfc3339DateParser :: Parser UTCTime
 rfc3339DateParser = do
-  -- get all the chars until the end of the term
-  -- a term can be terminated by
-  --  - a space (before another delimiter)
-  --  - a comma (before another term)
-  --  - a closing paren (the end of a term list)
-  --  - a closing bracket (the end of a set)
   let parseDate = parseTimeM False defaultTimeLocale "%FT%T%Q%EZ"
   input <- sequenceA [
-      pure <$> C.digitChar,
-      pure <$> C.digitChar,
-      pure <$> C.digitChar,
-      pure <$> C.digitChar,
-      pure <$> C.char '-',
-      pure <$> C.digitChar,
-      pure <$> C.digitChar,
-      pure <$> C.char '-',
-      pure <$> C.digitChar,
-      pure <$> C.digitChar,
-      pure <$> C.char 'T',
+      try (sequenceA [
+        C.digitChar,
+        C.digitChar,
+        C.digitChar,
+        C.digitChar,
+        C.char '-',
+        C.digitChar,
+        C.digitChar,
+        C.char '-',
+        C.digitChar,
+        C.digitChar,
+        C.char 'T'
+      ]),
       pure <$> C.digitChar,
       pure <$> C.digitChar,
       pure <$> C.char ':',
@@ -178,6 +175,10 @@ rfc3339DateParser = do
       pure <$> C.char ':',
       pure <$> C.digitChar,
       pure <$> C.digitChar,
+      foldMap join <$> optional (sequenceA [
+        pure <$> C.char '.',
+        some C.digitChar
+      ]),
       choice [
         pure <$> C.char 'Z',
         sequenceA [
@@ -195,13 +196,15 @@ rfc3339DateParser = do
 predicateParser' :: Parser (Term' 'NotWithinSet pof 'WithSlices)
                  -> Parser (Predicate' pof 'WithSlices)
 predicateParser' parseTerm = l $ do
-  x      <- C.letterChar
-  xs     <- takeWhileP (Just "_, :, or any alphanumeric char") (\c -> c == '_' || c == ':' || isAlphaNum c)
-  _      <- l $ C.char '('
+  name <- try . (<?> "predicate name") $ do
+    x      <- C.letterChar
+    xs     <- takeWhileP (Just "_, :, or any alphanumeric char") (\c -> c == '_' || c == ':' || isAlphaNum c)
+    _      <- l $ C.char '('
+    pure $ T.cons x xs
   terms  <- sepBy1 parseTerm (l $ C.char ',')
   _      <- l $ C.char ')'
   pure Predicate {
-    name = T.cons x xs,
+    name,
     terms
   }
 
@@ -221,9 +224,9 @@ expressionParser =
 
 table :: [[Expr.Operator Parser (Expression' 'WithSlices)]]
 table =
-  let infixL name op = Expr.InfixL (EBinary op <$ l (chunk name))
-      infixN name op = Expr.InfixN (EBinary op <$ l (chunk name))
-      prefix name op = Expr.Prefix (EUnary op <$  l (chunk name))
+  let infixL name op = Expr.InfixL (EBinary op <$ l (chunk name) <?> "infix operator")
+      infixN name op = Expr.InfixN (EBinary op <$ l (chunk name) <?> "infix operator")
+      prefix name op = Expr.Prefix (EUnary op <$  l (chunk name) <?> "prefix operator")
    in [ [ prefix "!" Negate]
       , [ infixL  "*" Mul
         , infixL  "/" Div
@@ -283,15 +286,14 @@ unaryParens = do
 
 exprTerm :: Parser (Expression' 'WithSlices)
 exprTerm = choice
-  [ unaryParens
+  [ unaryParens <?> "parens"
   , EValue <$> predicateTermParser
   ]
 
 ruleParser :: Parser (Rule' 'Repr 'WithSlices)
 ruleParser = do
   begin <- getOffset
-  rhead <- l predicateParser
-  _ <- l $ chunk "<-"
+  rhead <- try $ l predicateParser <* l (chunk "<-")
   (body, expressions, scope) <- ruleBodyParser
   end <- getOffset
   case makeRule rhead body expressions scope of
@@ -301,8 +303,8 @@ ruleParser = do
 ruleBodyParser :: Parser ([Predicate' 'InPredicate 'WithSlices], [Expression' 'WithSlices], Set.Set (RuleScope' 'Repr 'WithSlices))
 ruleBodyParser = do
   let predicateOrExprParser =
-            Right <$> expressionParser
-        <|> Left <$>  predicateParser
+            Left  <$> (predicateParser <?> "predicate")
+        <|> Right <$> (expressionParser <?> "expression")
   elems <- l $ sepBy1 (l predicateOrExprParser)
                       (l $ C.char ',')
   scope <- option Set.empty scopeParser
@@ -310,13 +312,13 @@ ruleBodyParser = do
   pure (predicates, expressions, scope)
 
 scopeParser :: Parser (Set.Set (RuleScope' 'Repr 'WithSlices))
-scopeParser = do
+scopeParser = (<?> "scope annotation") $ do
   _ <- l $ chunk "trusting "
   let elemParser = choice [ OnlyAuthority <$  chunk "authority"
                           , Previous      <$  chunk "previous"
                           , BlockId       <$>
-                             choice [ PkSlice <$> haskellVariableParser
-                                    , Pk <$> publicKeyParser
+                             choice [ PkSlice <$> haskellVariableParser <?> "parameter (eg. ${paramName})"
+                                    , Pk <$> publicKeyParser <?> "public key (eg. ed25519/00ff99)"
                                     ]
                           ]
    in Set.fromList <$> sepBy1 (l elemParser)
@@ -332,6 +334,7 @@ queryItemParser = do
 queryParser :: Parser [QueryItem' 'Repr 'WithSlices]
 queryParser =
    sepBy1 queryItemParser (l $ C.string' "or" <* C.space)
+     <?> "datalog query"
 
 checkParser :: Parser (Check' 'Repr 'WithSlices)
 checkParser = do
@@ -350,26 +353,26 @@ policyParser = do
 
 blockElementParser :: Parser (BlockElement' 'Repr 'WithSlices)
 blockElementParser = choice
-  [ BlockRule    <$> try (ruleParser <* C.char ';')
-  , BlockFact    <$> try (factParser <* C.char ';')
-  , BlockCheck   <$> try (checkParser <* C.char ';')
+  [ BlockCheck   <$> checkParser <* C.char ';' <?> "check"
+  , BlockRule    <$> ruleParser <* C.char ';' <?> "rule"
+  , BlockFact    <$> factParser <* C.char ';' <?> "fact"
   ]
 
 authorizerElementParser :: Parser (AuthorizerElement' 'Repr 'WithSlices)
 authorizerElementParser = choice
-  [ AuthorizerPolicy  <$> try (policyParser <* C.char ';')
+  [ AuthorizerPolicy  <$> policyParser <* C.char ';' <?> "policy"
   , BlockElement    <$> blockElementParser
   ]
 
 blockParser :: Parser (Block' 'Repr 'WithSlices)
 blockParser = do
-  bScope <- option Set.empty $ l (scopeParser <* C.char ';')
+  bScope <- option Set.empty $ l (scopeParser <* C.char ';' <?> "scope annotation")
   elems <- many $ l blockElementParser
   pure $ (foldMap elementToBlock elems) { bScope = bScope }
 
 authorizerParser :: Parser (Authorizer' 'Repr 'WithSlices)
 authorizerParser = do
-  bScope <- option Set.empty $ l (scopeParser <* C.char ';')
+  bScope <- option Set.empty $ l (scopeParser <* C.char ';' <?> "scope annotation")
   elems <- many $ l authorizerElementParser
   let addScope a = a { vBlock = (vBlock a) { bScope = bScope } }
   pure $ addScope $ foldMap elementToAuthorizer elems
