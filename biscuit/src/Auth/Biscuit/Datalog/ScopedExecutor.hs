@@ -120,7 +120,7 @@ mkRevocationIdFacts authority blocks =
   let allIds :: [(Int, ByteString)]
       allIds = zip [0..] $ snd' <$> authority : blocks
       snd' (_,b,_) = b
-      mkFact (index, rid) = [fact|revocation_id(${index}, ${rid})|]
+      mkFact (index, rid) = [fact|revocation_id({index}, {rid})|]
    in Set.fromList $ mkFact <$> allIds
 
 data ComputeState

@@ -208,7 +208,7 @@ data Term' (inSet :: IsWithinSet) (pof :: PredicateOrFact) (ctx :: DatalogContex
   | LBool Bool
   -- ^ A bool literal (eg. @true@)
   | Antiquote (SliceType ctx)
-  -- ^ A slice (eg. @${name}@)
+  -- ^ A slice (eg. @{name}@)
   | TermSet (SetType inSet ctx)
   -- ^ A set (eg. @[true, false]@)
 
@@ -765,9 +765,9 @@ renderExpression =
 -- to build composite blocks (eg if you need to generate a list of facts):
 --
 -- > -- build a block from multiple variables v1, v2, v3
--- > [block| value(${v1}); |] <>
--- > [block| value(${v2}); |] <>
--- > [block| value(${v3}); |]
+-- > [block| value({v1}); |] <>
+-- > [block| value({v2}); |] <>
+-- > [block| value({v3}); |]
 type Block = Block' 'Repr 'Representation
 type EvalBlock = Block' 'Eval 'Representation
 

@@ -95,7 +95,7 @@ variableParser =
 
 haskellVariableParser :: Parser Text
 haskellVariableParser = l $ do
-  _ <- chunk "${"
+  _ <- chunk "{"
   leadingUS <- optional $ C.char '_'
   x <- if isJust leadingUS then C.letterChar else C.lowerChar
   xs <- takeWhileP (Just "_, ', or any alphanumeric char") (\c -> c == '_' || c == '\'' || isAlphaNum c)
@@ -121,7 +121,7 @@ termParser :: Parser (VariableType inSet pof)
            -> Parser (SetType inSet 'WithSlices)
            -> Parser (Term' inSet pof 'WithSlices)
 termParser parseVar parseSet = l $ choice
-  [ Antiquote . Slice <$> haskellVariableParser <?> "parameter (eg. ${paramName})"
+  [ Antiquote . Slice <$> haskellVariableParser <?> "parameter (eg. {paramName})"
   , Variable <$> parseVar <?> "datalog variable (eg. $variable)"
   , TermSet <$> parseSet <?> "set (eg. [1,2,3])"
   , LBytes <$> (chunk "hex:" *> hexParser) <?> "hex-encoded bytestring (eg. hex:00ff99)"
@@ -317,7 +317,7 @@ scopeParser = (<?> "scope annotation") $ do
   let elemParser = choice [ OnlyAuthority <$  chunk "authority"
                           , Previous      <$  chunk "previous"
                           , BlockId       <$>
-                             choice [ PkSlice <$> haskellVariableParser <?> "parameter (eg. ${paramName})"
+                             choice [ PkSlice <$> haskellVariableParser <?> "parameter (eg. {paramName})"
                                     , Pk <$> publicKeyParser <?> "public key (eg. ed25519/00ff99)"
                                     ]
                           ]
@@ -399,7 +399,7 @@ compileParser p build =
   either fail build . run p . T.pack
 
 -- | Quasiquoter for a rule expression. You can reference haskell variables
--- like this: @${variableName}@.
+-- like this: @{variableName}@.
 --
 -- You most likely want to directly use 'block' or 'authorizer' instead.
 rule :: QuasiQuoter
@@ -411,7 +411,7 @@ rule = QuasiQuoter
   }
 
 -- | Quasiquoter for a predicate expression. You can reference haskell variables
--- like this: @${variableName}@.
+-- like this: @{variableName}@.
 --
 -- You most likely want to directly use 'block' or 'authorizer' instead.
 predicate :: QuasiQuoter
@@ -423,7 +423,7 @@ predicate = QuasiQuoter
   }
 
 -- | Quasiquoter for a fact expression. You can reference haskell variables
--- like this: @${variableName}@.
+-- like this: @{variableName}@.
 --
 -- You most likely want to directly use 'block' or 'authorizer' instead.
 fact :: QuasiQuoter
@@ -435,7 +435,7 @@ fact = QuasiQuoter
   }
 
 -- | Quasiquoter for a check expression. You can reference haskell variables
--- like this: @${variableName}@.
+-- like this: @{variableName}@.
 --
 -- You most likely want to directly use 'block' or 'authorizer' instead.
 check :: QuasiQuoter
@@ -453,8 +453,8 @@ check = QuasiQuoter
 --
 -- > let fileName = "data.pdf"
 -- >  in [block|
--- >       // datalog can reference haskell variables with ${variableName}
--- >       resource(${fileName});
+-- >       // datalog can reference haskell variables with {variableName}
+-- >       resource({fileName});
 -- >       rule($variable) <- fact($value), other_fact($value);
 -- >       check if operation("read");
 -- >     |]
@@ -474,8 +474,8 @@ block = QuasiQuoter
 -- > do
 -- >   now <- getCurrentTime
 -- >   pure [authorizer|
--- >          // datalog can reference haskell variables with ${variableName}
--- >          current_time(${now});
+-- >          // datalog can reference haskell variables with {variableName}
+-- >          current_time({now});
 -- >          // authorizers can contain facts, rules and checks like blocks, but
 -- >          // also declare policies. While every check has to pass for a biscuit to
 -- >          // be valid, policies are tried in order. The first one to match decides

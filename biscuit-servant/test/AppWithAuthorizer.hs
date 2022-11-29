@@ -55,7 +55,7 @@ server :: Server API
 server b =
   let nowFact = do
         now <- liftIO getCurrentTime
-        pure [authorizer|time(${now});|]
+        pure [authorizer|time({now});|]
       handleAuth :: WithAuthorizer Handler x -> Handler x
       handleAuth =
           handleBiscuit b
@@ -69,7 +69,7 @@ handler1 :: H Int
 handler1 = withAuthorizer [authorizer|allow if right("one");|] $ pure 1
 
 handler2 :: Int -> H Int
-handler2 v = withAuthorizer [authorizer|allow if right("two", ${v});|] $ pure 2
+handler2 v = withAuthorizer [authorizer|allow if right("two", {v});|] $ pure 2
 
 handler3 :: H Int
 handler3 = withAuthorizer [authorizer|deny if true;|] $ pure 3
