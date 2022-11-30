@@ -11,6 +11,11 @@ import           Data.Text                           (Text, unpack)
 import           Test.Tasty
 import           Test.Tasty.HUnit
 
+import           Auth.Biscuit                        (addBlock, addSignedBlock,
+                                                      authorizeBiscuit,
+                                                      mkBiscuit, newSecret,
+                                                      queryAuthorizerFacts,
+                                                      queryRawBiscuitFacts)
 import           Auth.Biscuit.Crypto
 import           Auth.Biscuit.Datalog.AST
 import           Auth.Biscuit.Datalog.Executor       (ExecutionError (..),
@@ -33,7 +38,8 @@ specs = testGroup "Block-scoped Datalog Evaluation"
   , maxFactsCountWorks
   , allChecksAreCollected
   , revocationIdsAreInjected
-  , factsAreQueried
+  , authorizerFactsAreQueried
+  , biscuitFactsAreQueried
   ]
 
 authorizerOnlySeesAuthority :: TestTree
@@ -252,14 +258,75 @@ revocationIdsAreInjected = testCase "ScopedExecutions injects revocation ids" $ 
        |]
   runAuthorizerNoTimeout defaultLimits (authority, "a", Nothing) [(block1, "b", Nothing), (block2, "c", Nothing)] verif @?= Left (ResultError $ NoPoliciesMatched [])
 
-factsAreQueried :: TestTree
-factsAreQueried = testCase "AuthorizationSuccess can be queried" $ do
-  let authority = [block|user(1234);|]
-      block1 = [block|user("tampered value");|]
-      verif = [authorizer|allow if true;|]
-      result = runAuthorizerNoTimeout defaultLimits (authority, "a", Nothing) [(block1, "b", Nothing)] verif
-      getUser s = queryAuthorizerFacts s [query|user($user)|]
-      expected = Set.singleton $ Map.fromList
-        [ ("user", LInteger 1234)
-        ]
-  getUser <$> result @?= Right expected
+authorizerFactsAreQueried :: TestTree
+authorizerFactsAreQueried = testGroup "AuthorizedBiscuit can be queried"
+  [ testCase "Attenuation blocks are ignored" $ do
+      (p,s) <- (toPublic &&& id) <$> newSecret
+      b <- mkBiscuit s [block|user(1234);|]
+      b1 <- addBlock [block|user("tampered value");|] b
+      result <- authorizeBiscuit b1 [authorizer|allow if true;|]
+      let getUser s = queryAuthorizerFacts s [query|user($user)|]
+          expected = Set.singleton $ Map.fromList
+            [ ("user", LInteger 1234)
+            ]
+      getUser <$> result @?= Right expected
+  , testCase "Attenuation blocks can be accessed if asked nicely" $ do
+      (p,s) <- (toPublic &&& id) <$> newSecret
+      b <- mkBiscuit s [block|user(1234);|]
+      b1 <- addBlock [block|user("tampered value");|] b
+      result <- authorizeBiscuit b1 [authorizer|allow if true;|]
+      let getUser s = queryAuthorizerFacts s [query|user($user) trusting previous|]
+          expected = Set.fromList
+            [ Map.fromList [("user", LInteger 1234)]
+            , Map.fromList [("user", LString "tampered value")]
+            ]
+      getUser <$> result @?= Right expected
+  , testCase "Signed blocks can be accessed if asked nicely" $ do
+      (p,s) <- (toPublic &&& id) <$> newSecret
+      (p1,s1) <- (toPublic &&& id) <$> newSecret
+      b <- mkBiscuit s [block|user(1234);|]
+      b1 <- addBlock [block|user("tampered value");|] b
+      b2 <- addSignedBlock s1 [block|user("from signed");|] b1
+      result <- authorizeBiscuit b2 [authorizer|allow if true;|]
+      let getUser s = queryAuthorizerFacts s [query|user($user) trusting authority, {p1}|]
+          expected = Set.fromList
+            [ Map.fromList [("user", LInteger 1234)]
+            , Map.fromList [("user", LString "from signed")]
+            ]
+      getUser <$> result @?= Right expected
+  ]
+
+biscuitFactsAreQueried :: TestTree
+biscuitFactsAreQueried = testGroup "Biscuit can be queried"
+  [ testCase "Attenuation blocks are ignored" $ do
+      (p,s) <- (toPublic &&& id) <$> newSecret
+      b <- mkBiscuit s [block|user(1234);|]
+      b1 <- addBlock [block|user("tampered value");|] b
+      let user = queryRawBiscuitFacts b1 [query|user($user)|]
+          expected = Set.singleton $ Map.fromList
+            [ ("user", LInteger 1234)
+            ]
+      user @?= expected
+  , testCase "Attenuation blocks can be accessed if asked nicely" $ do
+      (p,s) <- (toPublic &&& id) <$> newSecret
+      b <- mkBiscuit s [block|user(1234);|]
+      b1 <- addBlock [block|user("tampered value");|] b
+      let user = queryRawBiscuitFacts b1 [query|user($user) trusting previous|]
+          expected = Set.fromList
+            [ Map.fromList [("user", LInteger 1234)]
+            , Map.fromList [("user", LString "tampered value")]
+            ]
+      user @?= expected
+  , testCase "Signed blocks can be accessed if asked nicely" $ do
+      (p,s) <- (toPublic &&& id) <$> newSecret
+      (p1,s1) <- (toPublic &&& id) <$> newSecret
+      b <- mkBiscuit s [block|user(1234);|]
+      b1 <- addBlock [block|user("tampered value");|] b
+      b2 <- addSignedBlock s1 [block|user("from signed");|] b1
+      let user = queryRawBiscuitFacts b2 [query|user($user) trusting authority, {p1}|]
+          expected = Set.fromList
+            [ Map.fromList [("user", LInteger 1234)]
+            , Map.fromList [("user", LString "from signed")]
+            ]
+      user @?= expected
+  ]

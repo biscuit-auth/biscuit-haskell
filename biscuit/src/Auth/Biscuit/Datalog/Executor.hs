@@ -158,13 +158,17 @@ keepAuthorized (FactGroup facts) authorizedOrigins =
   let isAuthorized k _ = k `Set.isSubsetOf` authorizedOrigins
    in FactGroup $ Map.filterWithKey isAuthorized facts
 
-keepAuthorized' :: Natural -> FactGroup -> Set EvalRuleScope -> Natural -> FactGroup
-keepAuthorized' blockCount factGroup trustedBlocks currentBlockId =
+keepAuthorized' :: Bool -> Natural -> FactGroup -> Set EvalRuleScope -> Natural -> FactGroup
+keepAuthorized' allowPreviousInAuthorizer blockCount factGroup trustedBlocks currentBlockId =
   let scope = if null trustedBlocks then Set.singleton OnlyAuthority
                                     else trustedBlocks
       toBlockIds = \case
         OnlyAuthority    -> Set.singleton 0
-        Previous         -> Set.fromList [0..currentBlockId]
+        Previous         -> if allowPreviousInAuthorizer || currentBlockId < blockCount
+                            then Set.fromList [0..currentBlockId]
+                            else mempty -- `Previous` is forbidden in the authorizer
+                                        -- except when querying the authorizer contents
+                                        -- after authorization
         BlockId (idx, _) -> idx
       allBlockIds = foldMap toBlockIds scope
    in keepAuthorized factGroup $ Set.insert currentBlockId $ Set.insert blockCount allBlockIds
@@ -202,7 +206,7 @@ checkPolicy l blockCount facts (pType, query) =
 isQueryItemSatisfied :: Limits -> Natural -> Natural -> FactGroup -> QueryItem' 'Eval 'Representation -> Maybe (Set Bindings)
 isQueryItemSatisfied l blockCount blockId allFacts QueryItem{qBody, qExpressions, qScope} =
   let removeScope = Set.map snd
-      facts = toScopedFacts $ keepAuthorized' blockCount allFacts qScope blockId
+      facts = toScopedFacts $ keepAuthorized' False blockCount allFacts qScope blockId
       bindings = removeScope $ getBindingsForRuleBody l facts qBody qExpressions
    in if Set.size bindings > 0
       then Just bindings
@@ -215,7 +219,7 @@ isQueryItemSatisfied l blockCount blockId allFacts QueryItem{qBody, qExpressions
 isQueryItemSatisfiedForAllMatches :: Limits -> Natural -> Natural -> FactGroup -> QueryItem' 'Eval 'Representation -> Maybe (Set Bindings)
 isQueryItemSatisfiedForAllMatches l blockCount blockId allFacts QueryItem{qBody, qExpressions, qScope} =
   let removeScope = Set.map snd
-      facts = toScopedFacts $ keepAuthorized' blockCount allFacts qScope blockId
+      facts = toScopedFacts $ keepAuthorized' False blockCount allFacts qScope blockId
       allVariables = extractVariables qBody
       -- bindings that match facts
       candidateBindings = getCandidateBindings facts qBody
