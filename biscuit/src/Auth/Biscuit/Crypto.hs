@@ -80,6 +80,7 @@ readEd25519SecretKey bs = SecretKey <$> maybeCryptoError (Ed25519.secretKey bs)
 readEd25519Signature :: Signature -> Maybe Ed25519.Signature
 readEd25519Signature (Signature bs) = maybeCryptoError (Ed25519.signature bs)
 
+-- | Generate a public key from a secret key
 toPublic :: SecretKey -> PublicKey
 toPublic (SecretKey sk) = PublicKey $ Ed25519.toPublic sk
 

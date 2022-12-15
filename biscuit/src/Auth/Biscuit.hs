@@ -59,6 +59,7 @@ module Auth.Biscuit
   -- $attenuatingBiscuits
   , addBlock
   -- ** Third-party blocks
+  -- $thirdPartyBlocks
   , addSignedBlock
   , mkThirdPartyBlockReq
   , mkThirdPartyBlockReqB64
@@ -66,6 +67,7 @@ module Auth.Biscuit
   , mkThirdPartyBlockB64
   , applyThirdPartyBlock
   , applyThirdPartyBlockB64
+  -- ** Sealing biscuits
   -- $sealedBiscuits
   , seal
   , fromOpen
@@ -86,18 +88,18 @@ module Auth.Biscuit
   , AuthorizedBiscuit (..)
   , AuthorizationSuccess (..)
   , MatchedQuery (..)
-  , query
-  , queryAuthorizerFacts
-  , queryRawBiscuitFacts
   , getBindings
-  , getVariableValues
-  , getSingleVariableValue
   , ToTerm (..)
   , FromValue (..)
   , Term
   , Term' (..)
 
   -- * Retrieving information from a biscuit
+  , queryAuthorizerFacts
+  , queryRawBiscuitFacts
+  , getVariableValues
+  , getSingleVariableValue
+  , query
   , getRevocationIds
   , getVerifiedBiscuitPublicKey
   ) where
@@ -162,7 +164,7 @@ import qualified Data.Text                           as Text
 
 -- $biscuitOverview
 --
--- <https://github.com/CleverCloud/biscuit/blob/master/SUMMARY.md Biscuit> is a /bearer token/,
+-- <https://github.com/biscuit-auth/biscuit/blob/master/SUMMARY.md Biscuit> is a /bearer token/,
 -- allowing /offline attenuation/ (meaning that anyone having a token can craft a new, more
 -- restricted token),
 -- and /'PublicKey' verification/. Token rights and attenuation are expressed using a logic
@@ -221,7 +223,7 @@ import qualified Data.Text                           as Text
 -- >     Left e -> print e $> False
 -- >     Right biscuit -> do
 -- >       now <- getCurrentTime
--- >       let verif = [authorizer|
+-- >       let authorizer' = [authorizer|
 -- >                // the datalog snippets can reference haskell variables
 -- >                // with the {variableName} syntax
 -- >                time({now});
@@ -230,16 +232,14 @@ import qualified Data.Text                           as Text
 -- >                // will decide if the token is valid or not. If no policies
 -- >                // match, the token will fail validation
 -- >                allow if resource("file1");
--- >                // catch-all policy if the previous ones did not match
--- >                deny if true;
 -- >             |]
--- >       result <- authorizeBiscuit biscuit [authorizer|current_time()|]
+-- >       result <- authorizeBiscuit biscuit authorizer'
 -- >       case result of
 -- >         Left e -> print e $> False
 -- >         Right _ -> pure True
 
--- | Build a block containing an explicit context value.
--- The context of a block can't be parsed from datalog currently,
+-- | Build a block containing an explicit freeform context value.
+-- The context of a block can't be parsed from datalog,
 -- so you'll need an explicit call to `blockContext` to add it
 --
 -- >     [block|check if time($t), $t < 2021-01-01;|]
@@ -353,15 +353,23 @@ serialize = serializeBiscuit
 serializeB64 :: BiscuitProof p => Biscuit p Verified -> ByteString
 serializeB64 = B64.encodeBase64' . serialize
 
+-- | Generate a base64-encoded third-party block request. It can be used in
+-- conjunction with 'mkThirdPartyBlockB64' to generate a base64-encoded
+-- third-party block, which can be then appended to a token with
+-- 'applyThirdPartyBlockB64'.
 mkThirdPartyBlockReqB64 :: Biscuit Open c -> ByteString
 mkThirdPartyBlockReqB64 = B64.encodeBase64' . mkThirdPartyBlockReq
 
+-- | Given a base64-encoded third-party block request, generate a base64-encoded
+-- third-party block, which can be then appended to a token with
+-- 'applyThirdPartyBlockB64'.
 mkThirdPartyBlockB64 :: SecretKey -> ByteString -> Block -> Either String ByteString
 mkThirdPartyBlockB64 sk reqB64 b = do
   req <- first unpack $ B64.decodeBase64 reqB64
   contents <- mkThirdPartyBlock sk req b
   pure $ B64.encodeBase64' contents
 
+-- | Given a base64-encoded third-party block, append it to a token.
 applyThirdPartyBlockB64 :: Biscuit Open check -> ByteString -> Either String (IO (Biscuit Open check))
 applyThirdPartyBlockB64 b contentsB64 = do
   contents <- first unpack $ B64.decodeBase64 contentsB64
@@ -383,6 +391,34 @@ applyThirdPartyBlockB64 b contentsB64 = do
 -- By default, biscuits can be /attenuated/. It means that any party that holds a biscuit can
 -- craft a new biscuit with fewer rights. A common example is taking a long-lived biscuit and
 -- adding a short TTL right before sending it over the wire.
+
+-- $thirdPartyBlocks
+--
+-- Regular blocks can be added by anyone and as such can only /attenuate/ a token: the facts
+-- they carry are not visible outside themselves, only their checks are evaluated.
+--
+-- Third-party blocks lift this limitation by carrying an extra signature, crafted with a
+-- dedicated keypair. This way, the token authorizer (as well as blocks themselves) can
+-- opt-in to trust facts coming from third-party blocks signed with specific keypairs.
+--
+-- For instance, adding `check if group("admin") trusting {publicKey};` to a token will
+-- make it usable only if it carries a third party-block signed by the corresponding keypair,
+-- and carrying a `group("admin")` fact.
+--
+-- Since it is not desirable to share the token with the external entity providing the third-party
+-- block, a request mechanism is available:
+--
+-- - the token holder generates a /third-party block request/ from the token (it contains technical
+--   information needed to generate a third-party block) with 'mkThirdPartyBlockReq';
+-- - the token holder forwards this request to the external entity;
+-- - the external entity uses this request, a 'Block' value, and a 'SecretKey' to generate a third-party
+--   block, with 'mkThirdPartyBlock';
+-- - the external entity sends this block back to the token holder;
+-- - the token holder can now add the block to the token with 'applyThirdPartyBlock'.
+--
+-- In some cases, the party holding the token is also the one who's adding the third-party block. It
+-- is then possible to directly use 'addSignedBlock' to append a third-party block to the token without
+-- having to go through generating a third-party block request.
 
 -- $sealedBiscuits
 --
