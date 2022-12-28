@@ -384,6 +384,13 @@ evalBinary _ Equal (LBytes t) (LBytes t')     = pure $ LBool (t == t')
 evalBinary _ Equal (LBool t) (LBool t')       = pure $ LBool (t == t')
 evalBinary _ Equal (TermSet t) (TermSet t')   = pure $ LBool (t == t')
 evalBinary _ Equal _ _                        = Left "Equality mismatch"
+evalBinary _ NotEqual (LInteger i) (LInteger i') = pure $ LBool (i /= i')
+evalBinary _ NotEqual (LString t) (LString t')   = pure $ LBool (t /= t')
+evalBinary _ NotEqual (LDate t) (LDate t')       = pure $ LBool (t /= t')
+evalBinary _ NotEqual (LBytes t) (LBytes t')     = pure $ LBool (t /= t')
+evalBinary _ NotEqual (LBool t) (LBool t')       = pure $ LBool (t /= t')
+evalBinary _ NotEqual (TermSet t) (TermSet t')   = pure $ LBool (t /= t')
+evalBinary _ NotEqual _ _                        = Left "Inequity mismatch"
 evalBinary _ LessThan (LInteger i) (LInteger i') = pure $ LBool (i < i')
 evalBinary _ LessThan (LDate t) (LDate t')       = pure $ LBool (t < t')
 evalBinary _ LessThan _ _                        = Left "< mismatch"

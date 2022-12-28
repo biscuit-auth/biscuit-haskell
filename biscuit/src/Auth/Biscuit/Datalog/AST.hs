@@ -595,6 +595,7 @@ expressionHasNoV4Operators = \case
   EBinary BitwiseAnd _ _ -> False
   EBinary BitwiseOr _ _  -> False
   EBinary BitwiseXor _ _ -> False
+  EBinary NotEqual   _ _ -> False
   EBinary _ l r -> expressionHasNoV4Operators l && expressionHasNoV4Operators r
   _ -> True
 
@@ -677,6 +678,7 @@ data Binary =
   | BitwiseAnd
   | BitwiseOr
   | BitwiseXor
+  | NotEqual
   deriving (Eq, Ord, Show, Lift)
 
 data Expression' (ctx :: DatalogContext) =
@@ -758,6 +760,7 @@ renderExpression =
         EBinary BitwiseAnd e e'     -> rOp "&" e e'
         EBinary BitwiseOr e e'      -> rOp "|" e e'
         EBinary BitwiseXor e e'     -> rOp "^" e e'
+        EBinary NotEqual e e'       -> rOp "!=" e e'
 
 -- | A biscuit block, containing facts, rules and checks.
 --

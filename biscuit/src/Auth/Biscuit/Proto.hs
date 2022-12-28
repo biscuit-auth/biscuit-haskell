@@ -208,6 +208,7 @@ data BinaryKind =
   | BitwiseAnd
   | BitwiseOr
   | BitwiseXor
+  | NotEqual
   deriving stock (Show, Enum, Bounded)
 
 newtype OpBinary = OpBinary
