@@ -210,6 +210,12 @@ constraints = testGroup "Parse expressions"
                  (EValue (Variable "0"))
                  (EValue (LInteger 1))
                  )
+  , testCase "int comparison (NEQ)" $
+      parseExpression "$0 != 1" @?=
+        Right (EBinary NotEqual
+                 (EValue (Variable "0"))
+                 (EValue (LInteger 1))
+                 )
   , testCase "negative int comparison (GTE)" $
       parseExpression "$0 >= -1234" @?=
         Right (EBinary GreaterOrEqual
@@ -219,6 +225,12 @@ constraints = testGroup "Parse expressions"
   , testCase "string comparison" $
       parseExpression "$0 == \"abc\"" @?=
         Right (EBinary Equal
+                 (EValue (Variable "0"))
+                 (EValue (LString "abc"))
+                 )
+  , testCase "string comparison (NEQ)" $
+      parseExpression "$0 != \"abc\"" @?=
+        Right (EBinary NotEqual
                  (EValue (Variable "0"))
                  (EValue (LString "abc"))
                  )

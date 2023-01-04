@@ -246,6 +246,7 @@ table =
         , infixN  "<"  LessThan
         , infixN  ">"  GreaterThan
         , infixN  "==" Equal
+        , infixN  "!=" NotEqual
         ]
       , [ infixL "&&" And ]
       , [ infixL "||" Or ]
