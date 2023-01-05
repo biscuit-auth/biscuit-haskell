@@ -115,6 +115,7 @@ import           Data.ByteString            (ByteString)
 import           Data.ByteString.Base16     as Hex
 import           Data.Foldable              (fold, toList)
 import           Data.Function              (on)
+import           Data.Int                   (Int64)
 import           Data.List.NonEmpty         (NonEmpty, nonEmpty)
 import           Data.Map.Strict            (Map)
 import qualified Data.Map.Strict            as Map
@@ -197,7 +198,7 @@ type family BlockIdType (evalCtx :: EvaluationContext) (ctx :: DatalogContext) w
 data Term' (inSet :: IsWithinSet) (pof :: PredicateOrFact) (ctx :: DatalogContext) =
     Variable (VariableType inSet pof)
   -- ^ A variable (eg. @$0@)
-  | LInteger Int
+  | LInteger Int64
   -- ^ An integer literal (eg. @42@)
   | LString Text
   -- ^ A string literal (eg. @"file1"@)
@@ -267,10 +268,10 @@ class FromValue t where
   fromValue :: Value -> Maybe t
 
 instance ToTerm Int inSet pof where
-  toTerm = LInteger
+  toTerm = LInteger . fromIntegral
 
 instance FromValue Int where
-  fromValue (LInteger v) = Just v
+  fromValue (LInteger v) = Just $ fromIntegral v
   fromValue _            = Nothing
 
 instance ToTerm Integer inSet pof where

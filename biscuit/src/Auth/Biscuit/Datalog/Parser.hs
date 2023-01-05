@@ -23,6 +23,7 @@ import           Data.ByteString.Base16         as Hex
 import qualified Data.ByteString.Char8          as C8
 import           Data.Char
 import           Data.Either                    (partitionEithers)
+import           Data.Int                       (Int64)
 import           Data.List.NonEmpty             (NonEmpty)
 import qualified Data.List.NonEmpty             as NE
 import           Data.Map.Strict                (Map)
@@ -128,13 +129,21 @@ termParser parseVar parseSet = l $ choice
   , TermSet <$> parseSet <?> "set (eg. [1,2,3])"
   , LBytes <$> (chunk "hex:" *> hexParser) <?> "hex-encoded bytestring (eg. hex:00ff99)"
   , LDate <$> rfc3339DateParser <?> "RFC3339-formatted timestamp (eg. 2022-11-29T00:00:00Z)"
-  , LInteger <$> L.signed C.space L.decimal <?> "(signed) integer"
+  , LInteger <$> intParser <?> "(signed) integer"
   , LString . T.pack <$> (C.char '"' *> manyTill L.charLiteral (C.char '"')) <?> "string literal"
   , LBool <$> choice [ True <$ chunk "true"
                      , False <$ chunk "false"
                      ]
           <?> "boolean value (eg. true or false)"
   ]
+
+intParser :: Parser Int64
+intParser = do
+  integer :: Integer <- L.signed C.space L.decimal <?> "(signed) integer"
+  if integer < fromIntegral (minBound @Int64)
+     || integer > fromIntegral (maxBound @Int64)
+  then fail "integer literals must fit in the int64 range"
+  else pure $ fromIntegral integer
 
 hexParser :: Parser ByteString
 hexParser = do

@@ -178,6 +178,8 @@ exprEvalError = do
   testGroup "Expressions evaluation (expected errors)" $ evalFail <$>
     [ ("1 / 0", "Divide by 0")
     , ("\"toto\".matches(\"to\")", "Regex evaluation is disabled")
+    , ("9223372036854775807 + 1", "integer overflow")
+    , ("-9223372036854775808 - 1", "integer underflow")
     ]
 
 rulesWithConstraints :: TestTree
