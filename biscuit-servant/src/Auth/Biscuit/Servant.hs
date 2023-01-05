@@ -305,8 +305,8 @@ withFallbackAuthorizerM newV h@WithAuthorizer{authorizer_} =
 -- or to query a database), you can use 'withPriorityAuthorizerM' instead.
 withPriorityAuthorizer :: Functor m
                      => Authorizer
-                     -> WithAuthorizer m a
-                     -> WithAuthorizer m a
+                     -> WithAuthorizer' t m a
+                     -> WithAuthorizer' t m a
 withPriorityAuthorizer newV h@WithAuthorizer{authorizer_} =
      h { authorizer_ = (newV <>) <$> authorizer_ }
 
