@@ -536,7 +536,7 @@ checkBiscuit vb = do
 -- (on endpoints), 'withFallbackAuthorizer' and 'withPriorityAuthorizer' (on API sub-trees)
 -- and 'handleBiscuit' (on the whole API).
 checkBiscuitWith :: (MonadIO m, MonadError ServerError m)
-                 => (forall b. ExecutionError -> m b)
+                 => (ExecutionError -> m a)
                  -> Biscuit OpenOrSealed Verified
                  -> Authorizer
                  -> ReaderT (AuthorizedBiscuit OpenOrSealed) m a
@@ -578,7 +578,7 @@ checkBiscuitM vb mv h = do
 -- 'withFallbackAuthorizer' and 'withPriorityAuthorizer' (on API sub-trees) and 'handleBiscuit'
 -- (on the whole API).
 checkBiscuitMWith :: (MonadIO m, MonadError ServerError m)
-                  => (forall b. ExecutionError -> m b)
+                  => (ExecutionError -> m a)
                   -> Biscuit OpenOrSealed Verified
                   -> m Authorizer
                   -> ReaderT (AuthorizedBiscuit OpenOrSealed) m a
@@ -613,7 +613,7 @@ handleBiscuit b WithAuthorizer{authorizer_, handler_} =
 -- For simpler use cases, consider using 'checkBiscuitWith' instead, which works on regular
 -- servant handlers.
 handleBiscuitWith :: (MonadIO m, MonadError ServerError m)
-                  => (forall b. ExecutionError -> m b)
+                  => (ExecutionError -> m a)
                   -> Biscuit OpenOrSealed Verified
                   -> WithAuthorizer m a
                   -> m a
