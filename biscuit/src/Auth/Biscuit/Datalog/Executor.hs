@@ -6,6 +6,7 @@
 {-# LANGUAGE NamedFieldPuns             #-}
 {-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE TupleSections              #-}
+{-# LANGUAGE TypeApplications           #-}
 {-|
   Module      : Auth.Biscuit.Datalog.Executor
   Copyright   : © Clément Delafargue, 2021
@@ -42,6 +43,7 @@ import           Data.Bits                (xor, (.&.), (.|.))
 import qualified Data.ByteString          as ByteString
 import           Data.Foldable            (fold)
 import           Data.Functor.Compose     (Compose (..))
+import           Data.Int                 (Int64)
 import           Data.List.NonEmpty       (NonEmpty)
 import qualified Data.List.NonEmpty       as NE
 import           Data.Map.Strict          (Map, (!?))
@@ -370,9 +372,9 @@ evalUnary :: Unary -> Value -> Either String Value
 evalUnary Parens t = pure t
 evalUnary Negate (LBool b) = pure (LBool $ not b)
 evalUnary Negate _ = Left "Only booleans support negation"
-evalUnary Length (LString t) = pure . LInteger $ Text.length t
-evalUnary Length (LBytes bs) = pure . LInteger $ ByteString.length bs
-evalUnary Length (TermSet s) = pure . LInteger $ Set.size s
+evalUnary Length (LString t) = pure . LInteger . fromIntegral $ Text.length t
+evalUnary Length (LBytes bs) = pure . LInteger . fromIntegral $ ByteString.length bs
+evalUnary Length (TermSet s) = pure . LInteger . fromIntegral $ Set.size s
 evalUnary Length _ = Left "Only strings, bytes and sets support `.length()`"
 
 evalBinary :: Limits -> Binary -> Value -> Value -> Either String Value
@@ -412,15 +414,15 @@ evalBinary Limits{allowRegexes} Regex  (LString t) (LString r) | allowRegexes = 
                                                                | otherwise    = Left "Regex evaluation is disabled"
 evalBinary _ Regex _ _                       = Left "Only strings support `.matches()`"
 -- num operations
-evalBinary _ Add (LInteger i) (LInteger i') = pure $ LInteger (i + i')
+evalBinary _ Add (LInteger i) (LInteger i') = LInteger <$> checkedOp (+) i i'
 evalBinary _ Add (LString t) (LString t') = pure $ LString (t <> t')
 evalBinary _ Add _ _ = Left "Only integers and strings support addition"
-evalBinary _ Sub (LInteger i) (LInteger i') = pure $ LInteger (i - i')
+evalBinary _ Sub (LInteger i) (LInteger i') = LInteger <$> checkedOp (-) i i'
 evalBinary _ Sub _ _ = Left "Only integers support subtraction"
-evalBinary _ Mul (LInteger i) (LInteger i') = pure $ LInteger (i * i')
+evalBinary _ Mul (LInteger i) (LInteger i') = LInteger <$> checkedOp (*) i i'
 evalBinary _ Mul _ _ = Left "Only integers support multiplication"
 evalBinary _ Div (LInteger _) (LInteger 0) = Left "Divide by 0"
-evalBinary _ Div (LInteger i) (LInteger i') = pure $ LInteger (i `div` i')
+evalBinary _ Div (LInteger i) (LInteger i') = LInteger <$> checkedOp div i i'
 evalBinary _ Div _ _ = Left "Only integers support division"
 -- bitwise operations
 evalBinary _ BitwiseAnd (LInteger i) (LInteger i') = pure $ LInteger (i .&. i')
@@ -445,6 +447,17 @@ evalBinary _ Intersection (TermSet t) (TermSet t') = pure $ TermSet (Set.interse
 evalBinary _ Intersection _ _ = Left "Only sets support `.intersection()`"
 evalBinary _ Union (TermSet t) (TermSet t') = pure $ TermSet (Set.union t t')
 evalBinary _ Union _ _ = Left "Only sets support `.union()`"
+
+checkedOp :: (Integer -> Integer -> Integer)
+          -> Int64 -> Int64
+          -> Either String Int64
+checkedOp f a b =
+  let result = f (fromIntegral a) (fromIntegral b)
+   in if result < fromIntegral (minBound @Int64)
+      then Left "integer underflow"
+      else if result > fromIntegral (maxBound @Int64)
+      then Left "integer overflow"
+      else Right (fromIntegral result)
 
 regexMatch :: Text -> Text -> Either String Value
 regexMatch text regexT = do

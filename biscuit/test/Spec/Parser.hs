@@ -89,6 +89,8 @@ termsGroup = testGroup "Parse terms"
   [ testCase "String" $ parseTerm "\"file1 a hello - 123_\"" @?= Right (LString "file1 a hello - 123_")
   , testCase "Positive integer" $ parseTerm "123" @?= Right (LInteger 123)
   , testCase "Negative integer" $ parseTerm "-42" @?= Right (LInteger (-42))
+  , testCase "Positive integer (too large)" $ isLeft (parseTerm "9223372036854775808") @? "Integer literals must fit in the int64 range"
+  , testCase "Negative integer (too small)" $ isLeft (parseTerm "-9223372036854775809") @? "Integer literals must fit in the int64 range"
   , testCase "Date" $ parseTerm "2019-12-02T13:49:53Z" @?=
         Right (LDate $ read "2019-12-02 13:49:53 UTC")
   , testCase "Variable" $ parseTerm "$1" @?= Right (Variable "1")
