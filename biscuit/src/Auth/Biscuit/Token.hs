@@ -45,6 +45,8 @@ module Auth.Biscuit.Token
   , serializeBiscuit
   , authorizeBiscuit
   , authorizeBiscuitWithLimits
+  , authorizeBiscuitNoTimeout
+  , authorizeBiscuitWithLimitsNoTimeout
   , fromOpen
   , fromSealed
   , asOpen
@@ -92,7 +94,8 @@ import           Auth.Biscuit.Datalog.ScopedExecutor (AuthorizationSuccess,
                                                       collectWorld,
                                                       queryAvailableFacts,
                                                       queryGeneratedFacts,
-                                                      runAuthorizerWithLimits)
+                                                      runAuthorizerWithLimits,
+                                                      runAuthorizerNoTimeout)
 import qualified Auth.Biscuit.Proto                  as PB
 import           Auth.Biscuit.ProtoBufAdapter        (blockToPb, pbToBlock,
                                                       pbToProof,
@@ -578,6 +581,24 @@ authorizeBiscuitWithLimits l biscuit@Biscuit{..} authorizer =
           (toBlockWithRevocationId <$> blocks)
           authorizer
 
+authorizeBiscuitWithLimitsNoTimeout :: Limits -> Biscuit proof Verified -> Authorizer -> Either ExecutionError (AuthorizedBiscuit proof)
+authorizeBiscuitWithLimitsNoTimeout l biscuit@Biscuit{..} authorizer =
+  let toBlockWithRevocationId ((_, block), sig, _, eSig) = (block, sigBytes sig, snd <$> eSig)
+      -- the authority block can't be externally signed. If it carries a signature, it won't be
+      -- verified. So we need to make sure there is none, to avoid having facts trusted without
+      -- a proper signature check
+      dropExternalPk (b, rid, _) = (b, rid, Nothing)
+      withBiscuit authorizationSuccess =
+        AuthorizedBiscuit
+          { authorizedBiscuit = biscuit
+          , authorizationSuccess
+          }
+   in withBiscuit <$>
+        runAuthorizerNoTimeout l
+          (dropExternalPk $ toBlockWithRevocationId authority)
+          (toBlockWithRevocationId <$> blocks)
+          authorizer
+
 -- | Given a biscuit with a verified signature and an authorizer (a set of facts, rules, checks
 -- and policies), verify a biscuit:
 --
@@ -593,6 +614,9 @@ authorizeBiscuitWithLimits l biscuit@Biscuit{..} authorizer =
 -- uses a set of defaults defined in 'defaultLimits'.
 authorizeBiscuit :: Biscuit proof Verified -> Authorizer -> IO (Either ExecutionError (AuthorizedBiscuit proof))
 authorizeBiscuit = authorizeBiscuitWithLimits defaultLimits
+
+authorizeBiscuitNoTimeout :: Biscuit proof Verified -> Authorizer -> Either ExecutionError (AuthorizedBiscuit proof)
+authorizeBiscuitNoTimeout = authorizeBiscuitWithLimitsNoTimeout defaultLimits
 
 -- | Retrieve the `PublicKey` which was used to verify the `Biscuit` signatures
 getVerifiedBiscuitPublicKey :: Biscuit a Verified -> PublicKey
