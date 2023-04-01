@@ -584,9 +584,9 @@ authorizeBiscuitWithLimits l biscuit@Biscuit{..} authorizer =
 -- | Generic version of 'authorizeBiscuit' which takes custom 'Limits' and doesn't timeout.
 --
 -- The absence of timeout enables this function to be pure but opens one important vulnerability:
--- an attacker could craft a biscuit with some pathological datalog whose evaluation takes either
--- a very long time or never terminates. So this function should only be used in a context that
--- sets a timeout if run time can be an issue.
+-- an attacker could craft a biscuit with some pathological datalog whose evaluation takes a very
+-- long time. So this function should only be used in a context that sets a timeout if run time
+-- can be an issue.
 authorizeBiscuitWithLimitsNoTimeout :: Limits -> Biscuit proof Verified -> Authorizer -> Either ExecutionError (AuthorizedBiscuit proof)
 authorizeBiscuitWithLimitsNoTimeout l biscuit@Biscuit{..} authorizer =
   let toBlockWithRevocationId ((_, block), sig, _, eSig) = (block, sigBytes sig, snd <$> eSig)
