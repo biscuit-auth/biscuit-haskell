@@ -69,6 +69,7 @@ import           Data.Bifunctor                      (first)
 import           Data.ByteString                     (ByteString)
 import qualified Data.ByteString.Base64.URL          as B64
 import           Data.Foldable                       (fold)
+import           Data.Functor.Identity               (runIdentity)
 import           Data.List.NonEmpty                  (NonEmpty ((:|)))
 import qualified Data.List.NonEmpty                  as NE
 import           Data.Set                            (Set)
@@ -91,11 +92,12 @@ import           Auth.Biscuit.Datalog.AST            (Authorizer, Block, Query,
 import           Auth.Biscuit.Datalog.Executor       (Bindings, ExecutionError,
                                                       Limits, defaultLimits)
 import           Auth.Biscuit.Datalog.ScopedExecutor (AuthorizationSuccess,
+                                                      BlockWithRevocationId,
                                                       collectWorld,
                                                       queryAvailableFacts,
                                                       queryGeneratedFacts,
                                                       runAuthorizerWithLimits,
-                                                      runAuthorizerNoTimeout)
+                                                      runAuthorizerWithLimitsPure)
 import qualified Auth.Biscuit.Proto                  as PB
 import           Auth.Biscuit.ProtoBufAdapter        (blockToPb, pbToBlock,
                                                       pbToProof,
@@ -562,9 +564,11 @@ getRevocationIds Biscuit{authority, blocks} =
       getRevocationId (_, sig, _, _) = sigBytes sig
    in getRevocationId <$> allBlocks
 
--- | Generic version of 'authorizeBiscuitWithLimits' which takes custom 'Limits'.
-authorizeBiscuitWithLimits :: Limits -> Biscuit proof Verified -> Authorizer -> IO (Either ExecutionError (AuthorizedBiscuit proof))
-authorizeBiscuitWithLimits l biscuit@Biscuit{..} authorizer =
+-- | Generic version of 'authorizeBiscuit' which takes custom 'Limits' and a runner function
+-- to run actual authorization. It is polymorphic on the functor returned by the runner.
+authorizeBiscuitWithRunner :: Functor f => (Limits -> BlockWithRevocationId -> [BlockWithRevocationId] -> Authorizer -> f (Either ExecutionError AuthorizationSuccess))
+                           -> Limits -> Biscuit proof Verified -> Authorizer -> f (Either ExecutionError (AuthorizedBiscuit proof))
+authorizeBiscuitWithRunner runAuthorizerF l biscuit@Biscuit{..} authorizer =
   let toBlockWithRevocationId ((_, block), sig, _, eSig) = (block, sigBytes sig, snd <$> eSig)
       -- the authority block can't be externally signed. If it carries a signature, it won't be
       -- verified. So we need to make sure there is none, to avoid having facts trusted without
@@ -576,10 +580,14 @@ authorizeBiscuitWithLimits l biscuit@Biscuit{..} authorizer =
           , authorizationSuccess
           }
    in fmap withBiscuit <$>
-        runAuthorizerWithLimits l
+        runAuthorizerF l
           (dropExternalPk $ toBlockWithRevocationId authority)
           (toBlockWithRevocationId <$> blocks)
           authorizer
+
+-- | Generic version of 'authorizeBiscuitWithLimits' which takes custom 'Limits'.
+authorizeBiscuitWithLimits :: Limits -> Biscuit proof Verified -> Authorizer -> IO (Either ExecutionError (AuthorizedBiscuit proof))
+authorizeBiscuitWithLimits = authorizeBiscuitWithRunner runAuthorizerWithLimits
 
 -- | Generic version of 'authorizeBiscuit' which takes custom 'Limits' and doesn't timeout.
 --
@@ -588,22 +596,8 @@ authorizeBiscuitWithLimits l biscuit@Biscuit{..} authorizer =
 -- long time. So this function should only be used in a context that sets a timeout if run time
 -- can be an issue.
 authorizeBiscuitWithLimitsNoTimeout :: Limits -> Biscuit proof Verified -> Authorizer -> Either ExecutionError (AuthorizedBiscuit proof)
-authorizeBiscuitWithLimitsNoTimeout l biscuit@Biscuit{..} authorizer =
-  let toBlockWithRevocationId ((_, block), sig, _, eSig) = (block, sigBytes sig, snd <$> eSig)
-      -- the authority block can't be externally signed. If it carries a signature, it won't be
-      -- verified. So we need to make sure there is none, to avoid having facts trusted without
-      -- a proper signature check
-      dropExternalPk (b, rid, _) = (b, rid, Nothing)
-      withBiscuit authorizationSuccess =
-        AuthorizedBiscuit
-          { authorizedBiscuit = biscuit
-          , authorizationSuccess
-          }
-   in withBiscuit <$>
-        runAuthorizerNoTimeout l
-          (dropExternalPk $ toBlockWithRevocationId authority)
-          (toBlockWithRevocationId <$> blocks)
-          authorizer
+authorizeBiscuitWithLimitsNoTimeout l biscuit authorizer =
+  runIdentity $ authorizeBiscuitWithRunner runAuthorizerWithLimitsPure l biscuit authorizer
 
 -- | Given a biscuit with a verified signature and an authorizer (a set of facts, rules, checks
 -- and policies), verify a biscuit:

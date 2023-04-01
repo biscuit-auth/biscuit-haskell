@@ -12,6 +12,7 @@ module Auth.Biscuit.Datalog.ScopedExecutor
   ( BlockWithRevocationId
   , runAuthorizer
   , runAuthorizerWithLimits
+  , runAuthorizerWithLimitsPure
   , runAuthorizerNoTimeout
   , runFactGeneration
   , PureExecError (..)
@@ -31,6 +32,7 @@ import           Control.Monad.State           (StateT (..), evalStateT, get,
 import           Data.Bifunctor                (first)
 import           Data.ByteString               (ByteString)
 import           Data.Foldable                 (fold, traverse_)
+import           Data.Functor.Identity         (Identity(Identity))
 import           Data.List                     (genericLength)
 import           Data.List.NonEmpty            (NonEmpty)
 import qualified Data.List.NonEmpty            as NE
@@ -115,6 +117,19 @@ runAuthorizerWithLimits l@Limits{..} authority blocks v = do
     Nothing -> Left Timeout
     Just r  -> r
 
+-- | Given a series of blocks and an authorizer, ensure that all
+-- the checks and policies match
+runAuthorizerWithLimitsPure :: Limits
+                      -- ^ custom limits
+                      -> BlockWithRevocationId
+                      -- ^ The authority block
+                      -> [BlockWithRevocationId]
+                      -- ^ The extra blocks
+                      -> Authorizer
+                      -- ^ A authorizer
+                      -> Identity (Either ExecutionError AuthorizationSuccess)
+runAuthorizerWithLimitsPure l authority blocks v =
+  Identity $ runAuthorizerNoTimeout l authority blocks v
 
 mkRevocationIdFacts :: BlockWithRevocationId -> [BlockWithRevocationId]
                     -> Set Fact
