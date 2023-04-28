@@ -23,6 +23,7 @@ import           Data.ByteString.Base16         as Hex
 import qualified Data.ByteString.Char8          as C8
 import           Data.Char
 import           Data.Either                    (partitionEithers)
+import           Data.Function                  ((&))
 import           Data.Int                       (Int64)
 import           Data.List.NonEmpty             (NonEmpty)
 import qualified Data.List.NonEmpty             as NE
@@ -281,13 +282,13 @@ unaryMethodParser = do
   _ <- C.char '.'
   method <- Length <$ chunk "length"
   _ <- l $ chunk "()"
-  pure $ \e1 -> EUnary method e1
+  pure $ EUnary method
 
 methodsParser :: Parser (Expression' 'WithSlices)
 methodsParser = do
   e1 <- exprTerm
   methods <- some (try binaryMethodParser <|> unaryMethodParser)
-  pure $ foldl (\e m -> m e) e1 methods
+  pure $ foldl (&) e1 methods
 
 unaryParens :: Parser (Expression' 'WithSlices)
 unaryParens = do
