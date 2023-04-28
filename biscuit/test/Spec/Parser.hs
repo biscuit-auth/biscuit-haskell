@@ -292,6 +292,17 @@ constraints = testGroup "Parse expressions"
                  )
                  (EValue $ LInteger 2000)
               )
+  , testCase "chained method calls" $
+      parseExpression "$var.intersection([1]).union([2]).length()" @?=
+        Right (EUnary Length
+                 (EBinary Union
+                    ( EBinary Intersection
+                        (EValue $ Variable "var")
+                        (EValue $ TermSet [LInteger 1])
+                    )
+                    (EValue $ TermSet [LInteger 2])
+                 )
+              )
   , operatorPrecedences
   ]
 
