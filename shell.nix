@@ -3,6 +3,7 @@
 mkShell {
   buildInputs = [
     haskell.compiler.ghc924
+    haskell-language-server
     pkg-config
     libsodium
     zlib
