@@ -1,6 +1,7 @@
 packages:
   biscuit/
   biscuit-servant/
+  biscuit-wai/
 
 index-state: 2022-11-22T14:25:56Z
 tests: True
