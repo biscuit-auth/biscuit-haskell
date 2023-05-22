@@ -30,7 +30,7 @@ import           Control.Monad.State           (StateT (..), evalStateT, get,
                                                 gets, lift, put)
 import           Data.Bifunctor                (first)
 import           Data.ByteString               (ByteString)
-import           Data.Foldable                 (fold, traverse_)
+import           Data.Foldable                 (traverse_)
 import           Data.List                     (genericLength)
 import           Data.List.NonEmpty            (NonEmpty)
 import qualified Data.List.NonEmpty            as NE
@@ -146,7 +146,7 @@ mkInitState limits authority blocks authorizer =
       firstBlock = fst' authority
       otherBlocks = fst' <$> blocks
       allBlocks = zip [0..] (firstBlock : otherBlocks) <> [(sBlockCount, vBlock authorizer)]
-      (sRules, sFacts) = revocationWorld <> fold (uncurry collectWorld . fmap (toEvaluation externalKeys) <$> allBlocks)
+      (sRules, sFacts) = revocationWorld <> foldMap (uncurry collectWorld . fmap (toEvaluation externalKeys)) allBlocks
    in ComputeState
         { sLimits = limits
         , sRules

@@ -23,6 +23,7 @@ import           Data.ByteString.Base16         as Hex
 import qualified Data.ByteString.Char8          as C8
 import           Data.Char
 import           Data.Either                    (partitionEithers)
+import           Data.Function                  ((&))
 import           Data.Int                       (Int64)
 import           Data.List.NonEmpty             (NonEmpty)
 import qualified Data.List.NonEmpty             as NE
@@ -227,8 +228,7 @@ predicateParser = predicateParser' predicateTermParser
 
 expressionParser :: Parser (Expression' 'WithSlices)
 expressionParser =
-  let base = choice [ try binaryMethodParser
-                    , try unaryMethodParser
+  let base = choice [ try methodsParser
                     , exprTerm
                     ]
    in Expr.makeExprParser base table
@@ -261,9 +261,8 @@ table =
       , [ infixL "||" Or ]
       ]
 
-binaryMethodParser :: Parser (Expression' 'WithSlices)
+binaryMethodParser :: Parser (Expression' 'WithSlices -> Expression' 'WithSlices)
 binaryMethodParser = do
-  e1 <- exprTerm
   _ <- C.char '.'
   method <- choice
     [ Contains     <$ chunk "contains"
@@ -276,18 +275,20 @@ binaryMethodParser = do
   _ <- l $ C.char '('
   e2 <- l expressionParser
   _ <- l $ C.char ')'
-  pure $ EBinary method e1 e2
+  pure $ \e1 -> EBinary method e1 e2
 
-unaryMethodParser :: Parser (Expression' 'WithSlices)
+unaryMethodParser :: Parser (Expression' 'WithSlices -> Expression' 'WithSlices)
 unaryMethodParser = do
-  e1 <- exprTerm
   _ <- C.char '.'
   method <- Length <$ chunk "length"
   _ <- l $ chunk "()"
-  pure $ EUnary method e1
+  pure $ EUnary method
 
-methodParser :: Parser (Expression' 'WithSlices)
-methodParser = binaryMethodParser <|> unaryMethodParser
+methodsParser :: Parser (Expression' 'WithSlices)
+methodsParser = do
+  e1 <- exprTerm
+  methods <- some (try binaryMethodParser <|> unaryMethodParser)
+  pure $ foldl (&) e1 methods
 
 unaryParens :: Parser (Expression' 'WithSlices)
 unaryParens = do
