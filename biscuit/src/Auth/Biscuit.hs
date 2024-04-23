@@ -108,7 +108,6 @@ import           Control.Monad                       ((<=<))
 import           Control.Monad.Identity              (runIdentity)
 import           Data.Bifunctor                      (first)
 import           Data.ByteString                     (ByteString)
-import qualified Data.ByteString.Base16              as Hex
 import qualified Data.ByteString.Base64.URL          as B64
 import           Data.Foldable                       (toList)
 import           Data.Set                            (Set)
@@ -159,6 +158,7 @@ import           Auth.Biscuit.Token                  (AuthorizedBiscuit (..),
                                                       queryAuthorizerFacts,
                                                       queryRawBiscuitFacts,
                                                       seal, serializeBiscuit)
+import Auth.Biscuit.Utils                            (decodeHex, encodeHex')
 import qualified Data.Text                           as Text
 
 
@@ -249,7 +249,7 @@ blockContext c = mempty { bContext = Just c }
 
 -- | Decode a base16-encoded bytestring, reporting errors via `MonadFail`
 fromHex :: MonadFail m => ByteString -> m ByteString
-fromHex = either (fail . Text.unpack) pure . Hex.decodeBase16
+fromHex = either (fail . Text.unpack) pure . decodeHex
 
 -- $keypairs
 --
@@ -273,11 +273,11 @@ serializePublicKey = pkBytes
 
 -- | Serialize a 'SecretKey' to a hex-encoded bytestring
 serializeSecretKeyHex :: SecretKey -> ByteString
-serializeSecretKeyHex = Hex.encodeBase16' . skBytes
+serializeSecretKeyHex = encodeHex' . skBytes
 
 -- | Serialize a 'PublicKey' to a hex-encoded bytestring
 serializePublicKeyHex :: PublicKey -> ByteString
-serializePublicKeyHex = Hex.encodeBase16' . pkBytes
+serializePublicKeyHex = encodeHex' . pkBytes
 
 -- | Read a 'SecretKey' from raw bytes
 parseSecretKey :: ByteString -> Maybe SecretKey
