@@ -112,7 +112,6 @@ module Auth.Biscuit.Datalog.AST
 import           Control.Applicative        ((<|>))
 import           Control.Monad              ((<=<))
 import           Data.ByteString            (ByteString)
-import           Data.ByteString.Base16     as Hex
 import           Data.Foldable              (fold, toList)
 import           Data.Function              (on)
 import           Data.Int                   (Int64)
@@ -134,6 +133,7 @@ import           Numeric.Natural            (Natural)
 import           Validation                 (Validation (..), failure)
 
 import           Auth.Biscuit.Crypto        (PublicKey, pkBytes)
+import           Auth.Biscuit.Utils         (encodeHex)
 
 data IsWithinSet = NotWithinSet | WithinSet
 data DatalogContext
@@ -347,7 +347,7 @@ renderId' var set slice = \case
   LInteger int  -> pack $ show int
   LString str   -> pack $ show str
   LDate time    -> pack $ formatTime defaultTimeLocale "%FT%T%Q%Ez" time
-  LBytes bs     -> "hex:" <> Hex.encodeBase16 bs
+  LBytes bs     -> "hex:" <> encodeHex bs
   LBool True    -> "true"
   LBool False   -> "false"
   TermSet terms -> set terms
@@ -824,7 +824,7 @@ renderRuleScope =
   let renderScopeElem = \case
         OnlyAuthority -> "authority"
         Previous      -> "previous"
-        BlockId bs    -> "ed25519/" <> Hex.encodeBase16 (pkBytes bs)
+        BlockId bs    -> "ed25519/" <> encodeHex (pkBytes bs)
    in intercalate ", " . Set.toList . Set.map renderScopeElem
 
 renderBlock :: Block -> Text

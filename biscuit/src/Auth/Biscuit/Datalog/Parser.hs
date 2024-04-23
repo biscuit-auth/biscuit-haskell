@@ -15,11 +15,11 @@ module Auth.Biscuit.Datalog.Parser
 import           Auth.Biscuit.Crypto            (PublicKey,
                                                  readEd25519PublicKey)
 import           Auth.Biscuit.Datalog.AST
+import           Auth.Biscuit.Utils             (decodeHex)
 import           Control.Monad                  (join)
 import qualified Control.Monad.Combinators.Expr as Expr
 import           Data.Bifunctor
 import           Data.ByteString                (ByteString)
-import           Data.ByteString.Base16         as Hex
 import qualified Data.ByteString.Char8          as C8
 import           Data.Char
 import           Data.Either                    (partitionEithers)
@@ -149,14 +149,14 @@ intParser = do
 hexParser :: Parser ByteString
 hexParser = do
   (sp, hexStr) <- getSpan $ C8.pack <$> some C.hexDigitChar
-  case Hex.decodeBase16 hexStr of
+  case decodeHex hexStr of
     Left e   -> registerError (InvalidBs e) sp
     Right bs -> pure bs
 
 publicKeyParser :: Parser PublicKey
 publicKeyParser = do
   (sp, hexStr) <- getSpan $ C8.pack <$> (chunk "ed25519/" *> some C.hexDigitChar)
-  case Hex.decodeBase16 hexStr of
+  case decodeHex hexStr of
     Left e -> registerError (InvalidPublicKey e) sp
     Right bs -> case readEd25519PublicKey bs of
       Nothing -> registerError (InvalidPublicKey "Invalid ed25519 public key") sp

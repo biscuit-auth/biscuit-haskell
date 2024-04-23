@@ -1,5 +1,6 @@
 {-# LANGUAGE DataKinds          #-}
 {-# LANGUAGE DeriveAnyClass     #-}
+{-# LANGUAGE DeriveFunctor      #-}
 {-# LANGUAGE DeriveGeneric      #-}
 {-# LANGUAGE DeriveTraversable  #-}
 {-# LANGUAGE DerivingStrategies #-}
@@ -40,6 +41,7 @@ import           Auth.Biscuit.Datalog.Executor (ExecutionError (..),
                                                 ResultError (..))
 import           Auth.Biscuit.Datalog.Parser   (authorizerParser, blockParser)
 import           Auth.Biscuit.Token
+import           Auth.Biscuit.Utils            (encodeHex)
 
 import           Spec.Parser                   (parseAuthorizer, parseBlock)
 
@@ -93,7 +95,7 @@ data SampleFile a
 data RustResult e a
   = Err e
   | Ok a
-  deriving stock (Generic, Eq, Show)
+  deriving stock (Generic, Eq, Show, Functor)
 
 instance Bifunctor RustResult where
   bimap f g = \case
@@ -268,7 +270,7 @@ processValidation step b (name, ValidationR{..}) = do
   pols <- either (assertFailure . show) pure $ parseAuthorizer $ foldMap (<> ";") (policies w)
   res <- authorizeBiscuit b (authorizer_code <> pols)
   checkResult compareExecErrors result res
-  let revocationIds = Hex.encodeBase16 <$> toList (getRevocationIds b)
+  let revocationIds = encodeHex <$> toList (getRevocationIds b)
   step "Comparing revocation ids"
   revocation_ids @?= revocationIds
 
@@ -313,7 +315,7 @@ mkTestCaseFromBiscuit title filename biscuit authorizers = do
              }
           , result = Ok 0
           , authorizer_code = authorizer
-          , revocation_ids = Hex.encodeBase16 <$> toList (getRevocationIds biscuit)
+          , revocation_ids = encodeHex <$> toList (getRevocationIds biscuit)
           }
   BS.writeFile ("test/samples/current/" <> filename) (serialize biscuit)
   let token = mkBlockDesc <$> getAuthority biscuit :| getBlocks biscuit
