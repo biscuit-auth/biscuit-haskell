@@ -13,8 +13,8 @@ You will find below the main lib and its companions:
 
 The core library supports [`v3` and `v4` biscuits][spec] (both open and sealed).
 
-[CI-badge]: https://img.shields.io/github/actions/workflow/status/Divarvel/biscuit-haskell/github-actions.yml?style=flat-square&branch=main
-[CI-url]: https://github.com/Divarvel/biscuit-haskell/actions
+[CI-badge]: https://img.shields.io/github/actions/workflow/status/biscuit-auth/biscuit-haskell/github-actions.yml?style=flat-square&branch=main
+[CI-url]: https://github.com/biscuit-auth/biscuit-haskell/actions
 [Hackage]: https://img.shields.io/hackage/v/biscuit-haskell?color=purple&style=flat-square
 [hackage-url]: https://hackage.haskell.org/package/biscuit-haskell
 [gcouprie]: https://github.com/geal
