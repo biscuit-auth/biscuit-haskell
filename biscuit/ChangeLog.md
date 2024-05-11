@@ -1,5 +1,12 @@
 # Changelog for biscuit-haskell
 
+## 0.3.0.1
+
+- GHC 9.6 and 9.8 support
+- Support for `!=`
+- Fixed-sized arithmetic and overflow detection
+- Allow parsing chained method calls
+
 ## 0.3.0.0
 
 - GHC 9.2 support

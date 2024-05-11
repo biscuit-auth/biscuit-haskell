@@ -1,5 +1,11 @@
 # Changelog for biscuit-servant
 
+## 0.3.0.1
+
+- use biscuit-haskell 0.3.0.1
+- GHC 9.6 and 9.8 support
+- Generalize type for `withPriorityAuthorizer`
+
 ## 0.3.0.0
 
 - use biscuit-haskell 0.3.0.0

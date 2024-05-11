@@ -2,7 +2,7 @@
 
 mkShell {
   buildInputs = [
-    haskell.compiler.ghc924
+    haskell.compiler.ghc94
     haskell-language-server
     pkg-config
     libsodium
