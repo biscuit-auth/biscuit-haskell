@@ -1,4 +1,4 @@
-<img src="https://raw.githubusercontent.com/biscuit-auth/biscuit-haskell/main/assets/biscuit-logo.png" align=right>
+<img src="https://raw.githubusercontent.com/biscuit-auth/biscuit-haskell/main/assets/logo-black-white-bg.png" align=right>
 
 # biscuit-servant 🤖 [![Hackage][hackage]][hackage-url]
 
