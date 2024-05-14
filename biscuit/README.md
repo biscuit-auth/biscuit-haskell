@@ -1,6 +1,6 @@
 # biscuit-haskell [![CI-badge][CI-badge]][CI-url] [![Hackage][hackage]][hackage-url]
 
-<img src="https://raw.githubusercontent.com/biscuit-auth/biscuit-haskell/main/assets/biscuit-logo.png" align=right>
+<img src="https://raw.githubusercontent.com/biscuit-auth/biscuit-haskell/main/assets/logo-black-white-bg.png" align=right>
 
 Main library for biscuit tokens support, providing minting and signature verification of biscuit tokens, as well as a datalog engine allowing to compute the validity of a token in a given context.
 
