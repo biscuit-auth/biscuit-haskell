@@ -30,14 +30,13 @@ import           Control.Monad.State           (StateT (..), evalStateT, get,
                                                 gets, lift, put)
 import           Data.Bifunctor                (first)
 import           Data.ByteString               (ByteString)
-import           Data.Foldable                 (traverse_)
+import           Data.Foldable                 (sequenceA_)
 import           Data.List                     (genericLength)
 import           Data.List.NonEmpty            (NonEmpty)
 import qualified Data.List.NonEmpty            as NE
 import           Data.Map                      (Map)
 import qualified Data.Map                      as Map
 import           Data.Map.Strict               ((!?))
-import           Data.Maybe                    (mapMaybe)
 import           Data.Set                      (Set)
 import qualified Data.Set                      as Set
 import           Data.Text                     (Text)
@@ -58,11 +57,13 @@ import           Auth.Biscuit.Datalog.Executor (Bindings, ExecutionError (..),
                                                 keepAuthorized', toScopedFacts)
 import           Auth.Biscuit.Datalog.Parser   (fact)
 import           Auth.Biscuit.Timer            (timer)
+import           Auth.Biscuit.Utils            (foldMapM, mapMaybeM)
+import           Data.Bitraversable            (bisequence)
 
 type BlockWithRevocationId = (Block, ByteString, Maybe PublicKey)
 
 -- | A subset of 'ExecutionError' that can only happen during fact generation
-data PureExecError = Facts | Iterations | BadRule
+data PureExecError = Facts | Iterations | BadRule | BadExpression String
   deriving (Eq, Show)
 
 -- | Proof that a biscuit was authorized successfully. In addition to the matched
@@ -172,6 +173,7 @@ runAuthorizerNoTimeout limits authority blocks authorizer = do
         Facts      -> TooManyFacts
         Iterations -> TooManyIterations
         BadRule    -> InvalidRule
+        BadExpression e -> EvaluationError e
   allFacts <- first toExecutionError $ computeAllFacts initState
   let checks = bChecks <$$> ( zip [0..] (fst' <$> authority : blocks)
                            <> [(blockCount,vBlock authorizer)]
@@ -179,13 +181,14 @@ runAuthorizerNoTimeout limits authority blocks authorizer = do
       policies = vPolicies authorizer
       checkResults = checkChecks limits blockCount allFacts (checkToEvaluation externalKeys <$$$> checks)
       policyResults = checkPolicies limits blockCount allFacts (policyToEvaluation externalKeys <$> policies)
-  case (checkResults, policyResults) of
-    (Success (), Left Nothing)  -> Left $ ResultError $ NoPoliciesMatched []
-    (Success (), Left (Just p)) -> Left $ ResultError $ DenyRuleMatched [] p
-    (Failure cs, Left Nothing)  -> Left $ ResultError $ NoPoliciesMatched (NE.toList cs)
-    (Failure cs, Left (Just p)) -> Left $ ResultError $ DenyRuleMatched (NE.toList cs) p
-    (Failure cs, Right _)       -> Left $ ResultError $ FailedChecks cs
-    (Success (), Right p)       -> Right $ AuthorizationSuccess { matchedAllowQuery = p
+  case bisequence (checkResults, policyResults) of
+    Left e                            -> Left $ EvaluationError e
+    Right (Success (), Left Nothing)  -> Left $ ResultError $ NoPoliciesMatched []
+    Right (Success (), Left (Just p)) -> Left $ ResultError $ DenyRuleMatched [] p
+    Right (Failure cs, Left Nothing)  -> Left $ ResultError $ NoPoliciesMatched (NE.toList cs)
+    Right (Failure cs, Left (Just p)) -> Left $ ResultError $ DenyRuleMatched (NE.toList cs) p
+    Right (Failure cs, Right _)       -> Left $ ResultError $ FailedChecks cs
+    Right (Success (), Right p)       -> Right $ AuthorizationSuccess { matchedAllowQuery = p
                                                                 , allFacts
                                                                 , limits
                                                                 }
@@ -195,8 +198,10 @@ runStep = do
   state@ComputeState{sLimits,sFacts,sRules,sBlockCount,sIterations} <- get
   let Limits{maxFacts, maxIterations} = sLimits
       previousCount = countFacts sFacts
-      newFacts = sFacts <> extend sLimits sBlockCount sRules sFacts
-      newCount = countFacts newFacts
+      generatedFacts :: Either PureExecError FactGroup
+      generatedFacts = first BadExpression $ extend sLimits sBlockCount sRules sFacts
+  newFacts <- (sFacts <>) <$> lift generatedFacts
+  let newCount = countFacts newFacts
       -- counting the facts returned by `extend` is not equivalent to
       -- comparing complete counts, as `extend` may return facts that
       -- are already present in `sFacts`
@@ -206,7 +211,7 @@ runStep = do
   put $ state { sIterations = sIterations + 1
               , sFacts = newFacts
               }
-  return addedFactsCount
+  pure addedFactsCount
 
 -- | Check if every variable from the head is present in the body
 checkRuleHead :: EvalRule -> Bool
@@ -234,39 +239,39 @@ runFactGeneration sLimits sBlockCount sRules sFacts =
   let initState = ComputeState{sIterations = 0, ..}
    in computeAllFacts initState
 
-checkChecks :: Limits -> Natural -> FactGroup -> [(Natural, [EvalCheck])] -> Validation (NonEmpty Check) ()
+checkChecks :: Limits -> Natural -> FactGroup -> [(Natural, [EvalCheck])] -> Either String (Validation (NonEmpty Check) ())
 checkChecks limits blockCount allFacts =
-  traverse_ (uncurry $ checkChecksForGroup limits blockCount allFacts)
+  fmap sequenceA_ . traverse (uncurry $ checkChecksForGroup limits blockCount allFacts)
 
-checkChecksForGroup :: Limits -> Natural -> FactGroup -> Natural -> [EvalCheck] -> Validation (NonEmpty Check) ()
+checkChecksForGroup :: Limits -> Natural -> FactGroup -> Natural -> [EvalCheck] -> Either String (Validation (NonEmpty Check) ())
 checkChecksForGroup limits blockCount allFacts checksBlockId =
-  traverse_ (checkCheck limits blockCount checksBlockId allFacts)
+  fmap sequenceA_ . traverse (checkCheck limits blockCount checksBlockId allFacts)
 
-checkPolicies :: Limits -> Natural -> FactGroup -> [EvalPolicy] -> Either (Maybe MatchedQuery) MatchedQuery
-checkPolicies limits blockCount allFacts policies =
-  let results = mapMaybe (checkPolicy limits blockCount allFacts) policies
-   in case results of
-        p : _ -> first Just p
-        []    -> Left Nothing
+checkPolicies :: Limits -> Natural -> FactGroup -> [EvalPolicy] -> Either String (Either (Maybe MatchedQuery) MatchedQuery)
+checkPolicies limits blockCount allFacts policies = do
+  results <- mapMaybeM (checkPolicy limits blockCount allFacts) policies
+  pure $ case results of
+           p : _ -> first Just p
+           []    -> Left Nothing
 
 -- | Generate new facts by applying rules on existing facts
-extend :: Limits -> Natural -> Map Natural (Set EvalRule) -> FactGroup -> FactGroup
+extend :: Limits -> Natural -> Map Natural (Set EvalRule) -> FactGroup -> Either String FactGroup
 extend l blockCount rules facts =
-  let buildFacts :: Natural -> Set EvalRule -> FactGroup -> Set (Scoped Fact)
+  let buildFacts :: Natural -> Set EvalRule -> FactGroup -> Either String (Set (Scoped Fact))
       buildFacts ruleBlockId ruleGroup factGroup =
-        let extendRule :: EvalRule -> Set (Scoped Fact)
+        let extendRule :: EvalRule -> Either String (Set (Scoped Fact))
             extendRule r@Rule{scope} = getFactsForRule l (toScopedFacts $ keepAuthorized' False blockCount factGroup scope ruleBlockId) r
-         in foldMap extendRule ruleGroup
+         in foldMapM extendRule ruleGroup
 
-      extendRuleGroup :: Natural -> Set EvalRule -> FactGroup
+      extendRuleGroup :: Natural -> Set EvalRule -> Either String FactGroup
       extendRuleGroup ruleBlockId ruleGroup =
             -- todo pre-filter facts based on the weakest rule scope to avoid passing too many facts
             -- to buildFacts
         let authorizedFacts = facts -- test $ keepAuthorized facts $ Set.fromList [0..ruleBlockId]
             addRuleOrigin = FactGroup . Map.mapKeysWith (<>) (Set.insert ruleBlockId) . getFactGroup
-         in addRuleOrigin . fromScopedFacts $ buildFacts ruleBlockId ruleGroup authorizedFacts
+         in addRuleOrigin . fromScopedFacts <$> buildFacts ruleBlockId ruleGroup authorizedFacts
 
-   in foldMap (uncurry extendRuleGroup) $ Map.toList rules
+   in foldMapM (uncurry extendRuleGroup) $ Map.toList rules
 
 
 collectWorld :: Natural -> EvalBlock -> (Map Natural (Set EvalRule), FactGroup)
@@ -278,18 +283,18 @@ collectWorld blockId Block{..} =
       , FactGroup $ Map.singleton (Set.singleton blockId) $ Set.fromList bFacts
       )
 
-queryGeneratedFacts :: [Maybe PublicKey] -> AuthorizationSuccess -> Query -> Set Bindings
+queryGeneratedFacts :: [Maybe PublicKey] -> AuthorizationSuccess -> Query -> Either String (Set Bindings)
 queryGeneratedFacts ePks AuthorizationSuccess{allFacts, limits} =
   queryAvailableFacts ePks allFacts limits
 
-queryAvailableFacts :: [Maybe PublicKey] -> FactGroup -> Limits -> Query -> Set Bindings
+queryAvailableFacts :: [Maybe PublicKey] -> FactGroup -> Limits -> Query -> Either String (Set Bindings)
 queryAvailableFacts ePks allFacts limits q =
   let blockCount = genericLength ePks
       getBindingsForQueryItem QueryItem{qBody,qExpressions,qScope} =
         let facts = toScopedFacts $ keepAuthorized' True blockCount allFacts qScope blockCount
-         in Set.map snd $
+         in Set.map snd <$>
             getBindingsForRuleBody limits facts qBody qExpressions
-   in foldMap (getBindingsForQueryItem . toEvaluation ePks) q
+   in foldMapM (getBindingsForQueryItem . toEvaluation ePks) q
 
 -- | Extract a set of values from a matched variable for a specific type.
 -- Returning @Set Value@ allows to get all values, whatever their type.

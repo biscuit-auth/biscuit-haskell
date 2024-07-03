@@ -60,7 +60,7 @@ import qualified Text.Regex.TDFA.Text     as Regex
 import           Validation               (Validation (..), failure)
 
 import           Auth.Biscuit.Datalog.AST
-import           Auth.Biscuit.Utils       (maybeToRight)
+import           Auth.Biscuit.Utils       (allM, anyM, maybeToRight, setFilterM)
 
 -- | A variable name
 type Name = Text
@@ -105,6 +105,8 @@ data ExecutionError
   | ResultError ResultError
   -- ^ The evaluation ran to completion, but checks and policies were not
   -- fulfilled.
+  | EvaluationError String
+  -- ^ Datalog evaluation failed while evaluating an expression
   deriving (Eq, Show)
 
 -- | Settings for the executor runtime restrictions.
@@ -186,40 +188,40 @@ fromScopedFacts = FactGroup . Map.fromListWith (<>) . Set.toList . Set.map (fmap
 countFacts :: FactGroup -> Int
 countFacts (FactGroup facts) = sum $ Set.size <$> Map.elems facts
 
--- todo handle Check All
-checkCheck :: Limits -> Natural -> Natural -> FactGroup -> EvalCheck -> Validation (NonEmpty Check) ()
-checkCheck l blockCount checkBlockId facts c@Check{cQueries,cKind} =
+checkCheck :: Limits -> Natural -> Natural -> FactGroup -> EvalCheck -> Either String (Validation (NonEmpty Check) ())
+checkCheck l blockCount checkBlockId facts c@Check{cQueries,cKind} = do
   let isQueryItemOk = case cKind of
         One -> isQueryItemSatisfied l blockCount checkBlockId facts
         All -> isQueryItemSatisfiedForAllMatches l blockCount checkBlockId facts
-   in if any (isJust . isQueryItemOk) cQueries
-      then Success ()
-      else failure (toRepresentation c)
+  hasOkQueryItem <- anyM (fmap isJust . isQueryItemOk) cQueries
+  pure $ if hasOkQueryItem
+         then Success ()
+         else failure (toRepresentation c)
 
-checkPolicy :: Limits -> Natural -> FactGroup -> EvalPolicy -> Maybe (Either MatchedQuery MatchedQuery)
-checkPolicy l blockCount facts (pType, query) =
-  let bindings = fold $ mapMaybe (isQueryItemSatisfied l blockCount blockCount facts) query
-   in if not (null bindings)
-      then Just $ case pType of
-        Allow -> Right $ MatchedQuery{matchedQuery = toRepresentation <$> query, bindings}
-        Deny  -> Left $ MatchedQuery{matchedQuery = toRepresentation <$> query, bindings}
-      else Nothing
+checkPolicy :: Limits -> Natural -> FactGroup -> EvalPolicy -> Either String (Maybe (Either MatchedQuery MatchedQuery))
+checkPolicy l blockCount facts (pType, query) = do
+  bindings <- fold . fold <$> traverse (isQueryItemSatisfied l blockCount blockCount facts) query
+  pure $ if not (null bindings)
+         then Just $ case pType of
+           Allow -> Right $ MatchedQuery{matchedQuery = toRepresentation <$> query, bindings}
+           Deny  -> Left $ MatchedQuery{matchedQuery = toRepresentation <$> query, bindings}
+         else Nothing
 
-isQueryItemSatisfied :: Limits -> Natural -> Natural -> FactGroup -> QueryItem' 'Eval 'Representation -> Maybe (Set Bindings)
-isQueryItemSatisfied l blockCount blockId allFacts QueryItem{qBody, qExpressions, qScope} =
+isQueryItemSatisfied :: Limits -> Natural -> Natural -> FactGroup -> QueryItem' 'Eval 'Representation -> Either String (Maybe (Set Bindings))
+isQueryItemSatisfied l blockCount blockId allFacts QueryItem{qBody, qExpressions, qScope} = do
   let removeScope = Set.map snd
       facts = toScopedFacts $ keepAuthorized' False blockCount allFacts qScope blockId
-      bindings = removeScope $ getBindingsForRuleBody l facts qBody qExpressions
-   in if Set.size bindings > 0
-      then Just bindings
-      else Nothing
+  bindings <- removeScope <$> getBindingsForRuleBody l facts qBody qExpressions
+  pure $ if Set.size bindings > 0
+         then Just bindings
+         else Nothing
 
 -- | Given a set of scoped facts and a rule body, we generate a set of variable
 -- bindings that satisfy the rule clauses (predicates match, and expression constraints
 -- are fulfilled), and ensure that all bindings where predicates match also fulfill
 -- expression constraints. This is the behaviour of `check all`.
-isQueryItemSatisfiedForAllMatches :: Limits -> Natural -> Natural -> FactGroup -> QueryItem' 'Eval 'Representation -> Maybe (Set Bindings)
-isQueryItemSatisfiedForAllMatches l blockCount blockId allFacts QueryItem{qBody, qExpressions, qScope} =
+isQueryItemSatisfiedForAllMatches :: Limits -> Natural -> Natural -> FactGroup -> QueryItem' 'Eval 'Representation -> Either String (Maybe (Set Bindings))
+isQueryItemSatisfiedForAllMatches l blockCount blockId allFacts QueryItem{qBody, qExpressions, qScope} = do
   let removeScope = Set.map snd
       facts = toScopedFacts $ keepAuthorized' False blockCount allFacts qScope blockId
       allVariables = extractVariables qBody
@@ -228,26 +230,24 @@ isQueryItemSatisfiedForAllMatches l blockCount blockId allFacts QueryItem{qBody,
       -- bindings that unify correctly (each variable has a single possible match)
       legalBindingsForFacts = reduceCandidateBindings allVariables candidateBindings
       -- bindings that fulfill the constraints
-      constraintFulfillingBindings = Set.filter (\b -> all (satisfies l b) qExpressions) legalBindingsForFacts
-   in if Set.size constraintFulfillingBindings > 0 -- there is at least one match that fulfills the constraints
-      && constraintFulfillingBindings == legalBindingsForFacts -- all matches fulfill the constraints
-      then Just $ removeScope constraintFulfillingBindings
-      else Nothing
+  constraintFulfillingBindings <- setFilterM (\b -> allM (satisfies l b) qExpressions) legalBindingsForFacts
+  pure $ if Set.size constraintFulfillingBindings > 0 -- there is at least one match that fulfills the constraints
+         && constraintFulfillingBindings == legalBindingsForFacts -- all matches fulfill the constraints
+         then Just $ removeScope constraintFulfillingBindings
+         else Nothing
 
 -- | Given a rule and a set of available (scoped) facts, we find all fact
 -- combinations that match the rule body, and generate new facts by applying
 -- the bindings to the rule head (while keeping track of the facts origins)
-getFactsForRule :: Limits -> Set (Scoped Fact) -> EvalRule -> Set (Scoped Fact)
-getFactsForRule l facts Rule{rhead, body, expressions} =
-  let legalBindings :: Set (Scoped Bindings)
-      legalBindings = getBindingsForRuleBody l facts body expressions
-      newFacts = mapMaybe (applyBindings rhead) $ Set.toList legalBindings
-   in Set.fromList newFacts
+getFactsForRule :: Limits -> Set (Scoped Fact) -> EvalRule -> Either String (Set (Scoped Fact))
+getFactsForRule l facts Rule{rhead, body, expressions} = do
+  legalBindings <- getBindingsForRuleBody l facts body expressions
+  pure $ Set.fromList $ mapMaybe (applyBindings rhead) $ Set.toList legalBindings
 
 -- | Given a set of scoped facts and a rule body, we generate a set of variable
 -- bindings that satisfy the rule clauses (predicates match, and expression constraints
 -- are fulfilled)
-getBindingsForRuleBody :: Limits -> Set (Scoped Fact) -> [Predicate] -> [Expression] -> Set (Scoped Bindings)
+getBindingsForRuleBody :: Limits -> Set (Scoped Fact) -> [Predicate] -> [Expression] -> Either String (Set (Scoped Bindings))
 getBindingsForRuleBody l facts body expressions =
   let -- gather bindings from all the facts that match the query's predicates
       candidateBindings = getCandidateBindings facts body
@@ -255,13 +255,13 @@ getBindingsForRuleBody l facts body expressions =
       -- only keep bindings combinations where each variable has a single possible match
       legalBindingsForFacts = reduceCandidateBindings allVariables candidateBindings
       -- only keep bindings that satisfy the query expressions
-   in Set.filter (\b -> all (satisfies l b) expressions) legalBindingsForFacts
+   in setFilterM (\b -> allM (satisfies l b) expressions) legalBindingsForFacts
 
 satisfies :: Limits
           -> Scoped Bindings
           -> Expression
-          -> Bool
-satisfies l b e = evaluateExpression l (snd b) e == Right (LBool True)
+          -> Either String Bool
+satisfies l b e = (== LBool True) <$> evaluateExpression l (snd b) e
 
 applyBindings :: Predicate -> Scoped Bindings -> Maybe (Scoped Fact)
 applyBindings p@Predicate{terms} (origins, bindings) =
@@ -475,3 +475,4 @@ evaluateExpression l b = \case
     EValue term -> applyVariable b term
     EUnary op e' -> evalUnary op =<< evaluateExpression l b e'
     EBinary op e' e'' -> uncurry (evalBinary l op) =<< join bitraverse (evaluateExpression l b) (e', e'')
+

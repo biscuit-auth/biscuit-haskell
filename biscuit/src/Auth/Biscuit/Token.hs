@@ -215,7 +215,7 @@ data Biscuit proof check
 -- with a @trusting@ annotation. Be careful with @trusting previous@, as it queries
 -- facts from all blocks, even untrusted ones.
 queryRawBiscuitFactsWithLimits :: Biscuit openOrSealed check -> Limits -> Query
-                               -> Set Bindings
+                               -> Either String (Set Bindings)
 queryRawBiscuitFactsWithLimits b@Biscuit{authority,blocks} =
   let ePks = externalKeys b
       getBlock ((_, block), _, _, _) = block
@@ -235,7 +235,7 @@ queryRawBiscuitFactsWithLimits b@Biscuit{authority,blocks} =
 -- 💁 If the facts you want to query are part of an allow query in the authorizer,
 -- you can directly get values by calling 'getBindings' on 'AuthorizationSuccess'.
 queryRawBiscuitFacts :: Biscuit openOrSealed check -> Query
-                     -> Set Bindings
+                     -> Either String (Set Bindings)
 queryRawBiscuitFacts b = queryRawBiscuitFactsWithLimits b defaultLimits
 
 -- | Turn a 'Biscuit' statically known to be 'Open' into a more generic 'OpenOrSealed' 'Biscuit'
@@ -621,7 +621,7 @@ data AuthorizedBiscuit p
 -- 💁 If you are trying to extract facts from a biscuit in order to generate an
 -- authorizer, have a look at 'queryRawBiscuitFacts' instead.
 queryAuthorizerFacts :: AuthorizedBiscuit p -> Query
-                     -> Set Bindings
+                     -> Either String (Set Bindings)
 queryAuthorizerFacts AuthorizedBiscuit{authorizedBiscuit, authorizationSuccess} =
   let ePks = externalKeys authorizedBiscuit
    in queryGeneratedFacts ePks authorizationSuccess

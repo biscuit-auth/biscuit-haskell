@@ -269,7 +269,7 @@ authorizerFactsAreQueried = testGroup "AuthorizedBiscuit can be queried"
           expected = Set.singleton $ Map.fromList
             [ ("user", LInteger 1234)
             ]
-      getUser <$> result @?= Right expected
+      getUser <$> result @?= Right (Right expected)
   , testCase "Attenuation blocks can be accessed if asked nicely" $ do
       (p,s) <- (toPublic &&& id) <$> newSecret
       b <- mkBiscuit s [block|user(1234);|]
@@ -280,7 +280,7 @@ authorizerFactsAreQueried = testGroup "AuthorizedBiscuit can be queried"
             [ Map.fromList [("user", LInteger 1234)]
             , Map.fromList [("user", LString "tampered value")]
             ]
-      getUser <$> result @?= Right expected
+      getUser <$> result @?= Right (Right expected)
   , testCase "Signed blocks can be accessed if asked nicely" $ do
       (p,s) <- (toPublic &&& id) <$> newSecret
       (p1,s1) <- (toPublic &&& id) <$> newSecret
@@ -293,7 +293,7 @@ authorizerFactsAreQueried = testGroup "AuthorizedBiscuit can be queried"
             [ Map.fromList [("user", LInteger 1234)]
             , Map.fromList [("user", LString "from signed")]
             ]
-      getUser <$> result @?= Right expected
+      getUser <$> result @?= Right (Right expected)
   ]
 
 biscuitFactsAreQueried :: TestTree
@@ -306,7 +306,7 @@ biscuitFactsAreQueried = testGroup "Biscuit can be queried"
           expected = Set.singleton $ Map.fromList
             [ ("user", LInteger 1234)
             ]
-      user @?= expected
+      user @?= Right expected
   , testCase "Attenuation blocks can be accessed if asked nicely" $ do
       (p,s) <- (toPublic &&& id) <$> newSecret
       b <- mkBiscuit s [block|user(1234);|]
@@ -316,7 +316,7 @@ biscuitFactsAreQueried = testGroup "Biscuit can be queried"
             [ Map.fromList [("user", LInteger 1234)]
             , Map.fromList [("user", LString "tampered value")]
             ]
-      user @?= expected
+      user @?= Right expected
   , testCase "Signed blocks can be accessed if asked nicely" $ do
       (p,s) <- (toPublic &&& id) <$> newSecret
       (p1,s1) <- (toPublic &&& id) <$> newSecret
@@ -328,5 +328,5 @@ biscuitFactsAreQueried = testGroup "Biscuit can be queried"
             [ Map.fromList [("user", LInteger 1234)]
             , Map.fromList [("user", LString "from signed")]
             ]
-      user @?= expected
+      user @?= Right expected
   ]

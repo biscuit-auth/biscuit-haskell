@@ -1,17 +1,17 @@
-{-# LANGUAGE DataKinds                   #-}
-{-# LANGUAGE DeriveAnyClass              #-}
-{-# LANGUAGE DeriveFunctor               #-}
-{-# LANGUAGE DeriveGeneric               #-}
-{-# LANGUAGE DeriveTraversable           #-}
-{-# LANGUAGE DerivingStrategies          #-}
-{-# LANGUAGE DuplicateRecordFields       #-}
-{-# LANGUAGE FlexibleInstances           #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving  #-}
-{-# LANGUAGE LambdaCase                  #-}
-{-# LANGUAGE NamedFieldPuns              #-}
-{-# LANGUAGE OverloadedStrings           #-}
-{-# LANGUAGE RecordWildCards             #-}
-{-# LANGUAGE TypeApplications            #-}
+{-# LANGUAGE DataKinds                  #-}
+{-# LANGUAGE DeriveAnyClass             #-}
+{-# LANGUAGE DeriveFunctor              #-}
+{-# LANGUAGE DeriveGeneric              #-}
+{-# LANGUAGE DeriveTraversable          #-}
+{-# LANGUAGE DerivingStrategies         #-}
+{-# LANGUAGE DuplicateRecordFields      #-}
+{-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE LambdaCase                 #-}
+{-# LANGUAGE NamedFieldPuns             #-}
+{-# LANGUAGE OverloadedStrings          #-}
+{-# LANGUAGE RecordWildCards            #-}
+{-# LANGUAGE TypeApplications           #-}
 module Spec.SampleReader where
 
 import           Control.Arrow                 ((&&&))
@@ -34,7 +34,7 @@ import           Data.Text                     (Text, pack, unpack)
 import           Data.Text.Encoding            (decodeUtf8, encodeUtf8)
 import           Data.Traversable              (for)
 import           GHC.Generics                  (Generic)
-import           GHC.Records                   (HasField(getField))
+import           GHC.Records                   (HasField (getField))
 
 import           Test.Tasty                    hiding (Timeout)
 import           Test.Tasty.HUnit
@@ -158,7 +158,7 @@ data BlockDesc
 data FactSet
   = FactSet
   { origin :: [Maybe Integer]
-  , facts :: [Text]
+  , facts  :: [Text]
   }
   deriving stock (Eq, Show, Generic)
   deriving anyclass (FromJSON, ToJSON)
@@ -166,7 +166,7 @@ data FactSet
 data RuleSet
   = RuleSet
   { origin :: Maybe Integer
-  , rules :: [Text]
+  , rules  :: [Text]
   }
   deriving stock (Eq, Show, Generic)
   deriving anyclass (FromJSON, ToJSON)
@@ -226,9 +226,6 @@ processTestCase step rootPk TestCase{..} =
   if fst filename == "test018_unbound_variables_in_rule.bc"
   then
     step "Skipping for now (unbound variables are now caught before evaluation)"
-  else if fst filename == "test027_integer_wraparound.bc"
-  then
-    step "Skipping for now (evaluation fails silently)"
   else do
     step "Parsing "
     let vList = Map.toList validations
@@ -279,6 +276,7 @@ compareExecErrors ee re =
         TooManyFacts                       -> mustMatch $ key "RunLimit" . key "TooManyFacts"
         TooManyIterations                  -> mustMatch $ key "RunLimit" . key "TooManyIterations"
         InvalidRule                        -> mustMatch $ key "FailedLogic" . key "InvalidBlockRule"
+        EvaluationError _                  -> mustMatch $ key "Execution"
         ResultError (NoPoliciesMatched cs) -> mustMatch $ key "FailedLogic" . key "Unauthorized"
         ResultError (FailedChecks cs)      -> mustMatch $ key "FailedLogic" . key "Unauthorized"
         ResultError (DenyRuleMatched cs q) -> mustMatch $ key "FailedLogic" . key "Unauthorized"
