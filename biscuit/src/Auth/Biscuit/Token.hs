@@ -306,26 +306,21 @@ addSignedBlock :: SecretKey
                -> Biscuit Open check
                -> IO (Biscuit Open check)
 addSignedBlock eSk block b@Biscuit{..} = do
-  let symbolsForCurrentBlock = forgetSymbols $ registerNewPublicKeys [toPublic eSk] symbols
-      (newSymbols, blockSerialized) = PB.encodeBlock <$> blockToPb True symbolsForCurrentBlock block
+  let (_, blockSerialized) = PB.encodeBlock <$> blockToPb True newSymbolTable block
       lastBlock = NE.last (authority :| blocks)
       (_, _, lastPublicKey, _) = lastBlock
       Open p = proof
   (signedBlock, nextSk) <- signExternalBlock p eSk lastPublicKey blockSerialized
   pure $ b { blocks = blocks <> [toParsedSignedBlock block signedBlock]
-           , symbols = registerNewPublicKeys (getPkList newSymbols) symbols
            , proof = Open nextSk
            }
 
 mkThirdPartyBlock' :: SecretKey
-                   -> [PublicKey]
                    -> PublicKey
                    -> Block
                    -> (ByteString, Signature, PublicKey)
-mkThirdPartyBlock' eSk pkTable lastPublicKey block =
-  let symbolsForCurrentBlock = registerNewPublicKeys [toPublic eSk] $
-        registerNewPublicKeys pkTable newSymbolTable
-      (_, payload) = PB.encodeBlock <$> blockToPb True symbolsForCurrentBlock block
+mkThirdPartyBlock' eSk lastPublicKey block =
+  let (_, payload) = PB.encodeBlock <$> blockToPb True newSymbolTable block
       (eSig, ePk) = sign3rdPartyBlock eSk lastPublicKey payload
    in (payload, eSig, ePk)
 
@@ -336,17 +331,17 @@ mkThirdPartyBlock :: SecretKey
                   -> Block
                   -> Either String ByteString
 mkThirdPartyBlock eSk req block = do
-  (previousPk, pkTable) <- pbToThirdPartyBlockRequest =<< PB.decodeThirdPartyBlockRequest req
-  pure $ PB.encodeThirdPartyBlockContents . thirdPartyBlockContentsToPb $ mkThirdPartyBlock' eSk pkTable previousPk block
+  previousPk<- pbToThirdPartyBlockRequest =<< PB.decodeThirdPartyBlockRequest req
+  pure $ PB.encodeThirdPartyBlockContents . thirdPartyBlockContentsToPb $ mkThirdPartyBlock' eSk previousPk block
 
 -- | Generate a third-party block request. It can be used in
 -- conjunction with 'mkThirdPartyBlock' to generate a
 -- third-party block, which can be then appended to a token with
 -- 'applyThirdPartyBlock'.
 mkThirdPartyBlockReq :: Biscuit proof check -> ByteString
-mkThirdPartyBlockReq Biscuit{authority,blocks,symbols} =
+mkThirdPartyBlockReq Biscuit{authority,blocks} =
   let (_, _ , lastPk, _) = NE.last $ authority :| blocks
-   in PB.encodeThirdPartyBlockRequest $ thirdPartyBlockRequestToPb (lastPk, getPkTable symbols)
+   in PB.encodeThirdPartyBlockRequest $ thirdPartyBlockRequestToPb lastPk
 
 -- | Given a base64-encoded third-party block, append it to a token.
 applyThirdPartyBlock :: Biscuit Open check -> ByteString -> Either String (IO (Biscuit Open check))

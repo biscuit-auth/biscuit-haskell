@@ -15,7 +15,6 @@ module Auth.Biscuit.Symbols
   , addFromBlock
   , registerNewSymbols
   , registerNewPublicKeys
-  , forgetSymbols
   , reverseSymbols
   , getSymbolList
   , getPkList
@@ -138,9 +137,6 @@ registerNewPublicKeys :: [PublicKey] -> Symbols -> Symbols
 registerNewPublicKeys newPks s@Symbols{publicKeys} =
   let newPkMap = Map.fromList $ zip [getNextPublicKeyOffset s..] (newPks \\ elems publicKeys)
    in s { publicKeys = publicKeys <> newPkMap }
-
-forgetSymbols :: Symbols -> Symbols
-forgetSymbols s = s { symbols = commonSymbols }
 
 -- | Reverse a symbol table
 reverseSymbols :: Symbols -> ReverseSymbols
