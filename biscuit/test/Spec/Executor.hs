@@ -30,6 +30,7 @@ specs = testGroup "Datalog evaluation"
   , rulesWithConstraints
   , ruleHeadWithNoVars
   , limits
+  , overflow
   ]
 
 authGroup :: Set Fact -> FactGroup
@@ -296,3 +297,20 @@ scopedRules = testGroup "Rules and facts in different scopes"
                       ])
             ])
   ]
+
+overflow :: TestTree
+overflow =
+  let subtraction = authRulesGroup $ Set.singleton
+                   [rule|test(true) <- -9223372036854775808 - 1 != 0|]
+      multiplication = authRulesGroup $ Set.singleton
+                   [rule|test(true) <- 10000000000 * 10000000000 != 0|]
+      addition = authRulesGroup $ Set.singleton
+                   [rule|test(true) <- 9223372036854775807 + 1 != 0|]
+   in testGroup "Arithmetic overflow"
+        [ testCase "subtraction" $
+            runFactGeneration defaultLimits 1 subtraction mempty @?= Left (BadExpression "integer underflow")
+        , testCase "multiplication" $
+            runFactGeneration defaultLimits 1 multiplication mempty @?= Left (BadExpression "integer overflow")
+        , testCase "addition" $
+            runFactGeneration defaultLimits 1 addition mempty @?= Left (BadExpression "integer overflow")
+        ]
