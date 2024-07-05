@@ -1,17 +1,15 @@
-{-# LANGUAGE DataKinds                  #-}
-{-# LANGUAGE DeriveAnyClass             #-}
-{-# LANGUAGE DeriveFunctor              #-}
-{-# LANGUAGE DeriveGeneric              #-}
-{-# LANGUAGE DeriveTraversable          #-}
-{-# LANGUAGE DerivingStrategies         #-}
-{-# LANGUAGE DuplicateRecordFields      #-}
-{-# LANGUAGE FlexibleInstances          #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE LambdaCase                 #-}
-{-# LANGUAGE NamedFieldPuns             #-}
-{-# LANGUAGE OverloadedStrings          #-}
-{-# LANGUAGE RecordWildCards            #-}
-{-# LANGUAGE TypeApplications           #-}
+{-# LANGUAGE DataKinds             #-}
+{-# LANGUAGE DeriveAnyClass        #-}
+{-# LANGUAGE DeriveGeneric         #-}
+{-# LANGUAGE DeriveTraversable     #-}
+{-# LANGUAGE DerivingStrategies    #-}
+{-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE FlexibleInstances     #-}
+{-# LANGUAGE LambdaCase            #-}
+{-# LANGUAGE NamedFieldPuns        #-}
+{-# LANGUAGE OverloadedStrings     #-}
+{-# LANGUAGE RecordWildCards       #-}
+{-# LANGUAGE TypeApplications      #-}
 module Spec.SampleReader where
 
 import           Control.Arrow                 ((&&&))
@@ -238,7 +236,7 @@ processTestCase step rootPk TestCase{..} =
 compareParseErrors :: ParseError -> RustError -> Assertion
 compareParseErrors pe re =
   let mustMatch p = assertBool (show (re,pe)) $ isJust $ re ^? p
-      mustMatchEither ps = assertBool (show (re, pe)) $ any isJust $ (re ^?) <$> ps
+      mustMatchEither ps = assertBool (show (re, pe)) $ any (isJust . (re ^?)) ps
    in case pe of
         InvalidHexEncoding ->
           assertFailure $ "InvalidHexEncoding can't appear here " <> show re
