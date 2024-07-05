@@ -103,6 +103,7 @@ exprEval = do
     , ("!false", LBool True)
     , ("(true)", LBool True)
     , ("\"test\".length()", LInteger 4)
+    , ("\"é\".length()", LInteger 2)
     , ("hex:ababab.length()", LInteger 3)
     , ("[].length()", LInteger 0)
     , ("[\"test\", \"test\"].length()", LInteger 1)

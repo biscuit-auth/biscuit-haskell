@@ -53,6 +53,7 @@ import           Data.Set                 (Set)
 import qualified Data.Set                 as Set
 import           Data.Text                (Text, isInfixOf, unpack)
 import qualified Data.Text                as Text
+import qualified Data.Text.Encoding       as Text
 import           Data.Void                (absurd)
 import           Numeric.Natural          (Natural)
 import qualified Text.Regex.TDFA          as Regex
@@ -372,7 +373,7 @@ evalUnary :: Unary -> Value -> Either String Value
 evalUnary Parens t = pure t
 evalUnary Negate (LBool b) = pure (LBool $ not b)
 evalUnary Negate _ = Left "Only booleans support negation"
-evalUnary Length (LString t) = pure . LInteger . fromIntegral $ Text.length t
+evalUnary Length (LString t) = pure . LInteger . fromIntegral $ ByteString.length $ Text.encodeUtf8 t
 evalUnary Length (LBytes bs) = pure . LInteger . fromIntegral $ ByteString.length bs
 evalUnary Length (TermSet s) = pure . LInteger . fromIntegral $ Set.size s
 evalUnary Length _ = Left "Only strings, bytes and sets support `.length()`"
