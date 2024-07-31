@@ -1,5 +1,6 @@
 {-# LANGUAGE DataKinds         #-}
 {-# LANGUAGE LambdaCase        #-}
+{-# LANGUAGE MultiWayIf        #-}
 {-# LANGUAGE NamedFieldPuns    #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards   #-}
@@ -25,13 +26,12 @@ module Auth.Biscuit.ProtoBufAdapter
   , thirdPartyBlockContentsToPb
   ) where
 
-import           Control.Monad            (when)
+import           Control.Monad            (unless, when)
 import           Control.Monad.State      (StateT, get, lift, modify)
-import           Data.Bitraversable       (bisequence)
 import           Data.ByteString          (ByteString)
 import           Data.Int                 (Int64)
 import qualified Data.List.NonEmpty       as NE
-import           Data.Maybe               (isNothing)
+import           Data.Maybe               (isJust, isNothing)
 import qualified Data.Set                 as Set
 import qualified Data.Text                as T
 import           Data.Time                (UTCTime)
@@ -110,17 +110,17 @@ pbToBlock ePk PB.Block{..} = do
   -- but use the global public keys table:
   --   symbols defined in 3rd party blocks are not visible
   --   to following blocks, but public keys are
-  when (isNothing ePk) $ modify (registerNewSymbols blockSymbols)
-  modify (registerNewPublicKeys $ foldMap pure ePk <> blockPks)
+  when (isNothing ePk) $ do
+    modify (registerNewSymbols blockSymbols)
+    modify (registerNewPublicKeys blockPks)
   currentSymbols <- get
 
   let symbolsForCurrentBlock =
-        -- third party blocks use an isolated symbol table,
-        -- but use the global public keys table.
+        -- third party blocks use an isolated symbol and public keys table,
         --   3rd party blocks don't see previously defined
-        --   symbols, but see previously defined public keys
+        --   symbols or public keys
         if isNothing ePk then currentSymbols
-                         else registerNewSymbols blockSymbols $ forgetSymbols currentSymbols
+                         else registerNewPublicKeys blockPks $ registerNewSymbols blockSymbols newSymbolTable
   let bContext = PB.getField context
       bVersion = PB.getField version
   lift $ do
@@ -129,18 +129,25 @@ pbToBlock ePk PB.Block{..} = do
     bRules <- traverse (pbToRule s) $ PB.getField rules_v2
     bChecks <- traverse (pbToCheck s) $ PB.getField checks_v2
     bScope <- Set.fromList <$> traverse (pbToScope s) (PB.getField scope)
-    let isV3 = isNothing ePk
-            && Set.null bScope
-            && all ruleHasNoScope bRules
-            && all (queryHasNoScope . cQueries) bChecks
-            && all isCheckOne bChecks
-            && all ruleHasNoV4Operators bRules
-            && all (queryHasNoV4Operators . cQueries)  bChecks
-    case (bVersion, isV3) of
-      (Just 4, _) -> pure Block {..}
-      (Just 3, True) -> pure Block {..}
-      (Just 3, False) ->
-        Left "Biscuit v4 fields are present, but the block version is 3."
+    let v5Plus = isJust ePk
+        v4Plus = not $ and
+          [ Set.null bScope
+          , all ruleHasNoScope bRules
+          , all (queryHasNoScope . cQueries) bChecks
+          , all isCheckOne bChecks
+          , all ruleHasNoV4Operators bRules
+          , all (queryHasNoV4Operators . cQueries) bChecks
+          ]
+    case (bVersion, v4Plus, v5Plus) of
+      (Just 5, _, _) -> pure Block {..}
+      (Just 4, _, False) -> pure Block {..}
+      (Just 4, _, True) ->
+        Left "Biscuit v5 features are present, but the block version is 4."
+      (Just 3, False, False) -> pure Block {..}
+      (Just 3, True, False) ->
+        Left "Biscuit v4 features are present, but the block version is 3."
+      (Just 3, _, True) ->
+        Left "Biscuit v5 features are present, but the block version is 3."
       _ ->
         Left $ "Unsupported biscuit version: " <> maybe "0" show bVersion <> ". Only versions 3 and 4 are supported"
 
@@ -148,13 +155,15 @@ pbToBlock ePk PB.Block{..} = do
 -- along with the newly defined symbols
 blockToPb :: Bool -> Symbols -> Block -> (BlockSymbols, PB.Block)
 blockToPb hasExternalPk existingSymbols b@Block{..} =
-  let isV3 = not hasExternalPk
-            && Set.null bScope
-            && all ruleHasNoScope bRules
-            && all (queryHasNoScope . cQueries) bChecks
-            && all isCheckOne bChecks
-            && all ruleHasNoV4Operators bRules
-            && all (queryHasNoV4Operators . cQueries) bChecks
+  let v4Plus = not $ and
+        [Set.null bScope
+        , all ruleHasNoScope bRules
+        , all (queryHasNoScope . cQueries) bChecks
+        , all isCheckOne bChecks
+        , all ruleHasNoV4Operators bRules
+        , all (queryHasNoV4Operators . cQueries) bChecks
+        ]
+      v5Plus = hasExternalPk
       bSymbols = buildSymbolTable existingSymbols b
       s = reverseSymbols $ addFromBlock existingSymbols bSymbols
       symbols   = PB.putField $ getSymbolList bSymbols
@@ -164,8 +173,9 @@ blockToPb hasExternalPk existingSymbols b@Block{..} =
       checks_v2 = PB.putField $ checkToPb s <$> bChecks
       scope     = PB.putField $ scopeToPb s <$> Set.toList bScope
       pksTable   = PB.putField $ publicKeyToPb <$> getPkList bSymbols
-      version   = PB.putField $ if isV3 then Just 3
-                                        else Just 4
+      version   = PB.putField $ if | v5Plus    -> Just 5
+                                   | v4Plus    -> Just 4
+                                   | otherwise -> Just 3
    in (bSymbols, PB.Block {..})
 
 pbToFact :: Symbols -> PB.FactV2 -> Either String Fact
@@ -415,17 +425,15 @@ binaryToPb = PB.OpBinary . PB.putField . \case
   BitwiseXor     -> PB.BitwiseXor
   NotEqual       -> PB.NotEqual
 
-pbToThirdPartyBlockRequest :: PB.ThirdPartyBlockRequest -> Either String (Crypto.PublicKey, [Crypto.PublicKey])
+pbToThirdPartyBlockRequest :: PB.ThirdPartyBlockRequest -> Either String Crypto.PublicKey
 pbToThirdPartyBlockRequest PB.ThirdPartyBlockRequest{previousPk, pkTable} = do
-  bisequence
-    ( pbToPublicKey $ PB.getField previousPk
-    , traverse pbToPublicKey $ PB.getField pkTable
-    )
+  unless (null $ PB.getField pkTable) $ Left "Public key table provided in third-party block request"
+  pbToPublicKey $ PB.getField previousPk
 
-thirdPartyBlockRequestToPb :: (Crypto.PublicKey, [Crypto.PublicKey]) -> PB.ThirdPartyBlockRequest
-thirdPartyBlockRequestToPb (previousPk, pkTable) = PB.ThirdPartyBlockRequest
+thirdPartyBlockRequestToPb :: Crypto.PublicKey -> PB.ThirdPartyBlockRequest
+thirdPartyBlockRequestToPb previousPk = PB.ThirdPartyBlockRequest
   { previousPk = PB.putField $ publicKeyToPb previousPk
-  , pkTable = PB.putField $ publicKeyToPb <$> pkTable
+  , pkTable = PB.putField []
   }
 
 pbToThirdPartyBlockContents :: PB.ThirdPartyBlockContents -> Either String (ByteString, Crypto.Signature, Crypto.PublicKey)

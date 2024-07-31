@@ -1,5 +1,11 @@
 # Changelog for biscuit-haskell
 
+## 0.4.0.0
+
+- abort authorization on evaluation error as mandated by the spec
+- use utf8 byte count in `{string}.length()` as mandated by the spec
+- fix security issue with third-party blocks public key interning, see [advisory](https://github.com/biscuit-auth/biscuit/security/advisories/GHSA-rgqv-mwc3-c78m)
+
 ## 0.3.0.1
 
 - GHC 9.6 and 9.8 support

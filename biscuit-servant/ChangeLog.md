@@ -1,5 +1,9 @@
 # Changelog for biscuit-servant
 
+## 0.4.0.0
+
+- use biscuit-haskell 0.4.0.0
+
 ## 0.3.0.1
 
 - use biscuit-haskell 0.3.0.1
